@@ -476,7 +476,19 @@
           const screenDetails = await window.getScreenDetails();
           const detectedScreens = screenDetails.screens;
 
-          let infoHtml = `🎯 <span>Виявлено ${detectedScreens.length} монітор(ів) (${osLabel}):</span><br>`;
+          console.log('🔍 [OS Screen Details Raw Response]:', detectedScreens);
+          console.table(detectedScreens.map(s => ({
+            label: s.label,
+            width: s.width,
+            height: s.height,
+            devicePixelRatio: s.devicePixelRatio,
+            left: s.left,
+            top: s.top,
+            isPrimary: s.isPrimary,
+            isInternal: s.isInternal
+          })));
+
+          let infoHtml = `🎯 <span>Виявлено ${detectedScreens.length} монітор(ів) (${osLabel}):</span><br><br>`;
           screens = [];
 
           const parsed = detectedScreens.map((s, idx) => {
@@ -506,7 +518,10 @@
           const colors = ['#818cf8', '#38bdf8', '#34d399', '#fbbf24'];
 
           parsed.forEach((d) => {
-            infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
+            const s = d.original;
+            infoHtml += `• <b>${d.label}</b><br>`;
+            infoHtml += `&nbsp;&nbsp;📍 <i>Системна сира відповідь OS:</i> ${s.width}×${s.height} pt (DPR: ${d.ratio})<br>`;
+            infoHtml += `&nbsp;&nbsp;🎯 <i>Підібраний пресет:</i> <b>${d.width}×${d.height} px</b><br><br>`;
 
             const posX = canvasOffsetX + (d.rawLeft - minLeft) * scale;
             const posY = canvasOffsetY + (d.rawTop - minTop) * scale;
@@ -535,11 +550,16 @@
 
       // Fallback
       const ratio = window.devicePixelRatio || 1;
-      const preset = getClosestPresetResolution(window.screen.width, window.screen.height, ratio);
+      const rawW = window.screen.width;
+      const rawH = window.screen.height;
+      const preset = getClosestPresetResolution(rawW, rawH, ratio);
+
+      console.log('🔍 [OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio });
 
       document.getElementById('detectBox').innerHTML = `
         🎯 <span>Фізична роздільна здатність (${osLabel}):</span><br>
-        • Стандартний пресет: <b>${preset.width} x ${preset.height} px</b>
+        • <i>Системи сирий розрахунок:</i> ${rawW}×${rawH} (DPR: ${ratio})<br>
+        • <i>Стандартний пресет:</i> <b>${preset.width} × ${preset.height} px</b>
       `;
 
       addScreen(isMac ? 'MacBook Display' : 'DELL P2425HE', preset.width, preset.height, defaultChannel);

@@ -317,31 +317,31 @@
       
       <!-- Connection Card -->
       <div class="card">
-        <div class="card-title">🔌 1. Підключення до ESP32</div>
+        <div class="card-title">🔌 1. Connection</div>
         <div class="btn-group">
           <button class="btn" id="btnConnectUSB">
-            <span>💻 Підключити через USB (Web Serial)</span>
+            <span>💻 USB (Web Serial)</span>
           </button>
           <button class="btn btn-secondary" id="btnConnectBT">
-            <span>📡 Підключити через Bluetooth</span>
+            <span>📡 Bluetooth</span>
           </button>
         </div>
       </div>
 
       <!-- Multi-Screen Detection Card -->
       <div class="card">
-        <div class="card-title">🔍 2. Детектор моніторів ПК</div>
+        <div class="card-title">🔍 2. Auto Detect</div>
         <div class="detected-info" id="detectBox">
-          Зчитує точні стандартизовані пресети (FHD, QHD, 4K, Retina).
+          Detects connected displays from OS.
         </div>
         <button class="btn btn-secondary" id="btnAutoDetect" style="width: 100%;">
-          <span>🖥️ Детектувати всі монітори ПК</span>
+          <span>🖥️ Detect</span>
         </button>
       </div>
 
       <!-- Presets Card -->
       <div class="card">
-        <div class="card-title">🖥️ 3. Готові пресети моніторів</div>
+        <div class="card-title">🖥️ 3. Presets</div>
         <div class="preset-list" id="presetList">
           <!-- Populated dynamically from PRESET_RESOLUTIONS -->
         </div>
@@ -353,22 +353,22 @@
     <div class="editor-container">
       <div class="card" style="flex: 1; display: flex; flex-direction: column;">
         <div class="card-title" style="justify-content: space-between;">
-          <span>📐 Візуальний редактор моніторів (Розтягування лише за стандартом)</span>
-          <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 6px 12px; font-size: 12px;">Видалити всі</button>
+          <span>📐 Screen Layout</span>
+          <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 6px 12px; font-size: 12px;">Clear All</button>
         </div>
 
         <div class="canvas-wrapper">
           <canvas id="screenCanvas"></canvas>
-          <div class="canvas-instructions">📐 Тягніть за нижній правий кут монітора: розмір автоматично прилипає до пресетів (1080p, 1440p, 4K)!</div>
+          <div class="canvas-instructions">📐 Drag manual screens to arrange or resize. Auto-detected screens are locked.</div>
         </div>
 
         <div style="margin-top: 16px;">
-          <div class="card-title" style="font-size: 14px;">📤 Згенерована конфігурація для ESP32 Flash (JSON):</div>
+          <div class="card-title" style="font-size: 14px;">📤 ESP32 Config (JSON):</div>
           <div class="json-output" id="jsonOutput">{}</div>
         </div>
 
         <button class="btn" id="btnSyncESP32" style="margin-top: 16px;">
-          <span>💾 Зберегти конфігурацію в ESP32 Flash</span>
+          <span>💾 Save to ESP32 Flash</span>
         </button>
       </div>
     </div>
@@ -376,6 +376,8 @@
 
   <script>
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
+    const COLOR_DETECTED = '#34d399'; // Single Emerald color for auto-detected screens
+    const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
 
     // Official Standard Resolution Presets Matrix (Tuple Array [width, height, name], Sorted Descending by Width)
     const PRESET_RESOLUTIONS = [
@@ -448,8 +450,8 @@
 
     // Default initial screens (FHD 1920x1080)
     const defaultInitialScreens = [
-      { id: 1, name: 'Display 1 (Lenovo Laptop)', width: 1920, height: 1080, x: 60, y: 140, channel: 'USB_PC', color: '#818cf8' },
-      { id: 2, name: 'DELL P2425HE (Display 2)', width: 1920, height: 1080, x: 175, y: 20, channel: 'USB_PC', color: '#38bdf8' }
+      { id: 1, name: 'Display 1 (Lenovo Laptop)', width: 1920, height: 1080, x: 60, y: 140, channel: 'USB_PC', color: COLOR_MANUAL, isDetected: false, isLocked: false },
+      { id: 2, name: 'DELL P2425HE (Display 2)', width: 1920, height: 1080, x: 175, y: 20, channel: 'USB_PC', color: COLOR_MANUAL, isDetected: false, isLocked: false }
     ];
 
     function loadSavedProjectState() {
@@ -510,7 +512,7 @@
             isInternal: s.isInternal
           })));
 
-          let infoHtml = `🎯 <span>Виявлено ${detectedScreens.length} монітор(ів) (${osLabel}):</span><br>`;
+          let infoHtml = `🎯 <span>Detected ${detectedScreens.length} display(s) (${osLabel}):</span><br>`;
           screens = [];
 
           const parsed = detectedScreens.map((s, idx) => {
@@ -527,7 +529,7 @@
               width: preset.width,
               height: preset.height,
               ratio: ratio,
-              label: s.label ? s.label : `Display ${idx + 1}${s.isPrimary ? ' (Головний)' : ''}`
+              label: s.label ? s.label : `Display ${idx + 1}${s.isPrimary ? ' (Primary)' : ''}`
             };
           });
 
@@ -537,7 +539,6 @@
           const scale = 0.12;
           const canvasOffsetX = 60;
           const canvasOffsetY = 20;
-          const colors = ['#818cf8', '#38bdf8', '#34d399', '#fbbf24'];
 
           parsed.forEach((d) => {
             infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
@@ -553,7 +554,9 @@
               x: posX,
               y: posY,
               channel: defaultChannel,
-              color: colors[d.index % colors.length]
+              color: COLOR_DETECTED,
+              isDetected: true,
+              isLocked: true
             });
           });
 
@@ -576,18 +579,28 @@
       console.log('🔍 [OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio });
 
       document.getElementById('detectBox').innerHTML = `
-        🎯 <span>Фізична роздільна здатність (${osLabel}):</span><br>
-        • Стандартний пресет: <b>${preset.width} x ${preset.height} px</b>
+        🎯 <span>Physical Resolution (${osLabel}):</span><br>
+        • Preset: <b>${preset.width} x ${preset.height} px</b>
       `;
 
-      addScreen(isMac ? 'MacBook Display' : 'DELL P2425HE', preset.width, preset.height, defaultChannel);
+      screens = [{
+        id: Date.now(),
+        name: isMac ? 'MacBook Display' : 'DELL P2425HE',
+        width: preset.width,
+        height: preset.height,
+        x: 60,
+        y: 120,
+        channel: defaultChannel,
+        color: COLOR_DETECTED,
+        isDetected: true,
+        isLocked: true
+      }];
+      saveProjectState();
+      draw();
     });
 
     function addScreen(name, width, height, channel) {
-      const colors = ['#38bdf8', '#818cf8', '#34d399', '#fbbf24'];
       const scale = 0.12;
-      const sw = width * scale;
-      const sh = height * scale;
 
       // Ensure preset standard resolution
       const preset = getClosestPresetResolution(width, height);
@@ -601,8 +614,8 @@
       let initX = maxX + 1;
       let initY = 120;
 
-      if (initX + sw > canvas.width - 10) {
-        initX = Math.max(10, (screens.length * 40) % (canvas.width - sw - 10));
+      if (initX + (preset.width * scale) > canvas.width - 10) {
+        initX = Math.max(10, (screens.length * 40) % (canvas.width - (preset.width * scale) - 10));
         initY = 140;
       }
 
@@ -614,7 +627,9 @@
         x: initX,
         y: initY,
         channel: channel,
-        color: colors[screens.length % colors.length]
+        color: COLOR_MANUAL,
+        isDetected: false,
+        isLocked: false
       };
       screens.push(newScreen);
       saveProjectState();
@@ -672,6 +687,8 @@
       screens.forEach(s => {
         const sw = s.width * scale;
         const sh = s.height * scale;
+        const isLocked = s.isLocked || s.isDetected;
+        const color = isLocked ? COLOR_DETECTED : (s.color || COLOR_MANUAL);
 
         if (s.x < 0) s.x = 0;
         if (s.x + sw > canvas.width) s.x = Math.max(0, canvas.width - sw);
@@ -679,12 +696,12 @@
         if (s.y + sh > canvas.height) s.y = Math.max(0, canvas.height - sh);
 
         // Shadow & Glow
-        ctx.shadowColor = s.color;
+        ctx.shadowColor = color;
         ctx.shadowBlur = (selectedScreen === s) ? 20 : 6;
 
         // Screen Body
         ctx.fillStyle = 'rgba(30, 41, 59, 0.85)';
-        ctx.strokeStyle = s.color;
+        ctx.strokeStyle = color;
         ctx.lineWidth = (selectedScreen === s) ? 3 : 2;
 
         ctx.beginPath();
@@ -703,10 +720,11 @@
         ctx.font = '400 11px JetBrains Mono';
         ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
 
-        // Channel Tag
-        ctx.fillStyle = s.color;
+        // Channel & Lock Tag
+        ctx.fillStyle = color;
         ctx.font = '600 10px Outfit';
-        ctx.fillText(`Channel: ${s.channel}`, s.x + 14, s.y + sh - 14);
+        const tagText = isLocked ? `🔒 ${s.channel} (Locked)` : `Channel: ${s.channel}`;
+        ctx.fillText(tagText, s.x + 14, s.y + sh - 14);
 
         // --- Red Delete Button (Top Right Corner) ---
         const btnRadius = 11;
@@ -728,19 +746,23 @@
         ctx.lineTo(btnX - 4, btnY + 4);
         ctx.stroke();
 
-        // --- Resize Handle (Bottom Right Corner) ---
-        const handleSize = 12;
-        const handleX = s.x + sw - handleSize;
-        const handleY = s.y + sh - handleSize;
-        s.resizeHandle = { x: handleX, y: handleY, w: handleSize, h: handleSize };
+        // --- Resize Handle (Bottom Right Corner) - ONLY FOR UNLOCKED MANUAL SCREENS ---
+        if (!isLocked) {
+          const handleSize = 12;
+          const handleX = s.x + sw - handleSize;
+          const handleY = s.y + sh - handleSize;
+          s.resizeHandle = { x: handleX, y: handleY, w: handleSize, h: handleSize };
 
-        ctx.fillStyle = s.color;
-        ctx.beginPath();
-        ctx.moveTo(s.x + sw, s.y + sh - handleSize);
-        ctx.lineTo(s.x + sw, s.y + sh);
-        ctx.lineTo(s.x + sw - handleSize, s.y + sh);
-        ctx.closePath();
-        ctx.fill();
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.moveTo(s.x + sw, s.y + sh - handleSize);
+          ctx.lineTo(s.x + sw, s.y + sh);
+          ctx.lineTo(s.x + sw - handleSize, s.y + sh);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          s.resizeHandle = null;
+        }
       });
 
       updateJSON();
@@ -763,7 +785,8 @@
             channel: s.channel,
             x_min: minX,
             x_max: maxX,
-            height: s.height
+            height: s.height,
+            is_detected: !!(s.isDetected || s.isLocked)
           };
         })
       };
@@ -780,6 +803,7 @@
 
       for (let i = screens.length - 1; i >= 0; i--) {
         const s = screens[i];
+        const isLocked = s.isLocked || s.isDetected;
 
         // Check Click on Delete Button
         if (s.deleteBtn) {
@@ -790,8 +814,8 @@
           }
         }
 
-        // Check Click on Resize Handle (Bottom Right Corner)
-        if (s.resizeHandle) {
+        // Check Click on Resize Handle (Bottom Right Corner) - ONLY IF UNLOCKED
+        if (!isLocked && s.resizeHandle) {
           if (mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
               my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
             isResizing = true;
@@ -808,9 +832,13 @@
 
         if (mx >= s.x && mx <= s.x + sw && my >= s.y && my <= s.y + sh) {
           selectedScreen = s;
-          isDragging = true;
-          dragStartX = mx - s.x;
-          dragStartY = my - s.y;
+          if (!isLocked) {
+            isDragging = true;
+            dragStartX = mx - s.x;
+            dragStartY = my - s.y;
+          } else {
+            isDragging = false;
+          }
           draw();
           return;
         }
@@ -827,14 +855,22 @@
 
       let hoveringDelete = false;
       let hoveringResize = false;
+      let hoveringLocked = false;
 
       screens.forEach(s => {
+        const isLocked = s.isLocked || s.isDetected;
+        const sw = s.width * scale;
+        const sh = s.height * scale;
+
         if (s.deleteBtn && Math.hypot(mx - s.deleteBtn.x, my - s.deleteBtn.y) <= s.deleteBtn.r + 4) {
           hoveringDelete = true;
         }
-        if (s.resizeHandle && mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
+        if (!isLocked && s.resizeHandle && mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
             my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
           hoveringResize = true;
+        }
+        if (isLocked && mx >= s.x && mx <= s.x + sw && my >= s.y && my <= s.y + sh) {
+          hoveringLocked = true;
         }
       });
 
@@ -842,6 +878,8 @@
         canvas.style.cursor = 'pointer';
       } else if (hoveringResize || isResizing) {
         canvas.style.cursor = 'nwse-resize';
+      } else if (hoveringLocked) {
+        canvas.style.cursor = 'not-allowed';
       } else if (isDragging) {
         canvas.style.cursor = 'grabbing';
       } else {
@@ -849,7 +887,7 @@
       }
 
       // Handle Preset-Snapping Resize Stretch
-      if (isResizing && resizeScreen) {
+      if (isResizing && resizeScreen && !(resizeScreen.isLocked || resizeScreen.isDetected)) {
         const rawDraggedWidth = (mx - resizeScreen.x) / scale;
         const rawDraggedHeight = (my - resizeScreen.y) / scale;
 
@@ -862,8 +900,8 @@
         return;
       }
 
-      // Handle Drag & Drop
-      if (isDragging && selectedScreen) {
+      // Handle Drag & Drop (Only if selected screen is unlocked)
+      if (isDragging && selectedScreen && !(selectedScreen.isLocked || selectedScreen.isDetected)) {
         const sw = selectedScreen.width * scale;
         const sh = selectedScreen.height * scale;
 
@@ -938,7 +976,7 @@
 
     document.getElementById('btnSyncESP32').addEventListener('click', () => {
       saveProjectState();
-      alert('Конфігурацію успішно збережено в проєкті!');
+      alert('Config saved successfully!');
     });
 
     document.getElementById('btnConnectUSB').addEventListener('click', async () => {
@@ -948,10 +986,10 @@
           await port.open({ baudRate: 115200 });
           setConnectedStatus(true, 'USB Serial Connected');
         } catch (err) {
-          alert('Не вдалося підключитися через USB: ' + err.message);
+          alert('Failed to connect via USB: ' + err.message);
         }
       } else {
-        alert('Web Serial API не підтримується цим браузером.');
+        alert('Web Serial API is not supported in this browser.');
       }
     });
 
@@ -961,10 +999,10 @@
           const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
           setConnectedStatus(true, 'Bluetooth Connected: ' + device.name);
         } catch (err) {
-          alert('Не вдалося підключитися по Bluetooth: ' + err.message);
+          alert('Failed to connect via Bluetooth: ' + err.message);
         }
       } else {
-        alert('Web Bluetooth API не підтримується цим браузером.');
+        alert('Web Bluetooth API is not supported in this browser.');
       }
     });
 

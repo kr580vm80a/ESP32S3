@@ -406,17 +406,26 @@
       { label: 'Super Ultrawide', width: 5120, height: 1440 }
     ];
 
-    // Find closest standard preset for any dimension (e.g., 1200 becomes 1920 or 1512)
-    function getClosestPresetResolution(w, h) {
+    // Find closest standard preset for any dimension (tests logical and DPR-scaled dimensions)
+    function getClosestPresetResolution(w, h, ratio = 1) {
       let closest = PRESET_RESOLUTIONS[0];
       let minDiff = Infinity;
 
-      PRESET_RESOLUTIONS.forEach(p => {
-        const diff = Math.hypot(p.width - w, p.height - h);
-        if (diff < minDiff) {
-          minDiff = diff;
-          closest = p;
-        }
+      const candidates = [
+        { width: Math.round(w), height: Math.round(h) }
+      ];
+      if (ratio && ratio !== 1) {
+        candidates.push({ width: Math.round(w * ratio), height: Math.round(h * ratio) });
+      }
+
+      candidates.forEach(c => {
+        PRESET_RESOLUTIONS.forEach(p => {
+          const diff = Math.hypot(p.width - c.width, p.height - c.height);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closest = p;
+          }
+        });
       });
       return closest;
     }
@@ -478,11 +487,9 @@
 
           const parsed = detectedScreens.map((s, idx) => {
             const ratio = s.devicePixelRatio || window.devicePixelRatio || 1;
-            let rawW = Math.round(s.width * ratio);
-            let rawH = Math.round(s.height * ratio);
 
-            // Snap raw dimensions strictly to official standard presets (Prevents weird 1200 or 1536 values)
-            const preset = getClosestPresetResolution(rawW, rawH);
+            // Snap dimensions strictly to official standard presets (Prevents weird 1200 or 1536 values)
+            const preset = getClosestPresetResolution(s.width, s.height, ratio);
 
             return {
               original: s,
@@ -534,9 +541,7 @@
 
       // Fallback
       const ratio = window.devicePixelRatio || 1;
-      let rawW = Math.round(window.screen.width * ratio);
-      let rawH = Math.round(window.screen.height * ratio);
-      const preset = getClosestPresetResolution(rawW, rawH);
+      const preset = getClosestPresetResolution(window.screen.width, window.screen.height, ratio);
 
       document.getElementById('detectBox').innerHTML = `
         🎯 <span>Фізична роздільна здатність (${osLabel}):</span><br>

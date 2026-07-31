@@ -337,35 +337,8 @@
       <!-- Presets Card -->
       <div class="card">
         <div class="card-title">🖥️ 3. Готові пресети моніторів</div>
-        <div class="preset-list">
-          <div class="preset-item" onclick="addScreen('DELL P2425HE', 1920, 1080, 'USB_PC')">
-            <span class="preset-name">🖥️ DELL P2425HE (FHD)</span>
-            <span class="preset-res">1920x1080</span>
-          </div>
-          <div class="preset-item" onclick="addScreen('Lenovo Laptop Display', 1920, 1080, 'USB_PC')">
-            <span class="preset-name">💻 Lenovo Laptop (FHD)</span>
-            <span class="preset-res">1920x1080</span>
-          </div>
-          <div class="preset-item" onclick="addScreen('MacBook Pro 14&quot;', 1512, 982, 'BLE_MAC')">
-            <span class="preset-name">🍏 MacBook Pro 14" (Retina)</span>
-            <span class="preset-res">1512x982</span>
-          </div>
-          <div class="preset-item" onclick="addScreen('MacBook Pro 16&quot;', 1728, 1117, 'BLE_MAC')">
-            <span class="preset-name">🍏 MacBook Pro 16" (Retina)</span>
-            <span class="preset-res">1728x1117</span>
-          </div>
-          <div class="preset-item" onclick="addScreen('MacBook More Space', 2056, 1329, 'BLE_MAC')">
-            <span class="preset-name">🍏 MacBook (More Space)</span>
-            <span class="preset-res">2056x1329</span>
-          </div>
-          <div class="preset-item" onclick="addScreen('2K QHD Monitor', 2560, 1440, 'USB_PC')">
-            <span class="preset-name">🖥️ 2K QHD Display</span>
-            <span class="preset-res">2560x1440</span>
-          </div>
-          <div class="preset-item" onclick="addScreen('4K UHD Monitor', 3840, 2160, 'USB_PC')">
-            <span class="preset-name">🖥️ 4K UHD Display</span>
-            <span class="preset-res">3840x2160</span>
-          </div>
+        <div class="preset-list" id="presetList">
+          <!-- Populated dynamically from PRESET_RESOLUTIONS -->
         </div>
       </div>
 
@@ -399,17 +372,33 @@
   <script>
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
 
-    // Official Standard Resolution Presets Matrix (Strictly Allowed Dimensions)
+    // Official Standard Resolution Presets Matrix (Single Source of Truth)
     const PRESET_RESOLUTIONS = [
-      { label: 'FHD (1080p)', width: 1920, height: 1080 },
-      { label: 'MacBook 14"', width: 1512, height: 982 },
-      { label: 'MacBook 16"', width: 1728, height: 1117 },
-      { label: 'MacBook More Space', width: 2056, height: 1329 },
-      { label: '2K QHD (1440p)', width: 2560, height: 1440 },
-      { label: '4K UHD (2160p)', width: 3840, height: 2160 },
-      { label: 'Ultrawide 21:9', width: 3440, height: 1440 },
-      { label: 'Super Ultrawide', width: 5120, height: 1440 }
+      { name: 'DELL P2425HE (FHD)', icon: '🖥️', width: 1920, height: 1080, channel: 'USB_PC' },
+      { name: 'Lenovo Laptop (FHD)', icon: '💻', width: 1920, height: 1080, channel: 'USB_PC' },
+      { name: 'MacBook Pro 14" (Retina)', icon: '🍏', width: 1512, height: 982, channel: 'BLE_MAC' },
+      { name: 'MacBook Pro 16" (Retina)', icon: '🍏', width: 1728, height: 1117, channel: 'BLE_MAC' },
+      { name: 'MacBook (More Space)', icon: '🍏', width: 2056, height: 1329, channel: 'BLE_MAC' },
+      { name: '2K QHD Display', icon: '🖥️', width: 2560, height: 1440, channel: 'USB_PC' },
+      { name: '4K UHD Display', icon: '🖥️', width: 3840, height: 2160, channel: 'USB_PC' },
+      { name: 'Ultrawide 21:9', icon: '🖥️', width: 3440, height: 1440, channel: 'USB_PC' },
+      { name: 'Super Ultrawide', icon: '🖥️', width: 5120, height: 1440, channel: 'USB_PC' }
     ];
+
+    function renderPresetList() {
+      const container = document.getElementById('presetList');
+      if (!container) return;
+      container.innerHTML = PRESET_RESOLUTIONS.map(p => {
+        const safeName = p.name.replace(/'/g, "\\'");
+        return `
+          <div class="preset-item" onclick="addScreen('${safeName}', ${p.width}, ${p.height}, '${p.channel}')">
+            <span class="preset-name">${p.icon} ${p.name}</span>
+            <span class="preset-res">${p.width}x${p.height}</span>
+          </div>
+        `;
+      }).join('');
+    }
+    renderPresetList();
 
     // Find closest standard preset for any dimension (tests logical and DPR-scaled dimensions)
     function getClosestPresetResolution(w, h, ratio = 1) {

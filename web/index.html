@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ESP32 Bluetooth KVM Switcher - Configuration Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --bg-card: rgba(30, 41, 59, 0.7);
+      --bg-card-hover: rgba(51, 65, 85, 0.8);
+      --border-color: rgba(255, 255, 255, 0.1);
+      --primary: #38bdf8;
+      --primary-glow: rgba(56, 189, 248, 0.35);
+      --accent: #818cf8;
+      --success: #34d399;
+      --warning: #fbbf24;
+      --danger: #f87171;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --radius: 16px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Outfit', sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(129, 140, 248, 0.12) 0px, transparent 50%);
+      color: var(--text-main);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 24px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 20px 28px;
+      margin-bottom: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .logo-icon {
+      width: 44px;
+      height: 44px;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 20px;
+      color: #0f172a;
+      box-shadow: 0 0 20px var(--primary-glow);
+    }
+
+    h1 {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.5px;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-color);
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: var(--danger);
+      box-shadow: 0 0 10px var(--danger);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot.connected {
+      background-color: var(--success);
+      box-shadow: 0 0 12px var(--success);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      gap: 24px;
+      flex: 1;
+    }
+
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .card {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      padding: 24px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--primary);
+    }
+
+    .btn-group {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .btn {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(129, 140, 248, 0.15));
+      border: 1px solid var(--primary);
+      color: var(--text-main);
+      padding: 12px 18px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .btn:hover {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: #0f172a;
+      box-shadow: 0 0 20px var(--primary-glow);
+      transform: translateY(-2px);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: var(--text-main);
+      box-shadow: none;
+    }
+
+    .preset-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 220px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .preset-item {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.2s ease;
+    }
+
+    .preset-item:hover {
+      border-color: var(--primary);
+      background: rgba(56, 189, 248, 0.1);
+    }
+
+    .preset-name {
+      font-weight: 500;
+    }
+
+    .preset-res {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .editor-container {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .canvas-wrapper {
+      position: relative;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius);
+      overflow: hidden;
+      min-height: 480px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+    }
+
+    #screenCanvas {
+      background: transparent;
+      width: 100%;
+      height: 480px;
+      cursor: grab;
+    }
+
+    #screenCanvas:active {
+      cursor: grabbing;
+    }
+
+    .canvas-instructions {
+      position: absolute;
+      bottom: 16px;
+      left: 20px;
+      font-size: 13px;
+      color: var(--text-muted);
+      background: rgba(15, 23, 42, 0.8);
+      padding: 6px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border-color);
+      pointer-events: none;
+    }
+
+    .json-output {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--success);
+      max-height: 120px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+
+    .detected-info {
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 12px;
+      padding: 12px 16px;
+      margin-bottom: 14px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .detected-info span {
+      font-weight: 600;
+      color: var(--primary);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon">⚡</div>
+      <div>
+        <h1>ESP32 Bluetooth KVM Switcher</h1>
+        <p style="font-size: 12px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
+      </div>
+    </div>
+    <div class="status-badge">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">ESP32 Disconnected</span>
+    </div>
+  </header>
+
+  <div class="main-grid">
+    <!-- Sidebar Controls -->
+    <div class="sidebar">
+      
+      <!-- Connection Card -->
+      <div class="card">
+        <div class="card-title">🔌 1. Підключення до ESP32</div>
+        <div class="btn-group">
+          <button class="btn" id="btnConnectUSB">
+            <span>💻 Підключити через USB (Web Serial)</span>
+          </button>
+          <button class="btn btn-secondary" id="btnConnectBT">
+            <span>📡 Підключити через Bluetooth</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Multi-Screen Detection Card -->
+      <div class="card">
+        <div class="card-title">🔍 2. Детектор моніторів ПК</div>
+        <div class="detected-info" id="detectBox">
+          Зчитує точні стандартизовані пресети (FHD, QHD, 4K, Retina).
+        </div>
+        <button class="btn btn-secondary" id="btnAutoDetect" style="width: 100%;">
+          <span>🖥️ Детектувати всі монітори ПК</span>
+        </button>
+      </div>
+
+      <!-- Presets Card -->
+      <div class="card">
+        <div class="card-title">🖥️ 3. Готові пресети моніторів</div>
+        <div class="preset-list">
+          <div class="preset-item" onclick="addScreen('DELL P2425HE', 1920, 1080, 'USB_PC')">
+            <span class="preset-name">🖥️ DELL P2425HE (FHD)</span>
+            <span class="preset-res">1920x1080</span>
+          </div>
+          <div class="preset-item" onclick="addScreen('Lenovo Laptop Display', 1920, 1080, 'USB_PC')">
+            <span class="preset-name">💻 Lenovo Laptop (FHD)</span>
+            <span class="preset-res">1920x1080</span>
+          </div>
+          <div class="preset-item" onclick="addScreen('MacBook Pro 14&quot;', 1512, 982, 'BLE_MAC')">
+            <span class="preset-name">🍏 MacBook Pro 14" (Retina)</span>
+            <span class="preset-res">1512x982</span>
+          </div>
+          <div class="preset-item" onclick="addScreen('MacBook Pro 16&quot;', 1728, 1117, 'BLE_MAC')">
+            <span class="preset-name">🍏 MacBook Pro 16" (Retina)</span>
+            <span class="preset-res">1728x1117</span>
+          </div>
+          <div class="preset-item" onclick="addScreen('2K QHD Monitor', 2560, 1440, 'USB_PC')">
+            <span class="preset-name">🖥️ 2K QHD Display</span>
+            <span class="preset-res">2560x1440</span>
+          </div>
+          <div class="preset-item" onclick="addScreen('4K UHD Monitor', 3840, 2160, 'USB_PC')">
+            <span class="preset-name">🖥️ 4K UHD Display</span>
+            <span class="preset-res">3840x2160</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Main Canvas & JSON Editor -->
+    <div class="editor-container">
+      <div class="card" style="flex: 1; display: flex; flex-direction: column;">
+        <div class="card-title" style="justify-content: space-between;">
+          <span>📐 Візуальний редактор моніторів (Розтягування лише за стандартом)</span>
+          <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 6px 12px; font-size: 12px;">Видалити всі</button>
+        </div>
+
+        <div class="canvas-wrapper">
+          <canvas id="screenCanvas"></canvas>
+          <div class="canvas-instructions">📐 Тягніть за нижній правий кут монітора: розмір автоматично прилипає до пресетів (1080p, 1440p, 4K)!</div>
+        </div>
+
+        <div style="margin-top: 16px;">
+          <div class="card-title" style="font-size: 14px;">📤 Згенерована конфігурація для ESP32 Flash (JSON):</div>
+          <div class="json-output" id="jsonOutput">{}</div>
+        </div>
+
+        <button class="btn" id="btnSyncESP32" style="margin-top: 16px;">
+          <span>💾 Зберегти конфігурацію в ESP32 Flash</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'esp32_kvm_project_config_v7';
+
+    // Official Standard Resolution Presets Matrix (Strictly Allowed Dimensions)
+    const PRESET_RESOLUTIONS = [
+      { label: 'FHD (1080p)', width: 1920, height: 1080 },
+      { label: 'MacBook 14"', width: 1512, height: 982 },
+      { label: 'MacBook 16"', width: 1728, height: 1117 },
+      { label: '2K QHD (1440p)', width: 2560, height: 1440 },
+      { label: '4K UHD (2160p)', width: 3840, height: 2160 },
+      { label: 'Ultrawide 21:9', width: 3440, height: 1440 },
+      { label: 'Super Ultrawide', width: 5120, height: 1440 }
+    ];
+
+    // Find closest standard preset for any dimension (e.g., 1200 becomes 1920 or 1512)
+    function getClosestPresetResolution(w, h) {
+      let closest = PRESET_RESOLUTIONS[0];
+      let minDiff = Infinity;
+
+      PRESET_RESOLUTIONS.forEach(p => {
+        const diff = Math.hypot(p.width - w, p.height - h);
+        if (diff < minDiff) {
+          minDiff = diff;
+          closest = p;
+        }
+      });
+      return closest;
+    }
+
+    // Default initial screens (FHD 1920x1080)
+    const defaultInitialScreens = [
+      { id: 1, name: 'Display 1 (Lenovo Laptop)', width: 1920, height: 1080, x: 60, y: 140, channel: 'USB_PC', color: '#818cf8' },
+      { id: 2, name: 'DELL P2425HE (Display 2)', width: 1920, height: 1080, x: 175, y: 20, channel: 'USB_PC', color: '#38bdf8' }
+    ];
+
+    function loadSavedProjectState() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          return parsed;
+        } catch (e) {
+          console.warn('Error parsing saved project config:', e);
+        }
+      }
+      return defaultInitialScreens;
+    }
+
+    function saveProjectState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
+    }
+
+    let screens = loadSavedProjectState();
+    let selectedScreen = null;
+    let isDragging = false;
+    let isResizing = false;
+    let resizeScreen = null;
+    let dragStartX = 0, dragStartY = 0;
+    let snapGuides = [];
+
+    const canvas = document.getElementById('screenCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = canvas.parentElement.clientWidth;
+      canvas.height = canvas.parentElement.clientHeight;
+      draw();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    // Multi-Monitor Detection using strict preset snapping
+    document.getElementById('btnAutoDetect').addEventListener('click', async () => {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const defaultChannel = isMac ? 'BLE_MAC' : 'USB_PC';
+      const osLabel = isMac ? 'macOS 🍏' : 'Windows 🪟';
+
+      if ('getScreenDetails' in window) {
+        try {
+          const screenDetails = await window.getScreenDetails();
+          const detectedScreens = screenDetails.screens;
+
+          let infoHtml = `🎯 <span>Виявлено ${detectedScreens.length} монітор(ів) (${osLabel}):</span><br>`;
+          screens = [];
+
+          const parsed = detectedScreens.map((s, idx) => {
+            const ratio = s.devicePixelRatio || window.devicePixelRatio || 1;
+            let rawW = Math.round(s.width * ratio);
+            let rawH = Math.round(s.height * ratio);
+
+            // Snap raw dimensions strictly to official standard presets (Prevents weird 1200 or 1536 values)
+            const preset = getClosestPresetResolution(rawW, rawH);
+
+            return {
+              original: s,
+              index: idx,
+              rawLeft: s.left,
+              rawTop: s.top,
+              width: preset.width,
+              height: preset.height,
+              ratio: ratio,
+              label: s.label ? s.label : `Display ${idx + 1}${s.isPrimary ? ' (Головний)' : ''}`
+            };
+          });
+
+          const minLeft = Math.min(...parsed.map(d => d.rawLeft));
+          const minTop = Math.min(...parsed.map(d => d.rawTop));
+
+          const scale = 0.12;
+          const canvasOffsetX = 60;
+          const canvasOffsetY = 20;
+          const colors = ['#818cf8', '#38bdf8', '#34d399', '#fbbf24'];
+
+          parsed.forEach((d) => {
+            infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
+
+            const posX = canvasOffsetX + (d.rawLeft - minLeft) * scale;
+            const posY = canvasOffsetY + (d.rawTop - minTop) * scale;
+
+            screens.push({
+              id: Date.now() + d.index,
+              name: d.label,
+              width: d.width,
+              height: d.height,
+              x: posX,
+              y: posY,
+              channel: defaultChannel,
+              color: colors[d.index % colors.length]
+            });
+          });
+
+          document.getElementById('detectBox').innerHTML = infoHtml;
+          saveProjectState();
+          draw();
+          return;
+
+        } catch (err) {
+          console.warn('getScreenDetails permission denied or canceled:', err);
+        }
+      }
+
+      // Fallback
+      const ratio = window.devicePixelRatio || 1;
+      let rawW = Math.round(window.screen.width * ratio);
+      let rawH = Math.round(window.screen.height * ratio);
+      const preset = getClosestPresetResolution(rawW, rawH);
+
+      document.getElementById('detectBox').innerHTML = `
+        🎯 <span>Фізична роздільна здатність (${osLabel}):</span><br>
+        • Стандартний пресет: <b>${preset.width} x ${preset.height} px</b>
+      `;
+
+      addScreen(isMac ? 'MacBook Display' : 'DELL P2425HE', preset.width, preset.height, defaultChannel);
+    });
+
+    function addScreen(name, width, height, channel) {
+      const colors = ['#38bdf8', '#818cf8', '#34d399', '#fbbf24'];
+      const scale = 0.12;
+      const sw = width * scale;
+      const sh = height * scale;
+
+      // Ensure preset standard resolution
+      const preset = getClosestPresetResolution(width, height);
+
+      let maxX = 50;
+      screens.forEach(s => {
+        const rightEdge = s.x + (s.width * scale);
+        if (rightEdge > maxX) maxX = rightEdge;
+      });
+
+      let initX = maxX + 1;
+      let initY = 120;
+
+      if (initX + sw > canvas.width - 10) {
+        initX = Math.max(10, (screens.length * 40) % (canvas.width - sw - 10));
+        initY = 140;
+      }
+
+      const newScreen = {
+        id: Date.now(),
+        name: name,
+        width: preset.width,
+        height: preset.height,
+        x: initX,
+        y: initY,
+        channel: channel,
+        color: colors[screens.length % colors.length]
+      };
+      screens.push(newScreen);
+      saveProjectState();
+      draw();
+    }
+
+    function removeScreen(id) {
+      screens = screens.filter(s => s.id !== id);
+      if (selectedScreen && selectedScreen.id === id) {
+        selectedScreen = null;
+      }
+      saveProjectState();
+      draw();
+    }
+
+    function clearScreens() {
+      screens = [];
+      selectedScreen = null;
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      draw();
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw Grid Background
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 40) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+      }
+
+      // Draw Magnetic Snap Guide Lines
+      snapGuides.forEach(g => {
+        ctx.strokeStyle = '#34d399';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        if (g.type === 'v') {
+          ctx.moveTo(g.pos, 0); ctx.lineTo(g.pos, canvas.height);
+        } else {
+          ctx.moveTo(0, g.pos); ctx.lineTo(canvas.width, g.pos);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+
+      // Draw Screens
+      const scale = 0.12;
+
+      screens.forEach(s => {
+        const sw = s.width * scale;
+        const sh = s.height * scale;
+
+        if (s.x < 0) s.x = 0;
+        if (s.x + sw > canvas.width) s.x = Math.max(0, canvas.width - sw);
+        if (s.y < 0) s.y = 0;
+        if (s.y + sh > canvas.height) s.y = Math.max(0, canvas.height - sh);
+
+        // Shadow & Glow
+        ctx.shadowColor = s.color;
+        ctx.shadowBlur = (selectedScreen === s) ? 20 : 6;
+
+        // Screen Body
+        ctx.fillStyle = 'rgba(30, 41, 59, 0.85)';
+        ctx.strokeStyle = s.color;
+        ctx.lineWidth = (selectedScreen === s) ? 3 : 2;
+
+        ctx.beginPath();
+        ctx.roundRect(s.x, s.y, sw, sh, 12);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.shadowBlur = 0;
+
+        // Screen Title & Details
+        ctx.fillStyle = '#f8fafc';
+        ctx.font = '600 13px Outfit';
+        ctx.fillText(s.name, s.x + 14, s.y + 26);
+
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '400 11px JetBrains Mono';
+        ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
+
+        // Channel Tag
+        ctx.fillStyle = s.color;
+        ctx.font = '600 10px Outfit';
+        ctx.fillText(`Channel: ${s.channel}`, s.x + 14, s.y + sh - 14);
+
+        // --- Red Delete Button (Top Right Corner) ---
+        const btnRadius = 11;
+        const btnX = s.x + sw - 14;
+        const btnY = s.y + 14;
+        s.deleteBtn = { x: btnX, y: btnY, r: btnRadius };
+
+        ctx.fillStyle = '#f87171';
+        ctx.beginPath();
+        ctx.arc(btnX, btnY, btnRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        ctx.moveTo(btnX - 4, btnY - 4);
+        ctx.lineTo(btnX + 4, btnY + 4);
+        ctx.moveTo(btnX + 4, btnY - 4);
+        ctx.lineTo(btnX - 4, btnY + 4);
+        ctx.stroke();
+
+        // --- Resize Handle (Bottom Right Corner) ---
+        const handleSize = 12;
+        const handleX = s.x + sw - handleSize;
+        const handleY = s.y + sh - handleSize;
+        s.resizeHandle = { x: handleX, y: handleY, w: handleSize, h: handleSize };
+
+        ctx.fillStyle = s.color;
+        ctx.beginPath();
+        ctx.moveTo(s.x + sw, s.y + sh - handleSize);
+        ctx.lineTo(s.x + sw, s.y + sh);
+        ctx.lineTo(s.x + sw - handleSize, s.y + sh);
+        ctx.closePath();
+        ctx.fill();
+      });
+
+      updateJSON();
+    }
+
+    function updateJSON() {
+      const sorted = [...screens].sort((a, b) => a.x - b.x || a.y - b.y);
+      
+      let cumulativeX = 0;
+      const config = {
+        device: "ESP32-KVM-Switch",
+        total_screens: sorted.length,
+        layout: sorted.map((s, index) => {
+          const minX = cumulativeX;
+          const maxX = cumulativeX + s.width;
+          cumulativeX = maxX + 1;
+          return {
+            index: index + 1,
+            name: s.name,
+            channel: s.channel,
+            x_min: minX,
+            x_max: maxX,
+            height: s.height
+          };
+        })
+      };
+
+      document.getElementById('jsonOutput').textContent = JSON.stringify(config, null, 2);
+    }
+
+    // Canvas Interactivity (Drag, Delete & Preset-Snapping Stretch Resize)
+    canvas.addEventListener('mousedown', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const scale = 0.12;
+
+      for (let i = screens.length - 1; i >= 0; i--) {
+        const s = screens[i];
+
+        // Check Click on Delete Button
+        if (s.deleteBtn) {
+          const dist = Math.hypot(mx - s.deleteBtn.x, my - s.deleteBtn.y);
+          if (dist <= s.deleteBtn.r + 4) {
+            removeScreen(s.id);
+            return;
+          }
+        }
+
+        // Check Click on Resize Handle (Bottom Right Corner)
+        if (s.resizeHandle) {
+          if (mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
+              my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
+            isResizing = true;
+            resizeScreen = s;
+            selectedScreen = s;
+            draw();
+            return;
+          }
+        }
+
+        // Check Click inside Screen Body
+        const sw = s.width * scale;
+        const sh = s.height * scale;
+
+        if (mx >= s.x && mx <= s.x + sw && my >= s.y && my <= s.y + sh) {
+          selectedScreen = s;
+          isDragging = true;
+          dragStartX = mx - s.x;
+          dragStartY = my - s.y;
+          draw();
+          return;
+        }
+      }
+      selectedScreen = null;
+      draw();
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const scale = 0.12;
+
+      let hoveringDelete = false;
+      let hoveringResize = false;
+
+      screens.forEach(s => {
+        if (s.deleteBtn && Math.hypot(mx - s.deleteBtn.x, my - s.deleteBtn.y) <= s.deleteBtn.r + 4) {
+          hoveringDelete = true;
+        }
+        if (s.resizeHandle && mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
+            my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
+          hoveringResize = true;
+        }
+      });
+
+      if (hoveringDelete) {
+        canvas.style.cursor = 'pointer';
+      } else if (hoveringResize || isResizing) {
+        canvas.style.cursor = 'nwse-resize';
+      } else if (isDragging) {
+        canvas.style.cursor = 'grabbing';
+      } else {
+        canvas.style.cursor = 'grab';
+      }
+
+      // Handle Preset-Snapping Resize Stretch
+      if (isResizing && resizeScreen) {
+        const rawDraggedWidth = (mx - resizeScreen.x) / scale;
+        const rawDraggedHeight = (my - resizeScreen.y) / scale;
+
+        // Snap strictly to closest allowed standard preset resolution (e.g. 1920x1080, 2560x1440, 3840x2160)
+        const snappedPreset = getClosestPresetResolution(rawDraggedWidth, rawDraggedHeight);
+
+        resizeScreen.width = snappedPreset.width;
+        resizeScreen.height = snappedPreset.height;
+        draw();
+        return;
+      }
+
+      // Handle Drag & Drop
+      if (isDragging && selectedScreen) {
+        const sw = selectedScreen.width * scale;
+        const sh = selectedScreen.height * scale;
+
+        let newX = mx - dragStartX;
+        let newY = my - dragStartY;
+
+        snapGuides = [];
+        const SNAP_DIST = 16;
+
+        screens.forEach(other => {
+          if (other === selectedScreen) return;
+
+          const ow = other.width * scale;
+          const oh = other.height * scale;
+
+          if (Math.abs(newX - (other.x + ow)) < SNAP_DIST) {
+            newX = other.x + ow + 1;
+            snapGuides.push({ type: 'v', pos: newX });
+          }
+          if (Math.abs((newX + sw) - other.x) < SNAP_DIST) {
+            newX = other.x - sw - 1;
+            snapGuides.push({ type: 'v', pos: other.x });
+          }
+          if (Math.abs(newX - other.x) < SNAP_DIST) {
+            newX = other.x;
+            snapGuides.push({ type: 'v', pos: newX });
+          }
+          if (Math.abs((newX + sw) - (other.x + ow)) < SNAP_DIST) {
+            newX = other.x + ow - sw;
+            snapGuides.push({ type: 'v', pos: other.x + ow });
+          }
+
+          if (Math.abs(newY - (other.y + oh)) < SNAP_DIST) {
+            newY = other.y + oh + 1;
+            snapGuides.push({ type: 'h', pos: newY });
+          }
+          if (Math.abs((newY + sh) - other.y) < SNAP_DIST) {
+            newY = other.y - sh - 1;
+            snapGuides.push({ type: 'h', pos: other.y });
+          }
+          if (Math.abs(newY - other.y) < SNAP_DIST) {
+            newY = other.y;
+            snapGuides.push({ type: 'h', pos: newY });
+          }
+          if (Math.abs((newY + sh) - (other.y + oh)) < SNAP_DIST) {
+            newY = other.y + oh - sh;
+            snapGuides.push({ type: 'h', pos: other.y + oh });
+          }
+        });
+
+        if (newX < 0) newX = 0;
+        if (newX + sw > canvas.width) newX = canvas.width - sw;
+        if (newY < 0) newY = 0;
+        if (newY + sh > canvas.height) newY = canvas.height - sh;
+
+        selectedScreen.x = newX;
+        selectedScreen.y = newY;
+        draw();
+      }
+    });
+
+    window.addEventListener('mouseup', () => {
+      if (isDragging || isResizing) {
+        saveProjectState();
+      }
+      isDragging = false;
+      isResizing = false;
+      resizeScreen = null;
+      snapGuides = [];
+      draw();
+    });
+
+    document.getElementById('btnSyncESP32').addEventListener('click', () => {
+      saveProjectState();
+      alert('Конфігурацію успішно збережено в проєкті!');
+    });
+
+    document.getElementById('btnConnectUSB').addEventListener('click', async () => {
+      if ('serial' in navigator) {
+        try {
+          const port = await navigator.serial.requestPort();
+          await port.open({ baudRate: 115200 });
+          setConnectedStatus(true, 'USB Serial Connected');
+        } catch (err) {
+          alert('Не вдалося підключитися через USB: ' + err.message);
+        }
+      } else {
+        alert('Web Serial API не підтримується цим браузером.');
+      }
+    });
+
+    document.getElementById('btnConnectBT').addEventListener('click', async () => {
+      if ('bluetooth' in navigator) {
+        try {
+          const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
+          setConnectedStatus(true, 'Bluetooth Connected: ' + device.name);
+        } catch (err) {
+          alert('Не вдалося підключитися по Bluetooth: ' + err.message);
+        }
+      } else {
+        alert('Web Bluetooth API не підтримується цим браузером.');
+      }
+    });
+
+    function setConnectedStatus(connected, text) {
+      const dot = document.getElementById('statusDot');
+      const label = document.getElementById('statusText');
+      if (connected) {
+        dot.classList.add('connected');
+        label.textContent = text;
+      } else {
+        dot.classList.remove('connected');
+        label.textContent = 'ESP32 Disconnected';
+      }
+    }
+
+    setTimeout(() => {
+      resizeCanvas();
+    }, 100);
+  </script>
+</body>
+</html>

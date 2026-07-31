@@ -372,28 +372,46 @@
   <script>
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
 
-    // Official Standard Resolution Presets Matrix (Single Source of Truth)
+    // Official Standard Resolution Presets Matrix (Tuple Array [width, height, name], Sorted Descending by Width)
     const PRESET_RESOLUTIONS = [
-      { name: 'DELL P2425HE (FHD)', icon: '🖥️', width: 1920, height: 1080, channel: 'USB_PC' },
-      { name: 'Lenovo Laptop (FHD)', icon: '💻', width: 1920, height: 1080, channel: 'USB_PC' },
-      { name: 'MacBook Pro 14" (Retina)', icon: '🍏', width: 1512, height: 982, channel: 'BLE_MAC' },
-      { name: 'MacBook Pro 16" (Retina)', icon: '🍏', width: 1728, height: 1117, channel: 'BLE_MAC' },
-      { name: 'MacBook (More Space)', icon: '🍏', width: 2056, height: 1329, channel: 'BLE_MAC' },
-      { name: '2K QHD Display', icon: '🖥️', width: 2560, height: 1440, channel: 'USB_PC' },
-      { name: '4K UHD Display', icon: '🖥️', width: 3840, height: 2160, channel: 'USB_PC' },
-      { name: 'Ultrawide 21:9', icon: '🖥️', width: 3440, height: 1440, channel: 'USB_PC' },
-      { name: 'Super Ultrawide', icon: '🖥️', width: 5120, height: 1440, channel: 'USB_PC' }
+      [5120, 1440, 'Super Ultrawide (32:9)'],
+      [3840, 2160, '4K UHD Display (16:9)'],
+      [3440, 1440, 'Ultrawide 21:9 (UWQHD)'],
+      [2560, 1440, '2K QHD Display (16:9)'],
+      [2560, 1080, 'UW-FHD (21:9)'],
+      [2056, 1329, 'MacBook (More Space)'],
+      [1920, 1200, 'WUXGA (16:10)'],
+      [1920, 1080, 'DELL P2425HE (FHD)'],
+      [1920, 1080, 'Lenovo Laptop (FHD)'],
+      [1728, 1117, 'MacBook Pro 16" (Retina)'],
+      [1680, 1050, 'WSXGA+ (16:10)'],
+      [1600, 900, 'HD+ (16:9)'],
+      [1512, 982, 'MacBook Pro 14" (Retina)'],
+      [1470, 956, 'MacBook Air 13" (Retina)'],
+      [1440, 900, 'WXGA+ (16:10)'],
+      [1400, 1050, 'SXGA+ (4:3)'],
+      [1366, 768, 'WXGA (16:9)'],
+      [1360, 768, 'WXGA (1360x768)'],
+      [1280, 1024, 'SXGA (5:4)'],
+      [1280, 960, 'UVGA (4:3)'],
+      [1280, 800, 'WXGA (16:10)'],
+      [1280, 768, 'WXGA (15:9)'],
+      [1280, 720, 'HD (16:9)'],
+      [1280, 600, 'Wide SVGA (1280x600)']
     ];
 
     function renderPresetList() {
       const container = document.getElementById('presetList');
       if (!container) return;
-      container.innerHTML = PRESET_RESOLUTIONS.map(p => {
-        const safeName = p.name.replace(/'/g, "\\'");
+      container.innerHTML = PRESET_RESOLUTIONS.map(([w, h, name]) => {
+        const safeName = name.replace(/'/g, "\\'");
+        const isMac = name.toLowerCase().includes('macbook');
+        const channel = isMac ? 'BLE_MAC' : 'USB_PC';
+        const icon = isMac ? '🍏' : (name.toLowerCase().includes('laptop') ? '💻' : '🖥️');
         return `
-          <div class="preset-item" onclick="addScreen('${safeName}', ${p.width}, ${p.height}, '${p.channel}')">
-            <span class="preset-name">${p.icon} ${p.name}</span>
-            <span class="preset-res">${p.width}x${p.height}</span>
+          <div class="preset-item" onclick="addScreen('${safeName}', ${w}, ${h}, '${channel}')">
+            <span class="preset-name">${icon} ${name}</span>
+            <span class="preset-res">${w}x${h}</span>
           </div>
         `;
       }).join('');
@@ -402,7 +420,7 @@
 
     // Find closest standard preset for any dimension (tests logical and DPR-scaled dimensions)
     function getClosestPresetResolution(w, h, ratio = 1) {
-      let closest = PRESET_RESOLUTIONS[0];
+      let closest = { width: PRESET_RESOLUTIONS[0][0], height: PRESET_RESOLUTIONS[0][1] };
       let minDiff = Infinity;
 
       const candidates = [
@@ -413,11 +431,11 @@
       }
 
       candidates.forEach(c => {
-        PRESET_RESOLUTIONS.forEach(p => {
-          const diff = Math.hypot(p.width - c.width, p.height - c.height);
+        PRESET_RESOLUTIONS.forEach(([pw, ph]) => {
+          const diff = Math.hypot(pw - c.width, ph - c.height);
           if (diff < minDiff) {
             minDiff = diff;
-            closest = p;
+            closest = { width: pw, height: ph };
           }
         });
       });

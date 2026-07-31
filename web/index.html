@@ -414,11 +414,10 @@
         const safeName = name.replace(/'/g, "\\'");
         const isMac = name.toLowerCase().includes('macbook');
         const channel = isMac ? 'BLE_MAC' : 'USB_PC';
-        const icon = isMac ? '🍏' : (name.toLowerCase().includes('laptop') ? '💻' : '🖥️');
         return `
           <div class="preset-item" onclick="addScreen('${safeName}', ${w}, ${h}, '${channel}')">
             <span class="preset-res">${w} × ${h}</span>
-            <span class="preset-name">${icon} ${name}</span>
+            <span class="preset-name">${name}</span>
           </div>
         `;
       }).join('');

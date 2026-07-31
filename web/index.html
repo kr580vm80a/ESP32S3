@@ -207,13 +207,20 @@
       background: rgba(56, 189, 248, 0.1);
     }
 
-    .preset-name {
-      font-weight: 500;
-    }
-
     .preset-res {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 11px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.12);
+      padding: 3px 8px;
+      border-radius: 6px;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+    }
+
+    .preset-name {
+      font-weight: 500;
+      font-size: 12px;
       color: var(--text-muted);
     }
 
@@ -410,8 +417,8 @@
         const icon = isMac ? '🍏' : (name.toLowerCase().includes('laptop') ? '💻' : '🖥️');
         return `
           <div class="preset-item" onclick="addScreen('${safeName}', ${w}, ${h}, '${channel}')">
+            <span class="preset-res">${w} × ${h}</span>
             <span class="preset-name">${icon} ${name}</span>
-            <span class="preset-res">${w}x${h}</span>
           </div>
         `;
       }).join('');

@@ -488,7 +488,7 @@
             isInternal: s.isInternal
           })));
 
-          let infoHtml = `🎯 <span>Виявлено ${detectedScreens.length} монітор(ів) (${osLabel}):</span><br><br>`;
+          let infoHtml = `🎯 <span>Виявлено ${detectedScreens.length} монітор(ів) (${osLabel}):</span><br>`;
           screens = [];
 
           const parsed = detectedScreens.map((s, idx) => {
@@ -518,10 +518,7 @@
           const colors = ['#818cf8', '#38bdf8', '#34d399', '#fbbf24'];
 
           parsed.forEach((d) => {
-            const s = d.original;
-            infoHtml += `• <b>${d.label}</b><br>`;
-            infoHtml += `&nbsp;&nbsp;📍 <i>Системна сира відповідь OS:</i> ${s.width}×${s.height} pt (DPR: ${d.ratio})<br>`;
-            infoHtml += `&nbsp;&nbsp;🎯 <i>Підібраний пресет:</i> <b>${d.width}×${d.height} px</b><br><br>`;
+            infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
 
             const posX = canvasOffsetX + (d.rawLeft - minLeft) * scale;
             const posY = canvasOffsetY + (d.rawTop - minTop) * scale;
@@ -558,8 +555,7 @@
 
       document.getElementById('detectBox').innerHTML = `
         🎯 <span>Фізична роздільна здатність (${osLabel}):</span><br>
-        • <i>Системи сирий розрахунок:</i> ${rawW}×${rawH} (DPR: ${ratio})<br>
-        • <i>Стандартний пресет:</i> <b>${preset.width} × ${preset.height} px</b>
+        • Стандартний пресет: <b>${preset.width} x ${preset.height} px</b>
       `;
 
       addScreen(isMac ? 'MacBook Display' : 'DELL P2425HE', preset.width, preset.height, defaultChannel);

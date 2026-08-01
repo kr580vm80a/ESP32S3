@@ -1292,28 +1292,46 @@
       });
     }
 
+    async function tryLoadFromDriveHandle() {
+      if (!driveFileHandle) return false;
+      try {
+        const file = await driveFileHandle.getFile();
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        if (parsed && Array.isArray(parsed.layout) && parsed.layout.length > 0) {
+          screens = parseLayoutToScreens(parsed.layout);
+          saveProjectState();
+          draw();
+          console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT}`);
+          return true;
+        }
+      } catch (err) {
+        console.warn(`Direct read from ${TARGET_DRIVE_FOLDER_HINT} requires permission:`, err);
+      }
+      return false;
+    }
+
     async function initDriveSyncOnStartup() {
       resizeCanvas();
 
       driveFileHandle = await getStoredFileHandle();
-      console.log('driveFileHandle type:', typeof driveFileHandle);
-      console.log('driveFileHandle value:', driveFileHandle);
       if (driveFileHandle) {
-        try {
-          if (await verifyFilePermission(driveFileHandle, false)) {
-            const file = await driveFileHandle.getFile();
-            const text = await file.text();
-            const parsed = JSON.parse(text);
-            if (parsed && Array.isArray(parsed.layout) && parsed.layout.length > 0) {
-              screens = parseLayoutToScreens(parsed.layout);
-              saveProjectState();
-              draw();
-              console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} on startup`);
-              return;
+        const loaded = await tryLoadFromDriveHandle();
+        if (!loaded) {
+          // Register one-time user activation trigger to request permission on first user click/touch
+          const requestPermissionOnFirstClick = async () => {
+            if (driveFileHandle) {
+              try {
+                if (await verifyFilePermission(driveFileHandle, false)) {
+                  await tryLoadFromDriveHandle();
+                }
+              } catch (e) {}
             }
-          }
-        } catch (err) {
-          console.warn(`Auto-load from ${TARGET_DRIVE_FOLDER_HINT} failed on startup:`, err);
+          };
+          window.addEventListener('click', requestPermissionOnFirstClick, { once: true });
+          window.addEventListener('pointerdown', requestPermissionOnFirstClick, { once: true });
+        } else {
+          return;
         }
       }
 

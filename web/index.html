@@ -358,8 +358,7 @@
         </div>
 
         <div class="canvas-wrapper">
-          <canvas id="screenCanvas"></canvas>
-          <div class="canvas-instructions">📐 Drag manual screens to arrange or resize. Auto-detected screens are locked.</div>
+          <canvas i          <div class="canvas-instructions">📐 Drag screens to position. Auto-detected screens move together as a fixed group and cannot be resized.</div>
         </div>
 
         <div style="margin-top: 16px;">
@@ -477,6 +476,7 @@
     let isResizing = false;
     let resizeScreen = null;
     let dragStartX = 0, dragStartY = 0;
+    let initialDetectedGroup = [];
     let snapGuides = [];
 
     const canvas = document.getElementById('screenCanvas');
@@ -687,8 +687,8 @@
       screens.forEach(s => {
         const sw = s.width * scale;
         const sh = s.height * scale;
-        const isLocked = s.isLocked || s.isDetected;
-        const color = isLocked ? COLOR_DETECTED : (s.color || COLOR_MANUAL);
+        const isDetected = s.isDetected || s.isLocked;
+        const color = isDetected ? COLOR_DETECTED : (s.color || COLOR_MANUAL);
 
         if (s.x < 0) s.x = 0;
         if (s.x + sw > canvas.width) s.x = Math.max(0, canvas.width - sw);
@@ -720,10 +720,10 @@
         ctx.font = '400 11px JetBrains Mono';
         ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
 
-        // Channel & Lock Tag
+        // Channel & Group Lock Tag
         ctx.fillStyle = color;
         ctx.font = '600 10px Outfit';
-        const tagText = isLocked ? `🔒 ${s.channel} (Locked)` : `Channel: ${s.channel}`;
+        const tagText = isDetected ? `🔗 ${s.channel} (Grouped)` : `Channel: ${s.channel}`;
         ctx.fillText(tagText, s.x + 14, s.y + sh - 14);
 
         // --- Red Delete Button (Top Right Corner) ---
@@ -746,8 +746,8 @@
         ctx.lineTo(btnX - 4, btnY + 4);
         ctx.stroke();
 
-        // --- Resize Handle (Bottom Right Corner) - ONLY FOR UNLOCKED MANUAL SCREENS ---
-        if (!isLocked) {
+        // --- Resize Handle (Bottom Right Corner) - ONLY FOR MANUAL SCREENS ---
+        if (!isDetected) {
           const handleSize = 12;
           const handleX = s.x + sw - handleSize;
           const handleY = s.y + sh - handleSize;
@@ -803,7 +803,7 @@
 
       for (let i = screens.length - 1; i >= 0; i--) {
         const s = screens[i];
-        const isLocked = s.isLocked || s.isDetected;
+        const isDetected = s.isDetected || s.isLocked;
 
         // Check Click on Delete Button
         if (s.deleteBtn) {
@@ -814,8 +814,8 @@
           }
         }
 
-        // Check Click on Resize Handle (Bottom Right Corner) - ONLY IF UNLOCKED
-        if (!isLocked && s.resizeHandle) {
+        // Check Click on Resize Handle (Bottom Right Corner) - ONLY IF MANUAL SCREEN
+        if (!isDetected && s.resizeHandle) {
           if (mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
               my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
             isResizing = true;
@@ -832,13 +832,19 @@
 
         if (mx >= s.x && mx <= s.x + sw && my >= s.y && my <= s.y + sh) {
           selectedScreen = s;
-          if (!isLocked) {
-            isDragging = true;
-            dragStartX = mx - s.x;
-            dragStartY = my - s.y;
+          isDragging = true;
+          dragStartX = mx - s.x;
+          dragStartY = my - s.y;
+
+          if (isDetected) {
+            // Group Drag: Record initial positions of all auto-detected screens
+            initialDetectedGroup = screens
+              .filter(scr => scr.isDetected || scr.isLocked)
+              .map(scr => ({ id: scr.id, screen: scr, startX: scr.x, startY: scr.y }));
           } else {
-            isDragging = false;
+            initialDetectedGroup = [];
           }
+
           draw();
           return;
         }
@@ -855,22 +861,16 @@
 
       let hoveringDelete = false;
       let hoveringResize = false;
-      let hoveringLocked = false;
 
       screens.forEach(s => {
-        const isLocked = s.isLocked || s.isDetected;
-        const sw = s.width * scale;
-        const sh = s.height * scale;
+        const isDetected = s.isDetected || s.isLocked;
 
         if (s.deleteBtn && Math.hypot(mx - s.deleteBtn.x, my - s.deleteBtn.y) <= s.deleteBtn.r + 4) {
           hoveringDelete = true;
         }
-        if (!isLocked && s.resizeHandle && mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
+        if (!isDetected && s.resizeHandle && mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
             my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
           hoveringResize = true;
-        }
-        if (isLocked && mx >= s.x && mx <= s.x + sw && my >= s.y && my <= s.y + sh) {
-          hoveringLocked = true;
         }
       });
 
@@ -878,16 +878,14 @@
         canvas.style.cursor = 'pointer';
       } else if (hoveringResize || isResizing) {
         canvas.style.cursor = 'nwse-resize';
-      } else if (hoveringLocked) {
-        canvas.style.cursor = 'not-allowed';
       } else if (isDragging) {
         canvas.style.cursor = 'grabbing';
       } else {
         canvas.style.cursor = 'grab';
       }
 
-      // Handle Preset-Snapping Resize Stretch
-      if (isResizing && resizeScreen && !(resizeScreen.isLocked || resizeScreen.isDetected)) {
+      // Handle Preset-Snapping Resize Stretch (Only for manual screens)
+      if (isResizing && resizeScreen && !(resizeScreen.isDetected || resizeScreen.isLocked)) {
         const rawDraggedWidth = (mx - resizeScreen.x) / scale;
         const rawDraggedHeight = (my - resizeScreen.y) / scale;
 
@@ -900,66 +898,98 @@
         return;
       }
 
-      // Handle Drag & Drop (Only if selected screen is unlocked)
-      if (isDragging && selectedScreen && !(selectedScreen.isLocked || selectedScreen.isDetected)) {
-        const sw = selectedScreen.width * scale;
-        const sh = selectedScreen.height * scale;
+      // Handle Drag & Drop
+      if (isDragging && selectedScreen) {
+        const isDetected = selectedScreen.isDetected || selectedScreen.isLocked;
 
-        let newX = mx - dragStartX;
-        let newY = my - dragStartY;
+        if (isDetected && initialDetectedGroup.length > 0) {
+          // --- Grouped Drag for Auto-Detected Screens (Move together, cannot be unjoined/separated) ---
+          const targetX = mx - dragStartX;
+          const targetY = my - dragStartY;
+          const deltaX = targetX - selectedScreen.x;
+          const deltaY = targetY - selectedScreen.y;
 
-        snapGuides = [];
-        const SNAP_DIST = 16;
+          let canMoveX = true;
+          let canMoveY = true;
 
-        screens.forEach(other => {
-          if (other === selectedScreen) return;
+          initialDetectedGroup.forEach(g => {
+            const gsw = g.screen.width * scale;
+            const gsh = g.screen.height * scale;
+            const newGx = g.screen.x + deltaX;
+            const newGy = g.screen.y + deltaY;
 
-          const ow = other.width * scale;
-          const oh = other.height * scale;
+            if (newGx < 0 || newGx + gsw > canvas.width) canMoveX = false;
+            if (newGy < 0 || newGy + gsh > canvas.height) canMoveY = false;
+          });
 
-          if (Math.abs(newX - (other.x + ow)) < SNAP_DIST) {
-            newX = other.x + ow + 1;
-            snapGuides.push({ type: 'v', pos: newX });
-          }
-          if (Math.abs((newX + sw) - other.x) < SNAP_DIST) {
-            newX = other.x - sw - 1;
-            snapGuides.push({ type: 'v', pos: other.x });
-          }
-          if (Math.abs(newX - other.x) < SNAP_DIST) {
-            newX = other.x;
-            snapGuides.push({ type: 'v', pos: newX });
-          }
-          if (Math.abs((newX + sw) - (other.x + ow)) < SNAP_DIST) {
-            newX = other.x + ow - sw;
-            snapGuides.push({ type: 'v', pos: other.x + ow });
-          }
+          initialDetectedGroup.forEach(g => {
+            if (canMoveX) g.screen.x += deltaX;
+            if (canMoveY) g.screen.y += deltaY;
+          });
 
-          if (Math.abs(newY - (other.y + oh)) < SNAP_DIST) {
-            newY = other.y + oh + 1;
-            snapGuides.push({ type: 'h', pos: newY });
-          }
-          if (Math.abs((newY + sh) - other.y) < SNAP_DIST) {
-            newY = other.y - sh - 1;
-            snapGuides.push({ type: 'h', pos: other.y });
-          }
-          if (Math.abs(newY - other.y) < SNAP_DIST) {
-            newY = other.y;
-            snapGuides.push({ type: 'h', pos: newY });
-          }
-          if (Math.abs((newY + sh) - (other.y + oh)) < SNAP_DIST) {
-            newY = other.y + oh - sh;
-            snapGuides.push({ type: 'h', pos: other.y + oh });
-          }
-        });
+          draw();
+          return;
+        } else if (!isDetected) {
+          // --- Individual Drag & Drop for Manual Screens ---
+          const sw = selectedScreen.width * scale;
+          const sh = selectedScreen.height * scale;
 
-        if (newX < 0) newX = 0;
-        if (newX + sw > canvas.width) newX = canvas.width - sw;
-        if (newY < 0) newY = 0;
-        if (newY + sh > canvas.height) newY = canvas.height - sh;
+          let newX = mx - dragStartX;
+          let newY = my - dragStartY;
 
-        selectedScreen.x = newX;
-        selectedScreen.y = newY;
-        draw();
+          snapGuides = [];
+          const SNAP_DIST = 16;
+
+          screens.forEach(other => {
+            if (other === selectedScreen) return;
+
+            const ow = other.width * scale;
+            const oh = other.height * scale;
+
+            if (Math.abs(newX - (other.x + ow)) < SNAP_DIST) {
+              newX = other.x + ow + 1;
+              snapGuides.push({ type: 'v', pos: newX });
+            }
+            if (Math.abs((newX + sw) - other.x) < SNAP_DIST) {
+              newX = other.x - sw - 1;
+              snapGuides.push({ type: 'v', pos: other.x });
+            }
+            if (Math.abs(newX - other.x) < SNAP_DIST) {
+              newX = other.x;
+              snapGuides.push({ type: 'v', pos: newX });
+            }
+            if (Math.abs((newX + sw) - (other.x + ow)) < SNAP_DIST) {
+              newX = other.x + ow - sw;
+              snapGuides.push({ type: 'v', pos: other.x + ow });
+            }
+
+            if (Math.abs(newY - (other.y + oh)) < SNAP_DIST) {
+              newY = other.y + oh + 1;
+              snapGuides.push({ type: 'h', pos: newY });
+            }
+            if (Math.abs((newY + sh) - other.y) < SNAP_DIST) {
+              newY = other.y - sh - 1;
+              snapGuides.push({ type: 'h', pos: other.y });
+            }
+            if (Math.abs(newY - other.y) < SNAP_DIST) {
+              newY = other.y;
+              snapGuides.push({ type: 'h', pos: newY });
+            }
+            if (Math.abs((newY + sh) - (other.y + oh)) < SNAP_DIST) {
+              newY = other.y + oh - sh;
+              snapGuides.push({ type: 'h', pos: other.y + oh });
+            }
+          });
+
+          if (newX < 0) newX = 0;
+          if (newX + sw > canvas.width) newX = canvas.width - sw;
+          if (newY < 0) newY = 0;
+          if (newY + sh > canvas.height) newY = canvas.height - sh;
+
+          selectedScreen.x = newX;
+          selectedScreen.y = newY;
+          draw();
+        }
       }
     });
 

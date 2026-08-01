@@ -556,7 +556,7 @@
             let labelName = s.label ? s.label.trim() : '';
             if (!labelName) {
               if (s.isInternal) {
-                labelName = isMac ? 'MacBook Display' : 'Lenovo Laptop';
+                labelName = 'Internal Display';
               } else {
                 labelName = `Display ${idx + 1}`;
               }
@@ -713,8 +713,18 @@
     }
 
     function removeScreen(id) {
-      screens = screens.filter(s => s.id !== id);
-      if (selectedScreen && selectedScreen.id === id) {
+      const target = screens.find(s => s.id === id);
+      if (!target) return;
+
+      if (target.isDetected || target.isLocked) {
+        // Delete all screens in the auto-detected group
+        screens = screens.filter(s => !(s.isDetected || s.isLocked));
+      } else {
+        // Delete only this specific manual screen
+        screens = screens.filter(s => s.id !== id);
+      }
+
+      if (selectedScreen && !screens.includes(selectedScreen)) {
         selectedScreen = null;
       }
       saveProjectState();
@@ -756,6 +766,14 @@
         ctx.stroke();
         ctx.setLineDash([]);
       });
+
+      // Find top-left screen of auto-detected group for single delete button
+      const detectedScreens = screens.filter(s => s.isDetected || s.isLocked);
+      let topLeftDetectedScreen = null;
+      if (detectedScreens.length > 0) {
+        const sortedDetected = [...detectedScreens].sort((a, b) => a.y - b.y || a.x - b.x);
+        topLeftDetectedScreen = sortedDetected[0];
+      }
 
       // Draw Screens
       const scale = 0.12;
@@ -804,24 +822,31 @@
         }
 
         // --- Red Delete Button (Top Right Corner) ---
-        const btnRadius = 11;
-        const btnX = s.x + sw - 14;
-        const btnY = s.y + 14;
-        s.deleteBtn = { x: btnX, y: btnY, r: btnRadius };
+        // For auto-detected screens, show delete button ONLY on top-left screen of the group
+        const showDeleteBtn = !isDetected || (s === topLeftDetectedScreen);
 
-        ctx.fillStyle = '#f87171';
-        ctx.beginPath();
-        ctx.arc(btnX, btnY, btnRadius, 0, Math.PI * 2);
-        ctx.fill();
+        if (showDeleteBtn) {
+          const btnRadius = 11;
+          const btnX = s.x + sw - 14;
+          const btnY = s.y + 14;
+          s.deleteBtn = { x: btnX, y: btnY, r: btnRadius };
 
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        ctx.moveTo(btnX - 4, btnY - 4);
-        ctx.lineTo(btnX + 4, btnY + 4);
-        ctx.moveTo(btnX + 4, btnY - 4);
-        ctx.lineTo(btnX - 4, btnY + 4);
-        ctx.stroke();
+          ctx.fillStyle = '#f87171';
+          ctx.beginPath();
+          ctx.arc(btnX, btnY, btnRadius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.moveTo(btnX - 4, btnY - 4);
+          ctx.lineTo(btnX + 4, btnY + 4);
+          ctx.moveTo(btnX + 4, btnY - 4);
+          ctx.lineTo(btnX - 4, btnY + 4);
+          ctx.stroke();
+        } else {
+          s.deleteBtn = null;
+        }
 
         // --- Resize Handle (Bottom Right Corner) - ONLY FOR MANUAL SCREENS ---
         if (!isDetected) {

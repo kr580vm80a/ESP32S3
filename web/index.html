@@ -398,7 +398,7 @@
       [2240, 1450, 'MacBook Air 15"'],
       [2056, 1337, 'MacBook Pro 14"'],
       [2056, 1336, 'MacBook Air 13"'],
-      [2056, 1329, 'MacBook Pro 16" (More Space)'],
+      [2056, 1329, 'MacBook Pro 16"'],
       [2048, 1536, 'QXGA (4:3)'],
       [2048, 1280, 'MacBook Pro 16" Intel'],
       [1920, 1243, 'MacBook Air 15"'],
@@ -406,20 +406,22 @@
       [1920, 1080, 'FHD (16:9)'],
       [1800, 1169, 'MacBook Pro 14"'],
       [1792, 1120, 'MacBook Pro 16" Intel'],
-      [1728, 1117, 'MacBook Pro 16" (Retina)'],
+      [1728, 1117, 'MacBook Pro 16"'],
       [1710, 1112, 'MacBook Air 13"'],
       [1710, 1107, 'MacBook Air 15"'],
       [1680, 1050, 'WSXGA+ (16:10) / MacBook Pro 15"'],
       [1600, 1200, 'UXGA (4:3)'],
       [1600, 900, 'HD+ (16:9)'],
-      [1512, 982, 'MacBook Pro 14" (Retina)'],
-      [1470, 956, 'MacBook Air 13" (Retina)'],
+      [1512, 982, 'MacBook Pro 14"'],
+      [1496, 967, 'MacBook Pro 16"'],
+      [1470, 956, 'MacBook Air 13"'],
       [1440, 932, 'MacBook Air 15"'],
       [1440, 900, 'WXGA+ (16:10) / MacBook Air 13"'],
       [1400, 1050, 'SXGA+ (4:3)'],
       [1366, 768, 'WXGA (16:9)'],
       [1360, 768, 'WXGA (16:9)'],
       [1344, 840, 'MacBook Pro 16" Intel'],
+      [1312, 848, 'MacBook Pro 16"'],
       [1280, 1024, 'SXGA (5:4)'],
       [1280, 960, 'UVGA (4:3)'],
       [1280, 832, 'MacBook Air 13"'],
@@ -427,6 +429,7 @@
       [1280, 768, 'WXGA (15:9)'],
       [1280, 720, 'HD (16:9)'],
       [1280, 600, 'WSVGA (16:7.5)'],
+      [1168, 755, 'MacBook Pro 16"'],
       [1152, 720, 'MacBook Pro 16" Intel'],
       [1024, 768, 'XGA (4:3)'],
       [1024, 640, 'MacBook Air 13" Intel'],
@@ -476,12 +479,6 @@
       return closest;
     }
 
-    // Default initial screens (FHD 1920x1080)
-    const defaultInitialScreens = [
-      { id: 1, name: 'Display 1 (Lenovo Laptop)', width: 1920, height: 1080, x: 60, y: 140, channel: 'USB_PC', color: COLOR_MANUAL, isDetected: false, isLocked: false },
-      { id: 2, name: 'DELL P2425HE (Display 2)', width: 1920, height: 1080, x: 175, y: 20, channel: 'USB_PC', color: COLOR_MANUAL, isDetected: false, isLocked: false }
-    ];
-
     function loadSavedProjectState() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -492,7 +489,7 @@
           console.warn('Error parsing saved project config:', e);
         }
       }
-      return defaultInitialScreens;
+      return [];
     }
 
     function saveProjectState() {

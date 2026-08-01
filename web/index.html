@@ -532,7 +532,6 @@
       // 1. Save to LocalStorage (browser cache)
       localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
 
-      // 2. Save to G:\My Drive\ESP32\kvm_config.json
       if (driveFileHandle) {
         try {
           if (await verifyFilePermission(driveFileHandle, true)) {
@@ -1202,7 +1201,6 @@
     document.getElementById('btnSyncESP32').addEventListener('click', async () => {
       const jsonText = document.getElementById('jsonOutput').textContent;
       
-      // If G:\My Drive\ESP32\kvm_config.json is not linked yet, open native save dialog
       if (!driveFileHandle && 'showSaveFilePicker' in window) {
         try {
           driveFileHandle = await window.showSaveFilePicker({
@@ -1220,7 +1218,7 @@
       await saveESP32Config(jsonText);
 
       if (driveFileHandle) {
-        alert(`✅ Configuration saved to ${driveFileHandle.name} in G:\\My Drive\\ESP32\\!\n\n(Click 🔄 Load Config on your other computer to sync)`);
+        alert(`✅ Configuration saved to ${driveFileHandle.name} in ${TARGET_DRIVE_FOLDER_HINT}!\n\n(Click 🔄 Load Config on your other computer to sync)`);
       } else {
         alert('Config saved to local browser storage.');
       }
@@ -1268,6 +1266,8 @@
     }
 
     async function initDriveSyncOnStartup() {
+      resizeCanvas();
+
       driveFileHandle = await getStoredFileHandle();
       if (driveFileHandle) {
         try {
@@ -1289,12 +1289,12 @@
               }));
               saveProjectState();
               draw();
-              console.log('✅ Loaded layout from G:\\My Drive\\ESP32\\kvm_config.json on startup');
+              console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} on startup`);
               return;
             }
           }
         } catch (err) {
-          console.warn('Auto-load from G:\\My Drive\\ESP32\\ failed on startup:', err);
+          console.warn(`Auto-load from ${TARGET_DRIVE_FOLDER_HINT} failed on startup:`, err);
         }
       }
 
@@ -1317,14 +1317,13 @@
                 isLocked: !!item.is_detected
               }));
               saveProjectState();
-              draw();
             }
           }
         } catch (e) {}
       }
+
+      draw();
     }
-    resizeCanvas();
-    draw();
     initDriveSyncOnStartup();
   </script>
 </body>

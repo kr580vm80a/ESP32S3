@@ -443,10 +443,8 @@
       if (!container) return;
       container.innerHTML = PRESET_RESOLUTIONS.map(([w, h, name]) => {
         const safeName = name.replace(/'/g, "\\'");
-        const isMac = name.toLowerCase().includes('macbook');
-        const channel = isMac ? 'BLE_MAC' : 'USB_PC';
         return `
-          <div class="preset-item" onclick="addScreen('${safeName}', ${w}, ${h}, '${channel}')">
+          <div class="preset-item" onclick="addScreen('${safeName}', ${w}, ${h})">
             <span class="preset-res">${w} × ${h}</span>
             <span class="preset-name">${name}</span>
           </div>
@@ -518,7 +516,6 @@
     // Multi-Monitor Detection using strict preset snapping
     document.getElementById('btnAutoDetect').addEventListener('click', async () => {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const defaultChannel = isMac ? 'BLE_MAC' : 'USB_PC';
       const osLabel = isMac ? 'macOS 🍏' : 'Windows 🪟';
       const getDetailsFn = window.getScreenDetails || window.getScreenDetails;
 
@@ -588,7 +585,6 @@
               height: d.height,
               x: posX,
               y: posY,
-              channel: defaultChannel,
               color: COLOR_DETECTED,
               isDetected: true,
               isLocked: true
@@ -630,7 +626,6 @@
             height: preset.height,
             x: 60,
             y: 140,
-            channel: defaultChannel,
             color: COLOR_DETECTED,
             isDetected: true,
             isLocked: true
@@ -642,7 +637,6 @@
             height: 1080,
             x: 175,
             y: 20,
-            channel: defaultChannel,
             color: COLOR_DETECTED,
             isDetected: true,
             isLocked: true
@@ -661,7 +655,6 @@
           height: preset.height,
           x: 60,
           y: 120,
-          channel: defaultChannel,
           color: COLOR_DETECTED,
           isDetected: true,
           isLocked: true
@@ -672,7 +665,7 @@
       draw();
     });
 
-    function addScreen(name, width, height, channel) {
+    function addScreen(name, width, height) {
       const scale = 0.12;
 
       // Ensure preset standard resolution
@@ -699,7 +692,6 @@
         height: preset.height,
         x: initX,
         y: initY,
-        channel: channel,
         color: COLOR_MANUAL,
         isDetected: false,
         isLocked: false
@@ -856,7 +848,6 @@
           return {
             index: index + 1,
             name: s.name,
-            channel: s.channel,
             x_min: minX,
             x_max: maxX,
             height: s.height,

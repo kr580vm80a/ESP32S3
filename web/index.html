@@ -533,25 +533,13 @@
       localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
 
       // 2. Save to G:\My Drive\ESP32\kvm_config.json
-      if (!driveFileHandle && 'showSaveFilePicker' in window) {
-        try {
-          driveFileHandle = await window.showSaveFilePicker({
-            suggestedName: 'kvm_config.json',
-            types: [{ description: 'JSON Config File', accept: { 'application/json': ['.json'] } }]
-          });
-          if (driveFileHandle) {
-            await setStoredFileHandle(driveFileHandle);
-          }
-        } catch (e) {}
-      }
-
       if (driveFileHandle) {
         try {
           if (await verifyFilePermission(driveFileHandle, true)) {
             const writable = await driveFileHandle.createWritable();
             await writable.write(jsonText);
             await writable.close();
-            console.log('✅ Auto-saved config to ' + TARGET_DRIVE_FOLDER_HINT);
+            console.log('✅ Auto-saved config to Google Drive file: ' + driveFileHandle.name);
           }
         } catch (err) {
           console.warn('Google Drive file save failed:', err);
@@ -1206,9 +1194,31 @@
       draw();
     });
 
-    document.getElementById('btnSyncESP32').addEventListener('click', () => {
-      saveProjectState();
-      alert('Config saved successfully!');
+    document.getElementById('btnSyncESP32').addEventListener('click', async () => {
+      const jsonText = document.getElementById('jsonOutput').textContent;
+      
+      // If G:\My Drive\ESP32\kvm_config.json is not linked yet, open native save dialog
+      if (!driveFileHandle && 'showSaveFilePicker' in window) {
+        try {
+          driveFileHandle = await window.showSaveFilePicker({
+            suggestedName: 'kvm_config.json',
+            types: [{ description: 'JSON Config File', accept: { 'application/json': ['.json'] } }]
+          });
+          if (driveFileHandle) {
+            await setStoredFileHandle(driveFileHandle);
+          }
+        } catch (err) {
+          console.warn('Save file picker canceled or error:', err);
+        }
+      }
+
+      await saveESP32Config(jsonText);
+
+      if (driveFileHandle) {
+        alert(`✅ Configuration saved to ${driveFileHandle.name} in G:\\My Drive\\ESP32\\!\n\n(It is now synced and will reload automatically on all your computers)`);
+      } else {
+        alert('Config saved to local browser storage.');
+      }
     });
 
     document.getElementById('btnConnectUSB').addEventListener('click', async () => {

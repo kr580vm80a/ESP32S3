@@ -553,6 +553,18 @@
             // Snap dimensions strictly to official standard presets (Prevents weird 1200 or 1536 values)
             const preset = getClosestPresetResolution(s.width, s.height, ratio);
 
+            let labelName = s.label ? s.label.trim() : '';
+            if (!labelName) {
+              if (s.isInternal) {
+                labelName = isMac ? 'MacBook Display' : 'Lenovo Laptop';
+              } else {
+                labelName = `Display ${idx + 1}`;
+              }
+            }
+            if (s.isPrimary && !labelName.includes('Primary')) {
+              labelName += ' (Primary)';
+            }
+
             return {
               original: s,
               index: idx,
@@ -561,7 +573,7 @@
               width: preset.width,
               height: preset.height,
               ratio: ratio,
-              label: s.label ? s.label : `Display ${idx + 1}${s.isPrimary ? ' (Primary)' : ''}`
+              label: labelName
             };
           });
 

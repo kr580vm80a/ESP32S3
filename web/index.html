@@ -1296,6 +1296,8 @@
       resizeCanvas();
 
       driveFileHandle = await getStoredFileHandle();
+      console.log('driveFileHandle type:', typeof driveFileHandle);
+      console.log('driveFileHandle value:', driveFileHandle);
       if (driveFileHandle) {
         try {
           if (await verifyFilePermission(driveFileHandle, false)) {

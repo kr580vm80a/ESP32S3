@@ -367,9 +367,14 @@
           <div class="json-output" id="jsonOutput">{}</div>
         </div>
 
-        <button class="btn" id="btnSyncESP32" style="margin-top: 16px;">
-          <span>💾 Save to ESP32 Flash</span>
-        </button>
+        <div style="display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap;">
+          <button class="btn" id="btnSyncESP32" style="flex: 1; min-width: 160px;">
+            <span>💾 Save Config</span>
+          </button>
+          <button class="btn btn-secondary" id="btnLoadDrive" style="flex: 1; min-width: 160px;">
+            <span>🔄 Load Config</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1215,9 +1220,51 @@
       await saveESP32Config(jsonText);
 
       if (driveFileHandle) {
-        alert(`✅ Configuration saved to ${driveFileHandle.name} in G:\\My Drive\\ESP32\\!\n\n(It is now synced and will reload automatically on all your computers)`);
+        alert(`✅ Configuration saved to ${driveFileHandle.name} in G:\\My Drive\\ESP32\\!\n\n(Click 🔄 Load Config on your other computer to sync)`);
       } else {
         alert('Config saved to local browser storage.');
+      }
+    });
+
+    document.getElementById('btnLoadDrive').addEventListener('click', async () => {
+      if ('showOpenFilePicker' in window) {
+        try {
+          const [handle] = await window.showOpenFilePicker({
+            types: [{ description: 'JSON Config File', accept: { 'application/json': ['.json'] } }]
+          });
+          if (handle) {
+            driveFileHandle = handle;
+            await setStoredFileHandle(driveFileHandle);
+            const file = await driveFileHandle.getFile();
+            const text = await file.text();
+            const parsed = JSON.parse(text);
+            if (parsed && Array.isArray(parsed.layout)) {
+              screens = parsed.layout.map((item, idx) => ({
+                id: Date.now() + idx,
+                name: item.name,
+                width: (item.x_max - item.x_min),
+                height: item.height || 1080,
+                x: 60 + (idx * 140),
+                y: 120,
+                color: item.is_detected ? COLOR_DETECTED : COLOR_MANUAL,
+                isDetected: !!item.is_detected,
+                isLocked: !!item.is_detected
+              }));
+              saveProjectState();
+              draw();
+              alert(`✅ Successfully loaded layout from ${handle.name} in G:\\My Drive\\ESP32\\!`);
+            } else if (Array.isArray(parsed)) {
+              screens = parsed;
+              saveProjectState();
+              draw();
+              alert(`✅ Successfully loaded layout from ${handle.name}!`);
+            }
+          }
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            alert('File loading error: ' + err.message);
+          }
+        }
       }
     });
 

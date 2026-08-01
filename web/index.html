@@ -367,14 +367,9 @@
           <div class="json-output" id="jsonOutput">{}</div>
         </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap;">
-          <button class="btn" id="btnSyncESP32" style="flex: 1; min-width: 180px;">
-            <span>💾 Save to ESP32 Flash</span>
-          </button>
-          <button class="btn btn-secondary" id="btnLinkDrive" style="flex: 1; min-width: 220px;">
-            <span id="driveBtnText">📂 Link Drive (G:\My Drive\ESP32\)</span>
-          </button>
-        </div>
+        <button class="btn" id="btnSyncESP32" style="margin-top: 16px;">
+          <span>💾 Save to ESP32 Flash</span>
+        </button>
       </div>
     </div>
   </div>
@@ -528,6 +523,8 @@
       return false;
     }
 
+    const TARGET_DRIVE_FOLDER_HINT = 'G:\\My Drive\\ESP32\\kvm_config.json';
+
     // --- Modular ESP32 Storage Function (Reusable for ESP32 hardware Flash/Serial sync) ---
     async function saveESP32Config(configData) {
       const jsonText = typeof configData === 'string' ? configData : JSON.stringify(configData, null, 2);
@@ -535,17 +532,29 @@
       // 1. Save to LocalStorage (browser cache)
       localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
 
-      // 2. Save to Linked Drive File (G:\My Drive\ESP32\kvm_config.json)
+      // 2. Save to G:\My Drive\ESP32\kvm_config.json
+      if (!driveFileHandle && 'showSaveFilePicker' in window) {
+        try {
+          driveFileHandle = await window.showSaveFilePicker({
+            suggestedName: 'kvm_config.json',
+            types: [{ description: 'JSON Config File', accept: { 'application/json': ['.json'] } }]
+          });
+          if (driveFileHandle) {
+            await setStoredFileHandle(driveFileHandle);
+          }
+        } catch (e) {}
+      }
+
       if (driveFileHandle) {
         try {
           if (await verifyFilePermission(driveFileHandle, true)) {
             const writable = await driveFileHandle.createWritable();
             await writable.write(jsonText);
             await writable.close();
-            console.log('✅ Auto-saved config to G:\\My Drive\\ESP32\\kvm_config.json');
+            console.log('✅ Auto-saved config to ' + TARGET_DRIVE_FOLDER_HINT);
           }
         } catch (err) {
-          console.warn('Google Drive file auto-save failed:', err);
+          console.warn('Google Drive file save failed:', err);
         }
       }
 
@@ -1241,45 +1250,9 @@
       }
     }
 
-    document.getElementById('btnLinkDrive').addEventListener('click', async () => {
-      if ('showSaveFilePicker' in window) {
-        try {
-          driveFileHandle = await window.showSaveFilePicker({
-            suggestedName: 'kvm_config.json',
-            types: [{
-              description: 'JSON Config File',
-              accept: { 'application/json': ['.json'] }
-            }]
-          });
-          await setStoredFileHandle(driveFileHandle);
-          updateDriveBtnStatus(driveFileHandle.name);
-          
-          const currentConfig = document.getElementById('jsonOutput').textContent;
-          if (currentConfig && currentConfig !== '{}') {
-            await saveESP32Config(currentConfig);
-          }
-          alert(`✅ Successfully linked file: ${driveFileHandle.name}\n\nAll layout changes will now automatically sync to G:\\My Drive\\ESP32\\ and reload on your computers!`);
-        } catch (err) {
-          if (err.name !== 'AbortError') {
-            alert('File linking error: ' + err.message);
-          }
-        }
-      } else {
-        alert('File System Access API is not supported in this browser. Please use Chrome or Edge.');
-      }
-    });
-
-    function updateDriveBtnStatus(filename) {
-      const btnText = document.getElementById('driveBtnText');
-      if (btnText) {
-        btnText.textContent = `🟢 Linked: ${filename}`;
-      }
-    }
-
     async function initDriveSyncOnStartup() {
       driveFileHandle = await getStoredFileHandle();
       if (driveFileHandle) {
-        updateDriveBtnStatus(driveFileHandle.name);
         try {
           if (await verifyFilePermission(driveFileHandle, false)) {
             const file = await driveFileHandle.getFile();
@@ -1299,11 +1272,11 @@
               }));
               saveProjectState();
               draw();
-              console.log('✅ Loaded layout from G:\\My Drive\\ESP32\\ on startup');
+              console.log('✅ Loaded layout from G:\\My Drive\\ESP32\\kvm_config.json on startup');
             }
           }
         } catch (err) {
-          console.warn('Auto-load from linked Drive file failed on startup:', err);
+          console.warn('Auto-load from G:\\My Drive\\ESP32\\ failed on startup:', err);
         }
       }
     }

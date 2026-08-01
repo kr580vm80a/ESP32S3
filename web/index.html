@@ -793,11 +793,12 @@
         ctx.font = '400 11px JetBrains Mono';
         ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
 
-        // Channel & Group Lock Tag
-        ctx.fillStyle = color;
-        ctx.font = '600 10px Outfit';
-        const tagText = isDetected ? `🔗 ${s.channel} (Grouped)` : `Channel: ${s.channel}`;
-        ctx.fillText(tagText, s.x + 14, s.y + sh - 14);
+        // Group Lock Tag for Auto-Detected Screens (Without channel text)
+        if (isDetected) {
+          ctx.fillStyle = color;
+          ctx.font = '600 10px Outfit';
+          ctx.fillText('🔗 Grouped', s.x + 14, s.y + sh - 14);
+        }
 
         // --- Red Delete Button (Top Right Corner) ---
         const btnRadius = 11;

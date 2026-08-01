@@ -367,9 +367,14 @@
           <div class="json-output" id="jsonOutput">{}</div>
         </div>
 
-        <button class="btn" id="btnSyncESP32" style="margin-top: 16px;">
-          <span>💾 Save to ESP32 Flash</span>
-        </button>
+        <div style="display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap;">
+          <button class="btn" id="btnSyncESP32" style="flex: 1; min-width: 180px;">
+            <span>💾 Save to ESP32 Flash</span>
+          </button>
+          <button class="btn btn-secondary" id="btnLinkDrive" style="flex: 1; min-width: 220px;">
+            <span id="driveBtnText">📂 Link Drive (G:\My Drive\ESP32\)</span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -477,6 +482,96 @@
       return closest;
     }
 
+    // --- IndexedDB File Handle Storage Helpers ---
+    const DB_NAME = 'ESP32KVM_Storage';
+    const DB_STORE = 'handles';
+    let driveFileHandle = null;
+
+    function openDB() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function getStoredFileHandle() {
+      try {
+        const db = await openDB();
+        return new Promise((resolve) => {
+          const tx = db.transaction(DB_STORE, 'readonly');
+          const req = tx.objectStore(DB_STORE).get('drive_handle');
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        });
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function setStoredFileHandle(handle) {
+      try {
+        const db = await openDB();
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).put(handle, 'drive_handle');
+      } catch (e) {}
+    }
+
+    async function verifyFilePermission(fileHandle, readWrite = false) {
+      const options = {};
+      if (readWrite) options.mode = 'readwrite';
+      try {
+        if ((await fileHandle.queryPermission(options)) === 'granted') return true;
+        if ((await fileHandle.requestPermission(options)) === 'granted') return true;
+      } catch (e) {}
+      return false;
+    }
+
+    // --- Modular ESP32 Storage Function (Reusable for ESP32 hardware Flash/Serial sync) ---
+    async function saveESP32Config(configData) {
+      const jsonText = typeof configData === 'string' ? configData : JSON.stringify(configData, null, 2);
+
+      // 1. Save to LocalStorage (browser cache)
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
+
+      // 2. Save to Linked Drive File (G:\My Drive\ESP32\kvm_config.json)
+      if (driveFileHandle) {
+        try {
+          if (await verifyFilePermission(driveFileHandle, true)) {
+            const writable = await driveFileHandle.createWritable();
+            await writable.write(jsonText);
+            await writable.close();
+            console.log('✅ Auto-saved config to G:\\My Drive\\ESP32\\kvm_config.json');
+          }
+        } catch (err) {
+          console.warn('Google Drive file auto-save failed:', err);
+        }
+      }
+
+      // 3. ESP32 Hardware Flash Sync (Ready for AliExpress board arrival)
+      if (window.esp32SerialPort && window.esp32SerialPort.writable) {
+        try {
+          const writer = window.esp32SerialPort.writable.getWriter();
+          await writer.write(new TextEncoder().encode(`SAVE_CONFIG ${jsonText}\n`));
+          writer.releaseLock();
+          console.log('⚡ Config synced to ESP32 Flash memory!');
+        } catch (e) {
+          console.warn('ESP32 Serial Flash sync failed:', e);
+        }
+      }
+    }
+
+    function saveProjectState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
+      if (driveFileHandle) {
+        const jsonText = document.getElementById('jsonOutput').textContent;
+        if (jsonText && jsonText !== '{}') {
+          saveESP32Config(jsonText);
+        }
+      }
+    }
+
     function loadSavedProjectState() {
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
@@ -488,10 +583,6 @@
         }
       }
       return [];
-    }
-
-    function saveProjectState() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
     }
 
     let screens = loadSavedProjectState();
@@ -1149,6 +1240,74 @@
         label.textContent = 'ESP32 Disconnected';
       }
     }
+
+    document.getElementById('btnLinkDrive').addEventListener('click', async () => {
+      if ('showSaveFilePicker' in window) {
+        try {
+          driveFileHandle = await window.showSaveFilePicker({
+            suggestedName: 'kvm_config.json',
+            types: [{
+              description: 'JSON Config File',
+              accept: { 'application/json': ['.json'] }
+            }]
+          });
+          await setStoredFileHandle(driveFileHandle);
+          updateDriveBtnStatus(driveFileHandle.name);
+          
+          const currentConfig = document.getElementById('jsonOutput').textContent;
+          if (currentConfig && currentConfig !== '{}') {
+            await saveESP32Config(currentConfig);
+          }
+          alert(`✅ Successfully linked file: ${driveFileHandle.name}\n\nAll layout changes will now automatically sync to G:\\My Drive\\ESP32\\ and reload on your computers!`);
+        } catch (err) {
+          if (err.name !== 'AbortError') {
+            alert('File linking error: ' + err.message);
+          }
+        }
+      } else {
+        alert('File System Access API is not supported in this browser. Please use Chrome or Edge.');
+      }
+    });
+
+    function updateDriveBtnStatus(filename) {
+      const btnText = document.getElementById('driveBtnText');
+      if (btnText) {
+        btnText.textContent = `🟢 Linked: ${filename}`;
+      }
+    }
+
+    async function initDriveSyncOnStartup() {
+      driveFileHandle = await getStoredFileHandle();
+      if (driveFileHandle) {
+        updateDriveBtnStatus(driveFileHandle.name);
+        try {
+          if (await verifyFilePermission(driveFileHandle, false)) {
+            const file = await driveFileHandle.getFile();
+            const text = await file.text();
+            const parsed = JSON.parse(text);
+            if (parsed && Array.isArray(parsed.layout)) {
+              screens = parsed.layout.map((item, idx) => ({
+                id: Date.now() + idx,
+                name: item.name,
+                width: (item.x_max - item.x_min),
+                height: item.height || 1080,
+                x: 60 + (idx * 140),
+                y: 120,
+                color: item.is_detected ? COLOR_DETECTED : COLOR_MANUAL,
+                isDetected: !!item.is_detected,
+                isLocked: !!item.is_detected
+              }));
+              saveProjectState();
+              draw();
+              console.log('✅ Loaded layout from G:\\My Drive\\ESP32\\ on startup');
+            }
+          }
+        } catch (err) {
+          console.warn('Auto-load from linked Drive file failed on startup:', err);
+        }
+      }
+    }
+    initDriveSyncOnStartup();
 
     setTimeout(() => {
       resizeCanvas();

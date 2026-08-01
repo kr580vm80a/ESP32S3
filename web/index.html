@@ -1308,8 +1308,8 @@
         }
       }
 
-      // If screens is empty, attempt loading default config.json from repo
-      if (screens.length === 0) {
+      // If screens is empty, attempt loading default config.json from repo (only on http/https web servers)
+      if (screens.length === 0 && window.location.protocol !== 'file:') {
         try {
           const res = await fetch('./config.json');
           if (res.ok) {

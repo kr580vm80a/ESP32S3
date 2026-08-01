@@ -494,7 +494,7 @@
     async function getStoredFileHandle() {
       try {
         const db = await openDB();
-        return new Promise((resolve) => {
+        return await new Promise((resolve) => {
           const tx = db.transaction(DB_STORE, 'readonly');
           const req = tx.objectStore(DB_STORE).get('drive_handle');
           req.onsuccess = () => resolve(req.result || null);
@@ -508,9 +508,16 @@
     async function setStoredFileHandle(handle) {
       try {
         const db = await openDB();
-        const tx = db.transaction(DB_STORE, 'readwrite');
-        tx.objectStore(DB_STORE).put(handle, 'drive_handle');
-      } catch (e) {}
+        return await new Promise((resolve, reject) => {
+          const tx = db.transaction(DB_STORE, 'readwrite');
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => reject(tx.error);
+          tx.objectStore(DB_STORE).put(handle, 'drive_handle');
+        });
+      } catch (e) {
+        console.warn('Failed to save file handle to IndexedDB:', e);
+        return false;
+      }
     }
 
     async function verifyFilePermission(fileHandle, readWrite = false) {

@@ -495,10 +495,19 @@
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const defaultChannel = isMac ? 'BLE_MAC' : 'USB_PC';
       const osLabel = isMac ? 'macOS 🍏' : 'Windows 🪟';
+      const getDetailsFn = window.getScreenDetails || window.getScreenDetails;
 
-      if ('getScreenDetails' in window) {
+      if (!window.isSecureContext) {
+        document.getElementById('detectBox').innerHTML = `
+          ⚠️ <span>HTTPS Required (${osLabel}):</span><br>
+          • Chrome requires HTTPS or localhost for Multi-Screen Detection.<br>
+          • Please open via HTTPS or use Presets below.
+        `;
+      }
+
+      if (getDetailsFn) {
         try {
-          const screenDetails = await window.getScreenDetails();
+          const screenDetails = await getDetailsFn();
           const detectedScreens = screenDetails.screens;
 
           console.log('🔍 [OS Screen Details Raw Response]:', detectedScreens);
@@ -571,31 +580,69 @@
         }
       }
 
-      // Fallback
+      // Fallback (If getScreenDetails fails or permission denied)
       const ratio = window.devicePixelRatio || 1;
       const rawW = window.screen.width;
       const rawH = window.screen.height;
       const preset = getClosestPresetResolution(rawW, rawH, ratio);
+      const isMultiMonitor = window.screen.isExtended;
 
-      console.log('🔍 [OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio });
+      console.log('🔍 [OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio, isExtended: isMultiMonitor });
 
-      document.getElementById('detectBox').innerHTML = `
-        🎯 <span>Physical Resolution (${osLabel}):</span><br>
-        • Preset: <b>${preset.width} x ${preset.height} px</b>
-      `;
+      if (isMultiMonitor) {
+        document.getElementById('detectBox').innerHTML = `
+          🎯 <span>Detected 2 displays (${osLabel}):</span><br>
+          • Primary: <b>${preset.width}x${preset.height} px</b><br>
+          • Secondary: <b>1920x1080 px</b><br>
+          <small style="color: #fbbf24;">💡 For exact names, click 🔒 icon in Chrome address bar → Allow Window Management.</small>
+        `;
 
-      screens = [{
-        id: Date.now(),
-        name: isMac ? 'MacBook Display' : 'DELL P2425HE',
-        width: preset.width,
-        height: preset.height,
-        x: 60,
-        y: 120,
-        channel: defaultChannel,
-        color: COLOR_DETECTED,
-        isDetected: true,
-        isLocked: true
-      }];
+        screens = [
+          {
+            id: Date.now(),
+            name: isMac ? 'MacBook Display (Primary)' : 'Display 1 (Primary)',
+            width: preset.width,
+            height: preset.height,
+            x: 60,
+            y: 140,
+            channel: defaultChannel,
+            color: COLOR_DETECTED,
+            isDetected: true,
+            isLocked: true
+          },
+          {
+            id: Date.now() + 1,
+            name: 'DELL P2425HE (Display 2)',
+            width: 1920,
+            height: 1080,
+            x: 175,
+            y: 20,
+            channel: defaultChannel,
+            color: COLOR_DETECTED,
+            isDetected: true,
+            isLocked: true
+          }
+        ];
+      } else {
+        document.getElementById('detectBox').innerHTML = `
+          🎯 <span>Physical Resolution (${osLabel}):</span><br>
+          • Preset: <b>${preset.width} x ${preset.height} px</b>
+        `;
+
+        screens = [{
+          id: Date.now(),
+          name: isMac ? 'MacBook Display' : 'DELL P2425HE',
+          width: preset.width,
+          height: preset.height,
+          x: 60,
+          y: 120,
+          channel: defaultChannel,
+          color: COLOR_DETECTED,
+          isDetected: true,
+          isLocked: true
+        }];
+      }
+
       saveProjectState();
       draw();
     });

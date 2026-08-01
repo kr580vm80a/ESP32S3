@@ -824,6 +824,11 @@
     }
 
     function draw() {
+      if (!canvas.width || canvas.width === 0 || !canvas.height || canvas.height === 0) {
+        canvas.width = canvas.parentElement ? canvas.parentElement.clientWidth : 800;
+        canvas.height = canvas.parentElement ? canvas.parentElement.clientHeight : 500;
+      }
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       // Draw Grid Background
@@ -868,10 +873,14 @@
         const isDetected = s.isDetected || s.isLocked;
         const color = isDetected ? COLOR_DETECTED : (s.color || COLOR_MANUAL);
 
-        if (s.x < 0) s.x = 0;
-        if (s.x + sw > canvas.width) s.x = Math.max(0, canvas.width - sw);
-        if (s.y < 0) s.y = 0;
-        if (s.y + sh > canvas.height) s.y = Math.max(0, canvas.height - sh);
+        if (canvas.width > 100) {
+          if (s.x < 0) s.x = 0;
+          if (s.x + sw > canvas.width) s.x = Math.max(0, canvas.width - sw);
+        }
+        if (canvas.height > 100) {
+          if (s.y < 0) s.y = 0;
+          if (s.y + sh > canvas.height) s.y = Math.max(0, canvas.height - sh);
+        }
 
         // Shadow & Glow
         ctx.shadowColor = color;
@@ -1314,11 +1323,9 @@
         } catch (e) {}
       }
     }
+    resizeCanvas();
+    draw();
     initDriveSyncOnStartup();
-
-    setTimeout(() => {
-      resizeCanvas();
-    }, 100);
   </script>
 </body>
 </html>

@@ -367,21 +367,9 @@
           <div class="json-output" id="jsonOutput">{}</div>
         </div>
 
-        <div style="display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap;">
-          <button class="btn" id="btnSyncESP32" style="flex: 1; min-width: 160px;">
-            <span>💾 Save to ESP32 Flash</span>
-          </button>
-          <button class="btn btn-secondary" id="btnShareLink" style="padding: 10px 14px;">
-            <span>🔗 Share Link</span>
-          </button>
-          <button class="btn btn-secondary" id="btnExportJSON" style="padding: 10px 14px;">
-            <span>📥 Export JSON</span>
-          </button>
-          <button class="btn btn-secondary" id="btnImportJSON" style="padding: 10px 14px;" onclick="document.getElementById('fileInputJSON').click()">
-            <span>📤 Import JSON</span>
-          </button>
-          <input type="file" id="fileInputJSON" accept=".json" style="display: none;">
-        </div>
+        <button class="btn" id="btnSyncESP32" style="margin-top: 16px;">
+          <span>💾 Save to ESP32 Flash</span>
+        </button>
       </div>
     </div>
   </div>
@@ -490,15 +478,6 @@
     }
 
     function loadSavedProjectState() {
-      if (location.hash && location.hash.includes('config=')) {
-        try {
-          const raw = location.hash.split('config=')[1];
-          const parsed = JSON.parse(decodeURIComponent(raw));
-          if (Array.isArray(parsed)) return parsed;
-        } catch (e) {
-          console.warn('Error parsing hash config:', e);
-        }
-      }
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) {
         try {
@@ -1130,72 +1109,6 @@
     document.getElementById('btnSyncESP32').addEventListener('click', () => {
       saveProjectState();
       alert('Config saved successfully!');
-    });
-
-    document.getElementById('btnShareLink').addEventListener('click', () => {
-      if (screens.length === 0) {
-        alert('Please add or detect at least one screen before sharing.');
-        return;
-      }
-      const hashConfig = encodeURIComponent(JSON.stringify(screens));
-      const shareUrl = `${location.origin}${location.pathname}#config=${hashConfig}`;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(shareUrl).then(() => {
-          alert('🔗 Shareable URL copied to clipboard!\n\nOpen this link on your Lenovo laptop or PC to load this exact screen layout.');
-        }).catch(() => {
-          prompt('Copy this URL to open on your other computer:', shareUrl);
-        });
-      } else {
-        prompt('Copy this URL to open on your other computer:', shareUrl);
-      }
-    });
-
-    document.getElementById('btnExportJSON').addEventListener('click', () => {
-      const jsonText = document.getElementById('jsonOutput').textContent;
-      const blob = new Blob([jsonText], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'esp32_kvm_layout.json';
-      a.click();
-      URL.revokeObjectURL(url);
-    });
-
-    document.getElementById('fileInputJSON').addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (evt) => {
-        try {
-          const parsed = JSON.parse(evt.target.result);
-          if (parsed && Array.isArray(parsed.layout)) {
-            screens = parsed.layout.map((item, idx) => ({
-              id: Date.now() + idx,
-              name: item.name,
-              width: (item.x_max - item.x_min),
-              height: item.height || 1080,
-              x: 60 + (idx * 120),
-              y: 120,
-              color: item.is_detected ? COLOR_DETECTED : COLOR_MANUAL,
-              isDetected: !!item.is_detected,
-              isLocked: !!item.is_detected
-            }));
-            saveProjectState();
-            draw();
-            alert('JSON config imported successfully!');
-          } else if (Array.isArray(parsed)) {
-            screens = parsed;
-            saveProjectState();
-            draw();
-            alert('JSON config imported successfully!');
-          } else {
-            alert('Invalid JSON layout format.');
-          }
-        } catch (err) {
-          alert('Error reading JSON file: ' + err.message);
-        }
-      };
-      reader.readAsText(file);
     });
 
     document.getElementById('btnConnectUSB').addEventListener('click', async () => {

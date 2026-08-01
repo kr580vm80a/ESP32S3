@@ -455,7 +455,7 @@
 
     // Find closest standard preset for any dimension (tests logical and DPR-scaled dimensions)
     function getClosestPresetResolution(w, h, ratio = 1) {
-      let closest = { width: PRESET_RESOLUTIONS[0][0], height: PRESET_RESOLUTIONS[0][1] };
+      let closest = { width: PRESET_RESOLUTIONS[0][0], height: PRESET_RESOLUTIONS[0][1], name: PRESET_RESOLUTIONS[0][2] };
       let minDiff = Infinity;
 
       const candidates = [
@@ -466,11 +466,11 @@
       }
 
       candidates.forEach(c => {
-        PRESET_RESOLUTIONS.forEach(([pw, ph]) => {
+        PRESET_RESOLUTIONS.forEach(([pw, ph, pname]) => {
           const diff = Math.hypot(pw - c.width, ph - c.height);
           if (diff < minDiff) {
             minDiff = diff;
-            closest = { width: pw, height: ph };
+            closest = { width: pw, height: ph, name: pname };
           }
         });
       });
@@ -995,6 +995,7 @@
 
         resizeScreen.width = snappedPreset.width;
         resizeScreen.height = snappedPreset.height;
+        resizeScreen.name = snappedPreset.name;
         draw();
         return;
       }

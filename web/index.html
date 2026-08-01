@@ -561,12 +561,6 @@
 
     function saveProjectState() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
-      if (driveFileHandle) {
-        const jsonText = document.getElementById('jsonOutput').textContent;
-        if (jsonText && jsonText !== '{}') {
-          saveESP32Config(jsonText);
-        }
-      }
     }
 
     function loadSavedProjectState() {
@@ -574,7 +568,9 @@
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          return parsed;
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
         } catch (e) {
           console.warn('Error parsing saved project config:', e);
         }
@@ -1270,13 +1266,13 @@
             const file = await driveFileHandle.getFile();
             const text = await file.text();
             const parsed = JSON.parse(text);
-            if (parsed && Array.isArray(parsed.layout)) {
+            if (parsed && Array.isArray(parsed.layout) && parsed.layout.length > 0) {
               screens = parsed.layout.map((item, idx) => ({
                 id: Date.now() + idx,
                 name: item.name,
                 width: (item.x_max - item.x_min),
                 height: item.height || 1080,
-                x: 60 + (idx * 140),
+                x: 60 + (idx * 240),
                 y: 120,
                 color: item.is_detected ? COLOR_DETECTED : COLOR_MANUAL,
                 isDetected: !!item.is_detected,
@@ -1285,11 +1281,37 @@
               saveProjectState();
               draw();
               console.log('✅ Loaded layout from G:\\My Drive\\ESP32\\kvm_config.json on startup');
+              return;
             }
           }
         } catch (err) {
           console.warn('Auto-load from G:\\My Drive\\ESP32\\ failed on startup:', err);
         }
+      }
+
+      // If screens is empty, attempt loading default config.json from repo
+      if (screens.length === 0) {
+        try {
+          const res = await fetch('./config.json');
+          if (res.ok) {
+            const parsed = await res.json();
+            if (parsed && Array.isArray(parsed.layout) && parsed.layout.length > 0) {
+              screens = parsed.layout.map((item, idx) => ({
+                id: Date.now() + idx,
+                name: item.name,
+                width: (item.x_max - item.x_min),
+                height: item.height || 1080,
+                x: 60 + (idx * 240),
+                y: 120,
+                color: item.is_detected ? COLOR_DETECTED : COLOR_MANUAL,
+                isDetected: !!item.is_detected,
+                isLocked: !!item.is_detected
+              }));
+              saveProjectState();
+              draw();
+            }
+          }
+        } catch (e) {}
       }
     }
     initDriveSyncOnStartup();

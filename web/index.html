@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 9;
+    const BUILD_VERSION = 10;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -768,7 +768,7 @@
           }
 
           const minLeft = Math.min(...items.map(d => d.left));
-          const minTop = Math.min(...items.map(d => d.top));
+          const maxBottom = Math.max(...items.map(d => d.bottom));
 
           // Remove ONLY existing screens for currentDeviceId (preserve screens from other computers & manual screens)
           screens = screens.filter(s => s.group !== currentDeviceId);
@@ -788,6 +788,9 @@
             const posX = groupCanvasOffsetX + (item.left - minLeft) * scale;
             const posY = groupCanvasOffsetY + (item.top - minTop) * scale;
 
+            const relX = item.left - minLeft;
+            const relY = maxBottom - item.bottom;
+
             screens.push({
               id: Date.now() + d.index,
               name: d.label,
@@ -795,6 +798,8 @@
               groupName: currentDeviceName,
               width: d.width,
               height: d.height,
+              layoutX: relX,
+              layoutY: relY,
               x: posX,
               y: posY,
               color: getGroupColor(currentDeviceId),
@@ -994,8 +999,8 @@
       const scale = 0.12;
 
       // Compute relative Cartesian bottom-left coordinates (0,0) baseline for labels
-      const minCanvasX = screens.length > 0 ? Math.min(...screens.map(s => s.x)) : 0;
-      const maxCanvasBottomY = screens.length > 0 ? Math.max(...screens.map(s => s.y + (s.height * scale))) : 0;
+      const minLayoutX = screens.length > 0 ? Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale))) : 0;
+      const minLayoutY = screens.length > 0 ? Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0)) : 0;
 
       // Draw Screens
       screens.forEach(s => {
@@ -1004,8 +1009,8 @@
         const isDetected = s.isDetected || s.isLocked;
         const color = getGroupColor(s.group);
 
-        const relX = Math.round((s.x - minCanvasX) / scale);
-        const relY = Math.round((maxCanvasBottomY - (s.y + sh)) / scale);
+        const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale)) - minLayoutX);
+        const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLayoutY);
 
         // Keep screen within canvas top-left margin without stacking monitors
         if (s.x < 10) s.x = 10;
@@ -1114,24 +1119,23 @@
         return;
       }
 
-      const sorted = [...screens].sort((a, b) => a.x - b.x || b.y - a.y);
       const scale = 0.12;
+      const sorted = [...screens].sort((a, b) => (a.layoutX !== undefined ? a.layoutX : a.x) - (b.layoutX !== undefined ? b.layoutX : b.x) || (b.layoutY !== undefined ? b.layoutY : b.y) - (a.layoutY !== undefined ? a.layoutY : a.y));
 
-      const minCanvasX = Math.min(...screens.map(s => s.x));
-      const maxCanvasBottomY = Math.max(...screens.map(s => s.y + (s.height * scale)));
+      const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale)));
+      const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
 
       const config = {
         device: "ESP32-KVM-Switch",
         total_screens: sorted.length,
         layout: sorted.map((s, index) => {
-          const sw = s.width * scale;
-          const sh = s.height * scale;
-          const relX = Math.round((s.x - minCanvasX) / scale);
-          const relY = Math.round((maxCanvasBottomY - (s.y + sh)) / scale);
           const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
           const groupVal = s.group || (isDetected ? currentDeviceId : 'manual');
           const groupNameVal = s.groupName || (isDetected ? currentDeviceName : 'Manual Preset');
           const isPrimaryVal = !!(s.isPrimary || (s.name && s.name.includes('Primary')));
+
+          const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale)) - minLayoutX);
+          const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLayoutY);
 
           return {
             index: index + 1,
@@ -1409,7 +1413,21 @@
 
     window.addEventListener('mouseup', () => {
       if (isDragging || isResizing) {
+        // Synchronize layoutX and layoutY from canvas coordinates after drag/resize
+        const scale = 0.12;
+        if (screens.length > 0) {
+          const minCanvasX = Math.min(...screens.map(s => s.x));
+          const maxCanvasBottomY = Math.max(...screens.map(s => s.y + (s.height * scale)));
+
+          screens.forEach(s => {
+            const sh = s.height * scale;
+            s.layoutX = Math.round((s.x - minCanvasX) / scale);
+            s.layoutY = Math.round((maxCanvasBottomY - (s.y + sh)) / scale);
+          });
+        }
+
         saveProjectState();
+        updateJSON();
       }
       isDragging = false;
       isResizing = false;
@@ -1564,6 +1582,8 @@
           groupName: groupName,
           width: item.width,
           height: item.height,
+          layoutX: item.x,
+          layoutY: item.y,
           x: posX,
           y: posY,
           color: getGroupColor(groupKey),

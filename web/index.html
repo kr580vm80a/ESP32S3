@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 5;
+    const BUILD_VERSION = 6;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1488,29 +1488,67 @@
     function parseLayoutToScreens(layoutArray) {
       const scale = 0.12;
       const baseCanvasX = 50;
-      
-      const maxY = Math.max(...layoutArray.map(item => (item.y || 0) + (item.height || 1080)));
+
+      // Smart Grid Snapping for imported JSON layout items (Fixes 1075->1080, 15->0, 1917->1920 on page reload)
+      const items = layoutArray.map(item => {
+        const w = item.width || ((item.x_max !== undefined && item.x_min !== undefined && item.x_max > item.x_min) ? (item.x_max - item.x_min) : 1920);
+        const h = item.height || 1080;
+        return {
+          ...item,
+          width: w,
+          height: h,
+          x: item.x !== undefined ? item.x : (item.x_min !== undefined ? item.x_min : 0),
+          y: item.y !== undefined ? item.y : 0
+        };
+      });
+
+      const SNAP_THRESHOLD = 45;
+
+      for (let pass = 0; pass < 2; pass++) {
+        for (let i = 0; i < items.length; i++) {
+          for (let j = 0; j < items.length; j++) {
+            if (i === j) continue;
+
+            // Snap Y relative coordinates (Bottom-Left Origin Y)
+            if (Math.abs(items[i].y - (items[j].y + items[j].height)) < SNAP_THRESHOLD) {
+              items[i].y = items[j].y + items[j].height;
+            } else if (Math.abs((items[i].y + items[i].height) - items[j].y) < SNAP_THRESHOLD) {
+              items[i].y = items[j].y - items[i].height;
+            } else if (Math.abs(items[i].y - items[j].y) < SNAP_THRESHOLD) {
+              items[i].y = items[j].y;
+            }
+
+            // Snap X relative coordinates
+            if (Math.abs(items[i].x - (items[j].x + items[j].width)) < SNAP_THRESHOLD) {
+              items[i].x = items[j].x + items[j].width;
+            } else if (Math.abs((items[i].x + items[i].width) - items[j].x) < SNAP_THRESHOLD) {
+              items[i].x = items[j].x - items[i].width;
+            } else if (Math.abs(items[i].x - items[j].x) < SNAP_THRESHOLD) {
+              items[i].x = items[j].x;
+            }
+          }
+        }
+      }
+
+      const minX = Math.min(...items.map(item => item.x));
+      const minY = Math.min(...items.map(item => item.y));
+
+      // Normalize baseline to 0,0
+      items.forEach(item => {
+        item.x -= minX;
+        item.y -= minY;
+      });
+
+      const maxY = Math.max(...items.map(item => item.y + item.height));
       const baseCanvasBottomY = 120 + Math.round(maxY * scale);
       let currentX = baseCanvasX;
 
-      return layoutArray.map((item, idx) => {
-        const w = item.width || ((item.x_max !== undefined && item.x_min !== undefined && item.x_max > item.x_min) ? (item.x_max - item.x_min) : 1920);
-        const h = item.height || 1080;
-        const sw = w * scale;
-        const sh = h * scale;
+      return items.map((item, idx) => {
+        const sw = item.width * scale;
+        const sh = item.height * scale;
 
-        let posX = currentX;
-        let posY = baseCanvasBottomY - sh;
-
-        if (item.x !== undefined) {
-          posX = baseCanvasX + Math.round(item.x * scale);
-        } else if (item.x_min !== undefined) {
-          posX = baseCanvasX + Math.round(item.x_min * scale);
-        }
-
-        if (item.y !== undefined) {
-          posY = baseCanvasBottomY - Math.round((item.y + h) * scale);
-        }
+        let posX = baseCanvasX + Math.round(item.x * scale);
+        let posY = baseCanvasBottomY - Math.round((item.y + item.height) * scale);
 
         currentX = Math.max(currentX + sw + 15, posX + sw + 15);
 
@@ -1524,8 +1562,8 @@
           name: item.name || 'FHD (16:9)',
           group: groupKey,
           groupName: groupName,
-          width: w,
-          height: h,
+          width: item.width,
+          height: item.height,
           x: posX,
           y: posY,
           color: getGroupColor(groupKey),

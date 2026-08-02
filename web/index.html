@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 11;
+    const BUILD_VERSION = 12;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -768,6 +768,7 @@
           }
 
           const minLeft = Math.min(...items.map(d => d.left));
+          const minTop = Math.min(...items.map(d => d.top));
           const maxBottom = Math.max(...items.map(d => d.bottom));
 
           // Remove ONLY existing screens for currentDeviceId (preserve screens from other computers & manual screens)

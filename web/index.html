@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 15;
+    const BUILD_VERSION = 16;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -403,33 +403,47 @@
       localStorage.setItem('kvm_device_id', currentDeviceId);
     }
 
-    function detectSmartComputerName() {
+    async function getDetectedOSName() {
       const platform = (navigator.platform || '').toUpperCase();
       const ua = (navigator.userAgent || '').toUpperCase();
+
+      let osType = 'Windows';
       if (platform.includes('MAC') || ua.includes('MACINTOSH')) {
-        return 'MacBook Pro';
+        osType = 'MacBook';
       } else if (platform.includes('WIN') || ua.includes('WINDOWS')) {
-        return 'Windows PC';
+        osType = 'Windows';
       } else if (platform.includes('LINUX') || ua.includes('LINUX')) {
-        return 'Linux Workstation';
+        osType = 'Linux';
       }
-      return 'Workstation';
+
+      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+        try {
+          const hints = await navigator.userAgentData.getHighEntropyValues(['platform', 'model']);
+          if (hints.model) {
+            if (hints.platform === 'Windows' || osType === 'Windows') {
+              return `Windows ${hints.model}`;
+            } else if (hints.platform === 'macOS' || osType === 'MacBook') {
+              return hints.model.includes('Mac') ? hints.model : `MacBook ${hints.model}`;
+            }
+            return `${osType} ${hints.model}`;
+          }
+        } catch (e) {}
+      }
+
+      if (osType === 'Windows') return 'Windows PC';
+      if (osType === 'MacBook') return 'MacOS';
+      return osType;
     }
 
-    let currentDeviceName = localStorage.getItem('kvm_device_name');
-    if (!currentDeviceName || currentDeviceName === 'PC-1') {
-      currentDeviceName = detectSmartComputerName();
-      localStorage.setItem('kvm_device_name', currentDeviceName);
-    }
+    let currentDeviceName = 'Windows PC';
 
-    document.addEventListener('DOMContentLoaded', () => {
+    document.addEventListener('DOMContentLoaded', async () => {
+      currentDeviceName = await getDetectedOSName();
       const pcNameInput = document.getElementById('pcNameInput');
       if (pcNameInput) {
         pcNameInput.value = currentDeviceName;
         pcNameInput.addEventListener('input', (e) => {
           currentDeviceName = e.target.value.trim() || 'Workstation';
-          localStorage.setItem('kvm_device_name', currentDeviceName);
-          localStorage.setItem('kvm_device_name_custom', 'true');
           screens.forEach(s => {
             if (s.group === currentDeviceId) {
               s.groupName = currentDeviceName;
@@ -438,27 +452,6 @@
           saveProjectState();
           draw();
         });
-      }
-
-      // Try High-Entropy Client Hints for OS model info (e.g. 81X8 / MacBook)
-      if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
-        navigator.userAgentData.getHighEntropyValues(['platform', 'model']).then(hints => {
-          if (!localStorage.getItem('kvm_device_name_custom')) {
-            let smartModelName = '';
-            if (hints.model) {
-              smartModelName = hints.model;
-            } else if (hints.platform === 'Windows') {
-              smartModelName = 'Windows PC';
-            } else if (hints.platform === 'macOS') {
-              smartModelName = 'MacBook Pro';
-            }
-            if (smartModelName && (!currentDeviceName || currentDeviceName === 'PC-1' || currentDeviceName === 'Windows PC')) {
-              currentDeviceName = smartModelName;
-              localStorage.setItem('kvm_device_name', currentDeviceName);
-              if (pcNameInput) pcNameInput.value = currentDeviceName;
-            }
-          }
-        }).catch(() => {});
       }
     });
 
@@ -688,6 +681,14 @@
 
     // Multi-Monitor Detection using strict preset snapping
     document.getElementById('btnAutoDetect').addEventListener('click', async () => {
+      const pcNameInput = document.getElementById('pcNameInput');
+      if (!pcNameInput || !pcNameInput.value.trim()) {
+        currentDeviceName = await getDetectedOSName();
+        if (pcNameInput) pcNameInput.value = currentDeviceName;
+      } else {
+        currentDeviceName = pcNameInput.value.trim();
+      }
+
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const osLabel = isMac ? 'macOS 🍏' : 'Windows 🪟';
       const getDetailsFn = window.getScreenDetails || window.getScreenDetails;

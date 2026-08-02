@@ -380,6 +380,7 @@
   </div>
 
   <script>
+    const BUILD_VERSION = 2;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1495,7 +1496,7 @@
           saveProjectState();
           draw();
           updateBadgeStatus('synced');
-          console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT}`);
+          console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} (Build v${BUILD_VERSION})`);
           return true;
         }
       } catch (err) {
@@ -1505,6 +1506,7 @@
     }
 
     async function initDriveSyncOnStartup() {
+      console.log(`🚀 [ESP32 KVM Switch] Web App Build v${BUILD_VERSION} initialized.`);
       resizeCanvas();
 
       driveFileHandle = await getStoredFileHandle();
@@ -1539,6 +1541,10 @@
         updateBadgeStatus('none');
       }
 
+      if (screens.length > 0) {
+        console.log(`✅ Loaded layout from LocalStorage (Build v${BUILD_VERSION})`);
+      }
+
       // If screens is empty, attempt loading default config.json from repo (only on http/https web servers)
       if (screens.length === 0 && window.location.protocol !== 'file:') {
         try {
@@ -1548,6 +1554,7 @@
             if (parsed && Array.isArray(parsed.layout) && parsed.layout.length > 0) {
               screens = parseLayoutToScreens(parsed.layout);
               saveProjectState();
+              console.log(`✅ Loaded layout from ./config.json (Build v${BUILD_VERSION})`);
             }
           }
         } catch (e) {}

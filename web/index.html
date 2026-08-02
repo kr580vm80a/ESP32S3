@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 12;
+    const BUILD_VERSION = 13;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1013,9 +1013,9 @@
         const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale)) - minLayoutX);
         const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLayoutY);
 
-        // Keep screen within canvas top-left margin without stacking monitors
-        if (s.x < 10) s.x = 10;
-        if (s.y < 20) s.y = 20;
+        // Screen padding check
+        const minMarginX = 10;
+        const minMarginY = 20;
 
         // Draw Computer Group Header Badge above top-left screen of group
         if (isDetected && s.group && topLeftPerGroup[s.group] === s) {
@@ -1351,8 +1351,8 @@
             const newGx = g.startX + targetDeltaX;
             const newGy = g.startY + targetDeltaY;
 
-            if (newGx < 0 || newGx + gsw > canvas.width) canMoveX = false;
-            if (newGy < 0 || newGy + gsh > canvas.height) canMoveY = false;
+            if (newGx < 10 || newGx + gsw > canvas.width - 10) canMoveX = false;
+            if (newGy < 20 || newGy + gsh > canvas.height - 10) canMoveY = false;
           });
 
           const deltaLayoutX = Math.round(targetDeltaX / scale);

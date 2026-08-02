@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 3;
+    const BUILD_VERSION = 4;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -937,9 +937,11 @@
         }
       });
 
+      const scale = 0.12;
+
       // Compute relative Cartesian bottom-left coordinates (0,0) baseline for labels
-      const minCanvasX = Math.min(...screens.map(s => s.x));
-      const maxCanvasBottomY = Math.max(...screens.map(s => s.y + (s.height * scale)));
+      const minCanvasX = screens.length > 0 ? Math.min(...screens.map(s => s.x)) : 0;
+      const maxCanvasBottomY = screens.length > 0 ? Math.max(...screens.map(s => s.y + (s.height * scale))) : 0;
 
       // Draw Screens
       screens.forEach(s => {

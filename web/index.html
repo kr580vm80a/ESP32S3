@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 4;
+    const BUILD_VERSION = 5;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -714,8 +714,61 @@
             };
           });
 
-          const minLeft = Math.min(...parsed.map(d => d.rawLeft));
-          const minTop = Math.min(...parsed.map(d => d.rawTop));
+          // Smart OS Display Edge Grid Snapping (Fixes 1075->1080, 15->0, 1917->1920 OS scaling jitter)
+          const items = parsed.map(d => ({
+            ...d,
+            left: d.rawLeft,
+            top: d.rawTop,
+            right: d.rawLeft + d.width,
+            bottom: d.rawTop + d.height
+          }));
+
+          const SNAP_THRESHOLD = 45; // Snap OS scaling jitter within 45px threshold
+
+          for (let pass = 0; pass < 2; pass++) {
+            for (let i = 0; i < items.length; i++) {
+              for (let j = 0; j < items.length; j++) {
+                if (i === j) continue;
+
+                // X-Axis Grid Alignment (Left to Right, Left to Left, Right to Right)
+                if (Math.abs(items[i].left - items[j].right) < SNAP_THRESHOLD) {
+                  const shift = items[j].right - items[i].left;
+                  items[i].left += shift;
+                  items[i].right += shift;
+                } else if (Math.abs(items[i].left - items[j].left) < SNAP_THRESHOLD) {
+                  const shift = items[j].left - items[i].left;
+                  items[i].left += shift;
+                  items[i].right += shift;
+                } else if (Math.abs(items[i].right - items[j].right) < SNAP_THRESHOLD) {
+                  const shift = items[j].right - items[i].right;
+                  items[i].left += shift;
+                  items[i].right += shift;
+                }
+
+                // Y-Axis Grid Alignment (Top to Bottom, Bottom to Bottom, Top to Top)
+                if (Math.abs(items[i].top - items[j].bottom) < SNAP_THRESHOLD) {
+                  const shift = items[j].bottom - items[i].top;
+                  items[i].top += shift;
+                  items[i].bottom += shift;
+                } else if (Math.abs(items[i].bottom - items[j].top) < SNAP_THRESHOLD) {
+                  const shift = items[j].top - items[i].bottom;
+                  items[i].top += shift;
+                  items[i].bottom += shift;
+                } else if (Math.abs(items[i].bottom - items[j].bottom) < SNAP_THRESHOLD) {
+                  const shift = items[j].bottom - items[i].bottom;
+                  items[i].top += shift;
+                  items[i].bottom += shift;
+                } else if (Math.abs(items[i].top - items[j].top) < SNAP_THRESHOLD) {
+                  const shift = items[j].top - items[i].top;
+                  items[i].top += shift;
+                  items[i].bottom += shift;
+                }
+              }
+            }
+          }
+
+          const minLeft = Math.min(...items.map(d => d.left));
+          const minTop = Math.min(...items.map(d => d.top));
 
           // Remove ONLY existing screens for currentDeviceId (preserve screens from other computers & manual screens)
           screens = screens.filter(s => s.group !== currentDeviceId);
@@ -728,11 +781,12 @@
           }
           const groupCanvasOffsetY = 120;
 
-          parsed.forEach((d) => {
+          parsed.forEach((d, idx) => {
+            const item = items[idx];
             infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
 
-            const posX = groupCanvasOffsetX + (d.rawLeft - minLeft) * scale;
-            const posY = groupCanvasOffsetY + (d.rawTop - minTop) * scale;
+            const posX = groupCanvasOffsetX + (item.left - minLeft) * scale;
+            const posY = groupCanvasOffsetY + (item.top - minTop) * scale;
 
             screens.push({
               id: Date.now() + d.index,

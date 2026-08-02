@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 2;
+    const BUILD_VERSION = 3;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -937,14 +937,19 @@
         }
       });
 
-      // Draw Screens
-      const scale = 0.12;
+      // Compute relative Cartesian bottom-left coordinates (0,0) baseline for labels
+      const minCanvasX = Math.min(...screens.map(s => s.x));
+      const maxCanvasBottomY = Math.max(...screens.map(s => s.y + (s.height * scale)));
 
+      // Draw Screens
       screens.forEach(s => {
         const sw = s.width * scale;
         const sh = s.height * scale;
         const isDetected = s.isDetected || s.isLocked;
         const color = getGroupColor(s.group);
+
+        const relX = Math.round((s.x - minCanvasX) / scale);
+        const relY = Math.round((maxCanvasBottomY - (s.y + sh)) / scale);
 
         // Keep screen within canvas top-left margin without stacking monitors
         if (s.x < 10) s.x = 10;
@@ -982,12 +987,17 @@
         ctx.font = '400 11px JetBrains Mono';
         ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
 
-        // Group Lock Tag for Auto-Detected Screens (Without channel text)
+        // Group Lock Tag for Auto-Detected Screens
         if (isDetected) {
           ctx.fillStyle = color;
           ctx.font = '600 10px Outfit';
-          ctx.fillText(`🔗 ${s.groupName || 'Grouped'}`, s.x + 14, s.y + sh - 14);
+          ctx.fillText(`🔗 ${s.groupName || 'Grouped'}`, s.x + 14, s.y + sh - 28);
         }
+
+        // Bottom-Left Relative Coordinate Label (x, y)
+        ctx.fillStyle = '#38bdf8';
+        ctx.font = '600 11px JetBrains Mono, monospace';
+        ctx.fillText(`📍 (${relX}, ${relY})`, s.x + 14, s.y + sh - 12);
 
         // --- Red Delete Button (Top Right Corner) ---
         // For auto-detected screens, show delete button ONLY on Primary screen of its group

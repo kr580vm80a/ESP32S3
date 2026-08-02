@@ -966,21 +966,32 @@
     }
 
     function updateJSON() {
+      if (!screens || screens.length === 0) {
+        document.getElementById('jsonOutput').textContent = JSON.stringify({
+          device: "ESP32-KVM-Switch",
+          total_screens: 0,
+          layout: []
+        }, null, 2);
+        return;
+      }
+
       const sorted = [...screens].sort((a, b) => a.x - b.x || a.y - b.y);
-      
-      let cumulativeX = 0;
+      const minCanvasX = Math.min(...screens.map(s => s.x));
+      const minCanvasY = Math.min(...screens.map(s => s.y));
+      const scale = 0.12;
+
       const config = {
         device: "ESP32-KVM-Switch",
         total_screens: sorted.length,
         layout: sorted.map((s, index) => {
-          const minX = cumulativeX;
-          const maxX = cumulativeX + s.width;
-          cumulativeX = maxX + 1;
+          const relX = Math.round((s.x - minCanvasX) / scale);
+          const relY = Math.round((s.y - minCanvasY) / scale);
           return {
             index: index + 1,
             name: s.name,
-            x_min: minX,
-            x_max: maxX,
+            x: relX,
+            y: relY,
+            width: s.width,
             height: s.height,
             is_detected: !!(s.isDetected || s.isLocked)
           };
@@ -1270,22 +1281,37 @@
 
     function parseLayoutToScreens(layoutArray) {
       const scale = 0.12;
-      let currentX = 50;
+      const baseCanvasX = 50;
+      const baseCanvasY = 120;
+      let currentX = baseCanvasX;
+
       return layoutArray.map((item, idx) => {
-        const w = (item.x_max !== undefined && item.x_min !== undefined && item.x_max > item.x_min) 
-                  ? (item.x_max - item.x_min) 
-                  : (item.width || 1920);
+        const w = item.width || ((item.x_max !== undefined && item.x_min !== undefined && item.x_max > item.x_min) ? (item.x_max - item.x_min) : 1920);
         const h = item.height || 1080;
-        const posX = currentX;
+
+        let posX = currentX;
+        let posY = baseCanvasY;
+
+        if (item.x !== undefined) {
+          posX = baseCanvasX + Math.round(item.x * scale);
+        } else if (item.x_min !== undefined) {
+          posX = baseCanvasX + Math.round(item.x_min * scale);
+        }
+
+        if (item.y !== undefined) {
+          posY = baseCanvasY + Math.round(item.y * scale);
+        }
+
         const sw = w * scale;
-        currentX += sw + 15;
+        currentX = Math.max(currentX + sw + 15, posX + sw + 15);
+
         return {
           id: Date.now() + idx,
           name: item.name || 'FHD (16:9)',
           width: w,
           height: h,
           x: posX,
-          y: 120,
+          y: posY,
           color: item.is_detected ? COLOR_DETECTED : COLOR_MANUAL,
           isDetected: !!item.is_detected,
           isLocked: !!item.is_detected

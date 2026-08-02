@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 6;
+    const BUILD_VERSION = 7;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1599,6 +1599,7 @@
           screens = parseLayoutToScreens(parsed.layout);
           saveProjectState();
           draw();
+          updateJSON();
           updateBadgeStatus('synced');
           console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} (Build v${BUILD_VERSION})`);
           return true;
@@ -1649,22 +1650,8 @@
         console.log(`✅ Loaded layout from LocalStorage (Build v${BUILD_VERSION})`);
       }
 
-      // If screens is empty, attempt loading default config.json from repo (only on http/https web servers)
-      if (screens.length === 0 && window.location.protocol !== 'file:') {
-        try {
-          const res = await fetch('./config.json');
-          if (res.ok) {
-            const parsed = await res.json();
-            if (parsed && Array.isArray(parsed.layout) && parsed.layout.length > 0) {
-              screens = parseLayoutToScreens(parsed.layout);
-              saveProjectState();
-              console.log(`✅ Loaded layout from ./config.json (Build v${BUILD_VERSION})`);
-            }
-          }
-        } catch (e) {}
-      }
-
       draw();
+      updateJSON();
     }
     initDriveSyncOnStartup();
   </script>

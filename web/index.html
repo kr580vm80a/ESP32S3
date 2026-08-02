@@ -331,6 +331,10 @@
       <!-- Multi-Screen Detection Card -->
       <div class="card">
         <div class="card-title">🔍 2. Auto Detect</div>
+        <div style="margin-bottom: 10px;">
+          <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Computer Label / Group Name:</label>
+          <input type="text" id="pcNameInput" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 6px 10px; font-size: 13px;" placeholder="e.g. Lenovo Laptop, PC 1">
+        </div>
         <div class="detected-info" id="detectBox">
           Detects connected displays from OS.
         </div>
@@ -377,8 +381,51 @@
 
   <script>
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
-    const COLOR_DETECTED = '#34d399'; // Single Emerald color for auto-detected screens
+    const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
+    const GROUP_COLORS = ['#34d399', '#38bdf8', '#a855f7', '#f43f5e', '#fbbf24', '#818cf8'];
+
+    function getGroupColor(groupId) {
+      if (!groupId || groupId === 'manual') return COLOR_MANUAL;
+      let hash = 0;
+      for (let i = 0; i < groupId.length; i++) {
+        hash = groupId.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      const index = Math.abs(hash) % GROUP_COLORS.length;
+      return GROUP_COLORS[index];
+    }
+
+    // Persistent Device Identification for Multi-Computer KVM Layout
+    let currentDeviceId = localStorage.getItem('kvm_device_id');
+    if (!currentDeviceId) {
+      currentDeviceId = 'PC_' + Math.random().toString(36).substring(2, 7).toUpperCase();
+      localStorage.setItem('kvm_device_id', currentDeviceId);
+    }
+
+    let currentDeviceName = localStorage.getItem('kvm_device_name');
+    if (!currentDeviceName) {
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      currentDeviceName = isMac ? 'MacBook' : 'PC-1';
+      localStorage.setItem('kvm_device_name', currentDeviceName);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const pcNameInput = document.getElementById('pcNameInput');
+      if (pcNameInput) {
+        pcNameInput.value = currentDeviceName;
+        pcNameInput.addEventListener('input', (e) => {
+          currentDeviceName = e.target.value.trim() || 'PC';
+          localStorage.setItem('kvm_device_name', currentDeviceName);
+          screens.forEach(s => {
+            if (s.group === currentDeviceId) {
+              s.groupName = currentDeviceName;
+            }
+          });
+          saveProjectState();
+          draw();
+        });
+      }
+    });
 
     // Official Standard Resolution Presets Matrix (Tuple Array [width, height, name], Sorted Descending by Width)
     const PRESET_RESOLUTIONS = [
@@ -635,13 +682,10 @@
             isInternal: s.isInternal
           })));
 
-          let infoHtml = `🎯 <span>Detected ${detectedScreens.length} display(s) (${osLabel}):</span><br>`;
-          screens = [];
+          let infoHtml = `🎯 <span>Detected ${detectedScreens.length} display(s) for ${currentDeviceName} (${osLabel}):</span><br>`;
 
           const parsed = detectedScreens.map((s, idx) => {
             const ratio = s.devicePixelRatio || window.devicePixelRatio || 1;
-
-            // Snap dimensions strictly to official standard presets (Prevents weird 1200 or 1536 values)
             const preset = getClosestPresetResolution(s.width, s.height, ratio);
 
             let labelName = s.label ? s.label.trim() : '';
@@ -671,24 +715,33 @@
           const minLeft = Math.min(...parsed.map(d => d.rawLeft));
           const minTop = Math.min(...parsed.map(d => d.rawTop));
 
+          // Remove ONLY existing screens for currentDeviceId (preserve screens from other computers & manual screens)
+          screens = screens.filter(s => s.group !== currentDeviceId);
+
           const scale = 0.12;
-          const canvasOffsetX = 60;
-          const canvasOffsetY = 20;
+          let groupCanvasOffsetX = 60;
+          if (screens.length > 0) {
+            const maxExistingX = Math.max(...screens.map(s => s.x + (s.width * scale)));
+            groupCanvasOffsetX = maxExistingX + 35;
+          }
+          const groupCanvasOffsetY = 120;
 
           parsed.forEach((d) => {
             infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
 
-            const posX = canvasOffsetX + (d.rawLeft - minLeft) * scale;
-            const posY = canvasOffsetY + (d.rawTop - minTop) * scale;
+            const posX = groupCanvasOffsetX + (d.rawLeft - minLeft) * scale;
+            const posY = groupCanvasOffsetY + (d.rawTop - minTop) * scale;
 
             screens.push({
               id: Date.now() + d.index,
               name: d.label,
+              group: currentDeviceId,
+              groupName: currentDeviceName,
               width: d.width,
               height: d.height,
               x: posX,
               y: posY,
-              color: COLOR_DETECTED,
+              color: getGroupColor(currentDeviceId),
               isDetected: true,
               isLocked: true
             });
@@ -807,8 +860,11 @@
       const target = screens.find(s => s.id === id);
       if (!target) return;
 
-      if (target.isDetected || target.isLocked) {
-        // Delete all screens in the auto-detected group
+      if ((target.isDetected || target.isLocked) && target.group) {
+        // Delete all screens in this specific computer group
+        screens = screens.filter(s => s.group !== target.group);
+      } else if (target.isDetected || target.isLocked) {
+        // Delete all un-grouped auto-detected screens
         screens = screens.filter(s => !(s.isDetected || s.isLocked));
       } else {
         // Delete only this specific manual screen
@@ -863,13 +919,16 @@
         ctx.setLineDash([]);
       });
 
-      // Find top-left screen of auto-detected group for single delete button
-      const detectedScreens = screens.filter(s => s.isDetected || s.isLocked);
-      let topLeftDetectedScreen = null;
-      if (detectedScreens.length > 0) {
-        const sortedDetected = [...detectedScreens].sort((a, b) => a.y - b.y || a.x - b.x);
-        topLeftDetectedScreen = sortedDetected[0];
-      }
+      // Find top-left screen for each computer group
+      const topLeftPerGroup = {};
+      const groups = [...new Set(screens.map(s => s.group).filter(Boolean))];
+      groups.forEach(grp => {
+        const grpScreens = screens.filter(s => s.group === grp && (s.isDetected || s.isLocked));
+        if (grpScreens.length > 0) {
+          const sortedGrp = [...grpScreens].sort((a, b) => a.y - b.y || a.x - b.x);
+          topLeftPerGroup[grp] = sortedGrp[0];
+        }
+      });
 
       // Draw Screens
       const scale = 0.12;
@@ -878,11 +937,18 @@
         const sw = s.width * scale;
         const sh = s.height * scale;
         const isDetected = s.isDetected || s.isLocked;
-        const color = isDetected ? COLOR_DETECTED : (s.color || COLOR_MANUAL);
+        const color = getGroupColor(s.group);
 
         // Keep screen within canvas top-left margin without stacking monitors
         if (s.x < 10) s.x = 10;
-        if (s.y < 10) s.y = 10;
+        if (s.y < 20) s.y = 20;
+
+        // Draw Computer Group Header Badge above top-left screen of group
+        if (isDetected && s.group && topLeftPerGroup[s.group] === s) {
+          ctx.fillStyle = color;
+          ctx.font = '600 12px Outfit, sans-serif';
+          ctx.fillText(`💻 ${s.groupName || s.group}`, s.x, s.y - 8);
+        }
 
         // Shadow & Glow
         ctx.shadowColor = color;
@@ -913,12 +979,12 @@
         if (isDetected) {
           ctx.fillStyle = color;
           ctx.font = '600 10px Outfit';
-          ctx.fillText('🔗 Grouped', s.x + 14, s.y + sh - 14);
+          ctx.fillText(`🔗 ${s.groupName || 'Grouped'}`, s.x + 14, s.y + sh - 14);
         }
 
         // --- Red Delete Button (Top Right Corner) ---
-        // For auto-detected screens, show delete button ONLY on top-left screen of the group
-        const showDeleteBtn = !isDetected || (s === topLeftDetectedScreen);
+        // For auto-detected screens, show delete button ONLY on top-left screen of its group
+        const showDeleteBtn = !isDetected || (s.group && topLeftPerGroup[s.group] === s);
 
         if (showDeleteBtn) {
           const btnRadius = 11;
@@ -992,6 +1058,8 @@
           return {
             index: index + 1,
             name: s.name,
+            group: s.group || "manual",
+            group_name: s.groupName || (s.group || "Manual Preset"),
             x: relX,
             y: relY,
             width: s.width,
@@ -1046,8 +1114,12 @@
           dragStartX = mx - s.x;
           dragStartY = my - s.y;
 
-          if (isDetected) {
-            // Group Drag: Record initial positions of all auto-detected screens
+          if (isDetected && s.group) {
+            // Group Drag: Record initial positions of screens in this specific computer group
+            initialDetectedGroup = screens
+              .filter(scr => scr.group === s.group)
+              .map(scr => ({ id: scr.id, screen: scr, startX: scr.x, startY: scr.y }));
+          } else if (isDetected) {
             initialDetectedGroup = screens
               .filter(scr => scr.isDetected || scr.isLocked)
               .map(scr => ({ id: scr.id, screen: scr, startX: scr.x, startY: scr.y }));

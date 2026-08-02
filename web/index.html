@@ -1061,16 +1061,22 @@
           const sh = s.height * scale;
           const relX = Math.round((s.x - minCanvasX) / scale);
           const relY = Math.round((maxCanvasBottomY - (s.y + sh)) / scale);
+          const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
+          const groupVal = s.group || (isDetected ? currentDeviceId : 'manual');
+          const groupNameVal = s.groupName || (isDetected ? currentDeviceName : 'Manual Preset');
+          const isPrimaryVal = !!(s.isPrimary || (s.name && s.name.includes('Primary')));
+
           return {
             index: index + 1,
             name: s.name,
-            group: s.group || "manual",
-            group_name: s.groupName || (s.group || "Manual Preset"),
+            group: groupVal,
+            group_name: groupNameVal,
             x: relX,
             y: relY,
             width: s.width,
             height: s.height,
-            is_detected: !!(s.isDetected || s.isLocked)
+            is_detected: isDetected,
+            is_primary: isPrimaryVal
           };
         })
       };
@@ -1389,16 +1395,24 @@
 
         currentX = Math.max(currentX + sw + 15, posX + sw + 15);
 
+        const isDetected = !!(item.is_detected || (item.group && item.group !== 'manual'));
+        const groupKey = item.group || (isDetected ? 'PC_DETECTED' : 'manual');
+        const groupName = item.group_name || item.group || (isDetected ? 'Detected PC' : 'Manual Preset');
+        const isPrimary = !!(item.is_primary || (item.name && item.name.includes('Primary')));
+
         return {
           id: Date.now() + idx,
           name: item.name || 'FHD (16:9)',
+          group: groupKey,
+          groupName: groupName,
           width: w,
           height: h,
           x: posX,
           y: posY,
-          color: item.is_detected ? COLOR_DETECTED : COLOR_MANUAL,
-          isDetected: !!item.is_detected,
-          isLocked: !!item.is_detected
+          color: getGroupColor(groupKey),
+          isDetected: isDetected,
+          isLocked: isDetected,
+          isPrimary: isPrimary
         };
       });
     }

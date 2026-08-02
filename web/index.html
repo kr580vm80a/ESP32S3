@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 7;
+    const BUILD_VERSION = 8;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1595,13 +1595,13 @@
         const file = await driveFileHandle.getFile();
         const text = await file.text();
         const parsed = JSON.parse(text);
-        if (parsed && Array.isArray(parsed.layout) && parsed.layout.length > 0) {
+        if (parsed && Array.isArray(parsed.layout)) {
           screens = parseLayoutToScreens(parsed.layout);
           saveProjectState();
           draw();
           updateJSON();
           updateBadgeStatus('synced');
-          console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} (Build v${BUILD_VERSION})`);
+          console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} (${screens.length} screens, Build v${BUILD_VERSION})`);
           return true;
         }
       } catch (err) {

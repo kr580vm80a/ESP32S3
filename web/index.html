@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 10;
+    const BUILD_VERSION = 11;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1201,11 +1201,25 @@
             // Group Drag: Record initial positions of screens in this specific computer group
             initialDetectedGroup = screens
               .filter(scr => scr.group === s.group)
-              .map(scr => ({ id: scr.id, screen: scr, startX: scr.x, startY: scr.y }));
+              .map(scr => ({
+                id: scr.id,
+                screen: scr,
+                startX: scr.x,
+                startY: scr.y,
+                startLayoutX: scr.layoutX !== undefined ? scr.layoutX : 0,
+                startLayoutY: scr.layoutY !== undefined ? scr.layoutY : 0
+              }));
           } else if (isDetected) {
             initialDetectedGroup = screens
               .filter(scr => scr.isDetected || scr.isLocked)
-              .map(scr => ({ id: scr.id, screen: scr, startX: scr.x, startY: scr.y }));
+              .map(scr => ({
+                id: scr.id,
+                screen: scr,
+                startX: scr.x,
+                startY: scr.y,
+                startLayoutX: scr.layoutX !== undefined ? scr.layoutX : 0,
+                startLayoutY: scr.layoutY !== undefined ? scr.layoutY : 0
+              }));
           } else {
             initialDetectedGroup = [];
           }
@@ -1340,9 +1354,18 @@
             if (newGy < 0 || newGy + gsh > canvas.height) canMoveY = false;
           });
 
+          const deltaLayoutX = Math.round(targetDeltaX / scale);
+          const deltaLayoutY = Math.round(-targetDeltaY / scale);
+
           initialDetectedGroup.forEach(g => {
-            if (canMoveX) g.screen.x = g.startX + targetDeltaX;
-            if (canMoveY) g.screen.y = g.startY + targetDeltaY;
+            if (canMoveX) {
+              g.screen.x = g.startX + targetDeltaX;
+              g.screen.layoutX = g.startLayoutX + deltaLayoutX;
+            }
+            if (canMoveY) {
+              g.screen.y = g.startY + targetDeltaY;
+              g.screen.layoutY = g.startLayoutY + deltaLayoutY;
+            }
           });
 
           draw();
@@ -1413,16 +1436,23 @@
 
     window.addEventListener('mouseup', () => {
       if (isDragging || isResizing) {
-        // Synchronize layoutX and layoutY from canvas coordinates after drag/resize
         const scale = 0.12;
         if (screens.length > 0) {
-          const minCanvasX = Math.min(...screens.map(s => s.x));
-          const maxCanvasBottomY = Math.max(...screens.map(s => s.y + (s.height * scale)));
+          // Normalize baseline (0,0) without floating point scale division quantization error
+          const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale)));
+          const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
 
           screens.forEach(s => {
-            const sh = s.height * scale;
-            s.layoutX = Math.round((s.x - minCanvasX) / scale);
-            s.layoutY = Math.round((maxCanvasBottomY - (s.y + sh)) / scale);
+            if (s.layoutX !== undefined) {
+              s.layoutX -= minLayoutX;
+            } else {
+              s.layoutX = Math.round((s.x - 50) / scale) - minLayoutX;
+            }
+            if (s.layoutY !== undefined) {
+              s.layoutY -= minLayoutY;
+            } else {
+              s.layoutY = 0;
+            }
           });
         }
 

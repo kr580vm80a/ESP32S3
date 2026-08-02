@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 14;
+    const BUILD_VERSION = 15;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -429,6 +429,7 @@
         pcNameInput.addEventListener('input', (e) => {
           currentDeviceName = e.target.value.trim() || 'Workstation';
           localStorage.setItem('kvm_device_name', currentDeviceName);
+          localStorage.setItem('kvm_device_name_custom', 'true');
           screens.forEach(s => {
             if (s.group === currentDeviceId) {
               s.groupName = currentDeviceName;
@@ -439,19 +440,20 @@
         });
       }
 
-      // Try High-Entropy Client Hints for deeper OS model info if available
+      // Try High-Entropy Client Hints for OS model info (e.g. 81X8 / MacBook)
       if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
         navigator.userAgentData.getHighEntropyValues(['platform', 'model']).then(hints => {
-          if (hints.platform === 'Windows') {
-            if (!localStorage.getItem('kvm_device_name_custom') && (!currentDeviceName || currentDeviceName === 'PC-1' || currentDeviceName === 'Windows PC')) {
-              currentDeviceName = 'Windows PC';
-              localStorage.setItem('kvm_device_name', currentDeviceName);
-              if (pcNameInput) pcNameInput.value = currentDeviceName;
+          if (!localStorage.getItem('kvm_device_name_custom')) {
+            let smartModelName = '';
+            if (hints.model) {
+              smartModelName = hints.model;
+            } else if (hints.platform === 'Windows') {
+              smartModelName = 'Windows PC';
+            } else if (hints.platform === 'macOS') {
+              smartModelName = 'MacBook Pro';
             }
-          } else if (hints.platform === 'macOS') {
-            const macModel = hints.model ? hints.model : 'MacBook Pro';
-            if (!localStorage.getItem('kvm_device_name_custom') && (!currentDeviceName || currentDeviceName === 'PC-1' || currentDeviceName === 'MacBook Pro')) {
-              currentDeviceName = macModel;
+            if (smartModelName && (!currentDeviceName || currentDeviceName === 'PC-1' || currentDeviceName === 'Windows PC')) {
+              currentDeviceName = smartModelName;
               localStorage.setItem('kvm_device_name', currentDeviceName);
               if (pcNameInput) pcNameInput.value = currentDeviceName;
             }

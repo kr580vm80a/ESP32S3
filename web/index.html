@@ -1198,11 +1198,59 @@
         const isDetected = selectedScreen.isDetected || selectedScreen.isLocked;
 
         if (isDetected && initialDetectedGroup.length > 0) {
-          // --- Grouped Drag for Auto-Detected Screens (Move together, cannot be unjoined/separated) ---
-          const targetX = mx - dragStartX;
-          const targetY = my - dragStartY;
-          const deltaX = targetX - selectedScreen.x;
-          const deltaY = targetY - selectedScreen.y;
+          // --- Grouped Drag for Auto-Detected Screens with Magnetic Alignment Guides ---
+          let deltaX = (mx - dragStartX) - selectedScreen.x;
+          let deltaY = (my - dragStartY) - selectedScreen.y;
+
+          snapGuides = [];
+          const SNAP_DIST = 16;
+          const groupScreenIds = new Set(initialDetectedGroup.map(g => g.id));
+          const externalScreens = screens.filter(s => !groupScreenIds.has(s.id));
+
+          // Check magnetic snapping for all screens in dragging group against external screens
+          if (externalScreens.length > 0) {
+            for (let g of initialDetectedGroup) {
+              const gx = g.screen.x + deltaX;
+              const gy = g.screen.y + deltaY;
+              const gsw = g.screen.width * scale;
+              const gsh = g.screen.height * scale;
+
+              for (let other of externalScreens) {
+                const ow = other.width * scale;
+                const oh = other.height * scale;
+
+                // Vertical snapping (X axis)
+                if (Math.abs(gx - (other.x + ow)) < SNAP_DIST) {
+                  deltaX = (other.x + ow + 1) - g.screen.x;
+                  snapGuides.push({ type: 'v', pos: other.x + ow + 1 });
+                } else if (Math.abs((gx + gsw) - other.x) < SNAP_DIST) {
+                  deltaX = (other.x - gsw - 1) - g.screen.x;
+                  snapGuides.push({ type: 'v', pos: other.x });
+                } else if (Math.abs(gx - other.x) < SNAP_DIST) {
+                  deltaX = other.x - g.screen.x;
+                  snapGuides.push({ type: 'v', pos: other.x });
+                } else if (Math.abs((gx + gsw) - (other.x + ow)) < SNAP_DIST) {
+                  deltaX = (other.x + ow - gsw) - g.screen.x;
+                  snapGuides.push({ type: 'v', pos: other.x + ow });
+                }
+
+                // Horizontal snapping (Y axis)
+                if (Math.abs(gy - (other.y + oh)) < SNAP_DIST) {
+                  deltaY = (other.y + oh + 1) - g.screen.y;
+                  snapGuides.push({ type: 'h', pos: other.y + oh + 1 });
+                } else if (Math.abs((gy + gsh) - other.y) < SNAP_DIST) {
+                  deltaY = (other.y - gsh - 1) - g.screen.y;
+                  snapGuides.push({ type: 'h', pos: other.y });
+                } else if (Math.abs(gy - other.y) < SNAP_DIST) {
+                  deltaY = other.y - g.screen.y;
+                  snapGuides.push({ type: 'h', pos: other.y });
+                } else if (Math.abs((gy + gsh) - (other.y + oh)) < SNAP_DIST) {
+                  deltaY = (other.y + oh - gsh) - g.screen.y;
+                  snapGuides.push({ type: 'h', pos: other.y + oh });
+                }
+              }
+            }
+          }
 
           let canMoveX = true;
           let canMoveY = true;

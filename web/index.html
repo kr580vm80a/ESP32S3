@@ -708,7 +708,8 @@
               width: preset.width,
               height: preset.height,
               ratio: ratio,
-              label: labelName
+              label: labelName,
+              isPrimary: !!s.isPrimary
             };
           });
 
@@ -743,7 +744,8 @@
               y: posY,
               color: getGroupColor(currentDeviceId),
               isDetected: true,
-              isLocked: true
+              isLocked: true,
+              isPrimary: !!d.isPrimary
             });
           });
 
@@ -919,7 +921,8 @@
         ctx.setLineDash([]);
       });
 
-      // Find top-left screen for each computer group
+      // Find Primary (or top-left fallback) screen for each computer group
+      const primaryPerGroup = {};
       const topLeftPerGroup = {};
       const groups = [...new Set(screens.map(s => s.group).filter(Boolean))];
       groups.forEach(grp => {
@@ -927,6 +930,9 @@
         if (grpScreens.length > 0) {
           const sortedGrp = [...grpScreens].sort((a, b) => a.y - b.y || a.x - b.x);
           topLeftPerGroup[grp] = sortedGrp[0];
+
+          const primaryScreen = grpScreens.find(s => s.isPrimary || (s.name && s.name.includes('Primary')));
+          primaryPerGroup[grp] = primaryScreen || sortedGrp[0];
         }
       });
 
@@ -983,8 +989,8 @@
         }
 
         // --- Red Delete Button (Top Right Corner) ---
-        // For auto-detected screens, show delete button ONLY on top-left screen of its group
-        const showDeleteBtn = !isDetected || (s.group && topLeftPerGroup[s.group] === s);
+        // For auto-detected screens, show delete button ONLY on Primary screen of its group
+        const showDeleteBtn = !isDetected || (s.group && primaryPerGroup[s.group] === s);
 
         if (showDeleteBtn) {
           const btnRadius = 11;

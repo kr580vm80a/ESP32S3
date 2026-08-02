@@ -975,17 +975,20 @@
         return;
       }
 
-      const sorted = [...screens].sort((a, b) => a.x - b.x || a.y - b.y);
-      const minCanvasX = Math.min(...screens.map(s => s.x));
-      const minCanvasY = Math.min(...screens.map(s => s.y));
+      const sorted = [...screens].sort((a, b) => a.x - b.x || b.y - a.y);
       const scale = 0.12;
+
+      const minCanvasX = Math.min(...screens.map(s => s.x));
+      const maxCanvasBottomY = Math.max(...screens.map(s => s.y + (s.height * scale)));
 
       const config = {
         device: "ESP32-KVM-Switch",
         total_screens: sorted.length,
         layout: sorted.map((s, index) => {
+          const sw = s.width * scale;
+          const sh = s.height * scale;
           const relX = Math.round((s.x - minCanvasX) / scale);
-          const relY = Math.round((s.y - minCanvasY) / scale);
+          const relY = Math.round((maxCanvasBottomY - (s.y + sh)) / scale);
           return {
             index: index + 1,
             name: s.name,
@@ -1282,15 +1285,19 @@
     function parseLayoutToScreens(layoutArray) {
       const scale = 0.12;
       const baseCanvasX = 50;
-      const baseCanvasY = 120;
+      
+      const maxY = Math.max(...layoutArray.map(item => (item.y || 0) + (item.height || 1080)));
+      const baseCanvasBottomY = 120 + Math.round(maxY * scale);
       let currentX = baseCanvasX;
 
       return layoutArray.map((item, idx) => {
         const w = item.width || ((item.x_max !== undefined && item.x_min !== undefined && item.x_max > item.x_min) ? (item.x_max - item.x_min) : 1920);
         const h = item.height || 1080;
+        const sw = w * scale;
+        const sh = h * scale;
 
         let posX = currentX;
-        let posY = baseCanvasY;
+        let posY = baseCanvasBottomY - sh;
 
         if (item.x !== undefined) {
           posX = baseCanvasX + Math.round(item.x * scale);
@@ -1299,10 +1306,9 @@
         }
 
         if (item.y !== undefined) {
-          posY = baseCanvasY + Math.round(item.y * scale);
+          posY = baseCanvasBottomY - Math.round((item.y + h) * scale);
         }
 
-        const sw = w * scale;
         currentX = Math.max(currentX + sw + 15, posX + sw + 15);
 
         return {

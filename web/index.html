@@ -379,7 +379,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 36;
+    const BUILD_VERSION = 37;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1253,32 +1253,38 @@
       input.type = 'text';
       input.value = hitBox.currentName;
 
-      const inputLeft = canvasRect.left + hitBox.x - 4;
-      const inputTop = canvasRect.top + hitBox.y - 2;
-      const inputWidth = Math.max(120, hitBox.w + 20);
+      const inputLeft = window.scrollX + canvasRect.left + hitBox.x - 4;
+      const inputTop = window.scrollY + canvasRect.top + hitBox.y - 4;
+      const inputWidth = Math.max(130, hitBox.w + 24);
 
       Object.assign(input.style, {
-        position: 'fixed',
+        position: 'absolute',
         left: `${inputLeft}px`,
         top: `${inputTop}px`,
         width: `${inputWidth}px`,
         height: '24px',
         background: '#0f172a',
-        color: '#f8fafc',
-        border: '1px solid #38bdf8',
-        borderRadius: '4px',
+        color: '#34d399',
+        border: '2px solid #34d399',
+        borderRadius: '6px',
         fontFamily: 'Outfit, sans-serif',
-        fontSize: '11px',
+        fontSize: '12px',
         fontWeight: '600',
-        padding: '2px 6px',
-        zIndex: '1000',
+        padding: '2px 8px',
+        zIndex: '9999',
         outline: 'none',
-        boxShadow: '0 0 14px rgba(56, 189, 248, 0.4)'
+        boxShadow: '0 0 16px rgba(52, 211, 153, 0.5)'
       });
 
       document.body.appendChild(input);
-      input.focus();
-      input.select();
+
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 50);
+
+      input.addEventListener('mousedown', (e) => e.stopPropagation());
+      input.addEventListener('click', (e) => e.stopPropagation());
 
       let isFinished = false;
       const finishRename = (shouldSave) => {
@@ -1317,7 +1323,7 @@
       });
 
       input.addEventListener('blur', () => {
-        finishRename(true);
+        setTimeout(() => finishRename(true), 150);
       });
     }
 

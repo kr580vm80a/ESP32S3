@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 27;
+    const BUILD_VERSION = 28;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1398,7 +1398,7 @@
             const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
 
             function addSnapGuide(type, pos) {
-              if (!snapGuides.some(g => g.type === type && Math.abs(g.pos - pos) <= 2)) {
+              if (!snapGuides.some(g => g.type === type)) {
                 snapGuides.push({ type, pos });
               }
             }

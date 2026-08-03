@@ -379,7 +379,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 37;
+    const BUILD_VERSION = 38;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -810,13 +810,28 @@
 
           let anchorLayoutX = 0;
           let anchorLayoutY = 0;
+          let preservedGroupName = currentDeviceName;
+
+          // Read custom name typed into text input if present
+          const customInputName = document.getElementById('pcNameInput') ? document.getElementById('pcNameInput').value.trim() : '';
 
           if (existingGroupScreens.length > 0) {
+            // Group ALREADY EXISTS: preserve existing custom groupName if not empty
+            const existingWithCustomName = existingGroupScreens.find(s => s.groupName && s.groupName.trim() !== '');
+            if (existingWithCustomName && existingWithCustomName.groupName.trim() !== '') {
+              preservedGroupName = existingWithCustomName.groupName.trim();
+            } else if (customInputName !== '') {
+              preservedGroupName = customInputName;
+            }
+
             // Group ALREADY EXISTS: preserve bottom-left coordinates of lowest monitor
             anchorLayoutY = Math.min(...existingGroupScreens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
             const lowestMonitors = existingGroupScreens.filter(s => (s.layoutY !== undefined ? s.layoutY : 0) === anchorLayoutY);
             anchorLayoutX = Math.min(...lowestMonitors.map(s => s.layoutX !== undefined ? s.layoutX : 0));
           } else {
+            if (customInputName !== '') {
+              preservedGroupName = customInputName;
+            }
             // NEW GROUP: align with lowest Y coordinate rectangle across existing screens
             if (screens.length > 0) {
               anchorLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
@@ -827,6 +842,10 @@
               anchorLayoutY = 0;
             }
           }
+
+          // Update pcNameInput text box to match preserved name
+          const pcInput = document.getElementById('pcNameInput');
+          if (pcInput) pcInput.value = preservedGroupName;
 
           // Remove old screens for currentDeviceId
           screens = screens.filter(s => s.group !== currentDeviceId);
@@ -845,7 +864,7 @@
               id: Date.now() + d.index,
               name: d.label,
               group: currentDeviceId,
-              groupName: currentDeviceName,
+              groupName: preservedGroupName,
               width: d.width,
               height: d.height,
               layoutX: finalLayoutX,

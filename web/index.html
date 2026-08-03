@@ -379,7 +379,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 33;
+    const BUILD_VERSION = 34;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1125,9 +1125,22 @@
         // Line 3: Render Computer Name ONLY on Primary Monitor of group
         const isPrimaryScreen = s.isPrimary || (s.group && primaryPerGroup[s.group] === s);
         if (isPrimaryScreen && (s.groupName || s.group)) {
+          const gName = s.groupName || s.group;
           ctx.fillStyle = color;
           ctx.font = '600 11px Outfit, sans-serif';
-          ctx.fillText(`${s.groupName || s.group}`, s.x + 14, s.y + 62);
+          ctx.fillText(gName, s.x + 14, s.y + 62);
+
+          const textWidth = ctx.measureText(gName).width;
+          s.groupNameHitBox = {
+            x: s.x + 14,
+            y: s.y + 48,
+            w: Math.max(70, textWidth + 10),
+            h: 18,
+            group: s.group,
+            currentName: gName
+          };
+        } else {
+          s.groupNameHitBox = null;
         }
 
         // Bottom-Left Relative Coordinate Label (x, y)
@@ -1250,6 +1263,32 @@
           }
         }
 
+        // Check Click on Computer Group Name (Inline Rename)
+        if (s.groupNameHitBox) {
+          const hb = s.groupNameHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            const newName = prompt('Enter new Computer / Group Name:', hb.currentName);
+            if (newName !== null && newName.trim() !== '') {
+              const cleanName = newName.trim();
+              const targetGroup = hb.group;
+
+              screens.forEach(scr => {
+                if (scr.group === targetGroup || (!scr.group && scr.isPrimary)) {
+                  scr.groupName = cleanName;
+                }
+              });
+
+              const pcInput = document.getElementById('pcNameInput');
+              if (pcInput) pcInput.value = cleanName;
+
+              saveProjectState();
+              updateJSON();
+              draw();
+            }
+            return;
+          }
+        }
+
         // Check Click on Resize Handle (Bottom Right Corner) - ONLY IF MANUAL SCREEN
         if (!isDetected && s.resizeHandle) {
           if (mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
@@ -1315,6 +1354,7 @@
 
       let hoveringDelete = false;
       let hoveringResize = false;
+      let hoveringName = false;
 
       screens.forEach(s => {
         const isDetected = s.isDetected || s.isLocked;
@@ -1326,9 +1366,15 @@
             my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
           hoveringResize = true;
         }
+        if (s.groupNameHitBox) {
+          const hb = s.groupNameHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            hoveringName = true;
+          }
+        }
       });
 
-      if (hoveringDelete) {
+      if (hoveringDelete || hoveringName) {
         canvas.style.cursor = 'pointer';
       } else if (hoveringResize || isResizing) {
         canvas.style.cursor = 'nwse-resize';

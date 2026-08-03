@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 31;
+    const BUILD_VERSION = 32;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1098,13 +1098,6 @@
         const relX = Math.round(lx - minLayoutX);
         const relY = Math.round(ly - minLayoutY);
 
-        // Draw Computer Group Header Badge above top-left screen of group
-        if (isDetected && s.group && topLeftPerGroup[s.group] === s) {
-          ctx.fillStyle = color;
-          ctx.font = '600 12px Outfit, sans-serif';
-          ctx.fillText(`💻 ${s.groupName || s.group}`, s.x, s.y - 8);
-        }
-
         // Shadow & Glow
         ctx.shadowColor = color;
         ctx.shadowBlur = (selectedScreen === s) ? 20 : 6;
@@ -1130,11 +1123,12 @@
         ctx.font = '400 11px JetBrains Mono';
         ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
 
-        // Group Lock Tag for Auto-Detected Screens
-        if (isDetected) {
+        // Line 3: Render Computer Name ONLY on Primary Monitor of group
+        const isPrimaryScreen = s.isPrimary || (s.group && primaryPerGroup[s.group] === s);
+        if (isPrimaryScreen && (s.groupName || s.group)) {
           ctx.fillStyle = color;
-          ctx.font = '600 10px Outfit';
-          ctx.fillText(`🔗 ${s.groupName || 'Grouped'}`, s.x + 14, s.y + sh - 28);
+          ctx.font = '600 11px Outfit, sans-serif';
+          ctx.fillText(`💻 ${s.groupName || s.group}`, s.x + 14, s.y + 62);
         }
 
         // Bottom-Left Relative Coordinate Label (x, y)

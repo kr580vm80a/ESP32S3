@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 20;
+    const BUILD_VERSION = 21;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1527,6 +1527,10 @@
               s.layoutY = 0;
             }
           });
+
+          // Log calculated relative coordinates for all monitors
+          const coordsSummary = screens.map(s => `${s.name} [${s.groupName || 'Group'}]: (x=${s.layoutX}, y=${s.layoutY})`).join(' | ');
+          console.log(`📍 Calculated Relative Coordinates (Build v${BUILD_VERSION}): ${coordsSummary}`);
         }
 
         saveProjectState();

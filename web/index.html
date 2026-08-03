@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 24;
+    const BUILD_VERSION = 25;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1413,31 +1413,31 @@
                 // Vertical snapping (X axis in exact layout units)
                 if (Math.abs(glx - (olx + olw)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx + olw) - g.startLayoutX;
-                  snapGuides.push({ type: 'v', pos: baseCanvasX + Math.round(((olx + olw) - minLayoutX) * scale) });
+                  snapGuides.push({ type: 'v', pos: other.x + ow });
                 } else if (Math.abs((glx + glw) - olx) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx - glw) - g.startLayoutX;
-                  snapGuides.push({ type: 'v', pos: baseCanvasX + Math.round((olx - minLayoutX) * scale) });
+                  snapGuides.push({ type: 'v', pos: other.x });
                 } else if (Math.abs(glx - olx) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = olx - g.startLayoutX;
-                  snapGuides.push({ type: 'v', pos: baseCanvasX + Math.round((olx - minLayoutX) * scale) });
+                  snapGuides.push({ type: 'v', pos: other.x });
                 } else if (Math.abs((glx + glw) - (olx + olw)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx + olw - glw) - g.startLayoutX;
-                  snapGuides.push({ type: 'v', pos: baseCanvasX + Math.round(((olx + olw) - minLayoutX) * scale) });
+                  snapGuides.push({ type: 'v', pos: other.x + ow });
                 }
 
                 // Horizontal snapping (Y axis in exact layout units)
                 if (Math.abs(gly - (oly + olh)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly + olh) - g.startLayoutY;
-                  snapGuides.push({ type: 'h', pos: baseCanvasBottomY - Math.round(((oly + olh) - minLayoutY) * scale) });
+                  snapGuides.push({ type: 'h', pos: other.y });
                 } else if (Math.abs((gly + glh) - oly) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly - glh) - g.startLayoutY;
-                  snapGuides.push({ type: 'h', pos: baseCanvasBottomY - Math.round((oly - minLayoutY) * scale) });
+                  snapGuides.push({ type: 'h', pos: other.y + oh });
                 } else if (Math.abs(gly - oly) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = oly - g.startLayoutY;
-                  snapGuides.push({ type: 'h', pos: baseCanvasBottomY - Math.round((oly - minLayoutY) * scale) });
+                  snapGuides.push({ type: 'h', pos: other.y + oh });
                 } else if (Math.abs((gly + glh) - (oly + olh)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly + olh - glh) - g.startLayoutY;
-                  snapGuides.push({ type: 'h', pos: baseCanvasBottomY - Math.round(((oly + olh) - minLayoutY) * scale) });
+                  snapGuides.push({ type: 'h', pos: other.y });
                 }
               }
             }

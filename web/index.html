@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 23;
+    const BUILD_VERSION = 24;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1084,8 +1084,8 @@
         const ly = s.layoutY !== undefined ? s.layoutY : 0;
         const lx = s.layoutX !== undefined ? s.layoutX : Math.round((s.x - baseCanvasX) / scale);
 
-        // Auto-fit screen canvas coordinates so all screens are 100% visible inside canvas viewport
-        if (!isDragging || (selectedScreen && s.group !== selectedScreen.group && s !== selectedScreen)) {
+        // Auto-fit screen canvas coordinates when not actively dragging
+        if (!isDragging) {
           s.x = baseCanvasX + Math.round((lx - minLayoutX) * scale);
           s.y = baseCanvasBottomY - Math.round((ly - minLayoutY + s.height) * scale);
         }

@@ -299,7 +299,6 @@
 
   <header>
     <div class="logo-container">
-      <div class="logo-icon">⚡</div>
       <div>
         <h1>ESP32 Bluetooth KVM Switcher</h1>
         <p style="font-size: 12px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
@@ -317,20 +316,20 @@
       
       <!-- Connection Card -->
       <div class="card">
-        <div class="card-title">🔌 1. Connection</div>
+        <div class="card-title">1. Connection</div>
         <div class="btn-group">
           <button class="btn" id="btnConnectUSB">
-            <span>💻 USB (Web Serial)</span>
+            <span>USB (Web Serial)</span>
           </button>
           <button class="btn btn-secondary" id="btnConnectBT">
-            <span>📡 Bluetooth</span>
+            <span>Bluetooth</span>
           </button>
         </div>
       </div>
 
       <!-- Multi-Screen Detection Card -->
       <div class="card">
-        <div class="card-title">🔍 2. Auto Detect</div>
+        <div class="card-title">2. Auto Detect</div>
         <div style="margin-bottom: 10px;">
           <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Computer Label / Group Name:</label>
           <input type="text" id="pcNameInput" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 6px 10px; font-size: 13px;" placeholder="e.g. Lenovo Laptop, PC 1">
@@ -339,13 +338,13 @@
           Detects connected displays from OS.
         </div>
         <button class="btn btn-secondary" id="btnAutoDetect" style="width: 100%;">
-          <span>🖥️ Detect</span>
+          <span>Detect</span>
         </button>
       </div>
 
       <!-- Presets Card -->
       <div class="card">
-        <div class="card-title">🖥️ 3. Presets</div>
+        <div class="card-title">3. Presets</div>
         <div class="preset-list" id="presetList">
           <!-- Populated dynamically from PRESET_RESOLUTIONS -->
         </div>
@@ -357,30 +356,30 @@
     <div class="editor-container">
       <div class="card" style="flex: 1; display: flex; flex-direction: column;">
         <div class="card-title" style="justify-content: space-between;">
-          <span>📐 Screen Layout</span>
+          <span>Screen Layout</span>
           <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 6px 12px; font-size: 12px;">Clear All</button>
         </div>
 
         <div class="canvas-wrapper">
           <canvas id="screenCanvas"></canvas>
-          <div class="canvas-instructions">📐 Drag screens to position. Auto-detected screens move together as a fixed group and cannot be resized.</div>
+          <div class="canvas-instructions">Drag screens to position. Auto-detected screens move together as a fixed group and cannot be resized.</div>
         </div>
 
         <div style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
-          <div class="card-title" style="font-size: 14px;">📤 ESP32 Config (JSON):</div>
-          <div id="driveSyncBadge" style="font-size: 12px; color: #94a3b8; cursor: pointer;" title="Click to sync with G:\My Drive\ESP32\kvm_config.json">⚪ Drive Sync</div>
+          <div class="card-title" style="font-size: 14px;">ESP32 Config (JSON):</div>
+          <div id="driveSyncBadge" style="font-size: 12px; color: #94a3b8; cursor: pointer;" title="Click to sync with G:\My Drive\ESP32\kvm_config.json">Drive Sync</div>
         </div>
         <div class="json-output" id="jsonOutput">{}</div>
 
         <button class="btn" id="btnSyncESP32" style="margin-top: 16px;">
-          <span>💾 Save to ESP32 Flash</span>
+          <span>Save to ESP32 Flash</span>
         </button>
       </div>
     </div>
   </div>
 
   <script>
-    const BUILD_VERSION = 32;
+    const BUILD_VERSION = 33;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -621,7 +620,7 @@
             const writable = await driveFileHandle.createWritable();
             await writable.write(jsonText);
             await writable.close();
-            console.log('✅ Auto-saved config to Google Drive file: ' + driveFileHandle.name);
+            console.log('Auto-saved config to Google Drive file: ' + driveFileHandle.name);
           }
         } catch (err) {
           console.warn('Google Drive file save failed:', err);
@@ -634,7 +633,7 @@
           const writer = window.esp32SerialPort.writable.getWriter();
           await writer.write(new TextEncoder().encode(`SAVE_CONFIG ${jsonText}\n`));
           writer.releaseLock();
-          console.log('⚡ Config synced to ESP32 Flash memory!');
+          console.log('Config synced to ESP32 Flash memory!');
         } catch (e) {
           console.warn('ESP32 Serial Flash sync failed:', e);
         }
@@ -706,7 +705,7 @@
           const screenDetails = await getDetailsFn();
           const detectedScreens = screenDetails.screens;
 
-          console.log('🔍 [OS Screen Details Raw Response]:', detectedScreens);
+          console.log('[OS Screen Details Raw Response]:', detectedScreens);
           console.table(detectedScreens.map(s => ({
             label: s.label,
             width: s.width,
@@ -890,7 +889,7 @@
       const preset = getClosestPresetResolution(rawW, rawH, ratio);
       const isMultiMonitor = window.screen.isExtended;
 
-      console.log('🔍 [OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio, isExtended: isMultiMonitor });
+      console.log('[OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio, isExtended: isMultiMonitor });
 
       if (isMultiMonitor) {
         document.getElementById('detectBox').innerHTML = `
@@ -1128,13 +1127,13 @@
         if (isPrimaryScreen && (s.groupName || s.group)) {
           ctx.fillStyle = color;
           ctx.font = '600 11px Outfit, sans-serif';
-          ctx.fillText(`💻 ${s.groupName || s.group}`, s.x + 14, s.y + 62);
+          ctx.fillText(`${s.groupName || s.group}`, s.x + 14, s.y + 62);
         }
 
         // Bottom-Left Relative Coordinate Label (x, y)
         ctx.fillStyle = '#38bdf8';
         ctx.font = '600 11px JetBrains Mono, monospace';
-        ctx.fillText(`📍 (${relX}, ${relY})`, s.x + 14, s.y + sh - 12);
+        ctx.fillText(`(${relX}, ${relY})`, s.x + 14, s.y + sh - 12);
 
         // --- Red Delete Button (Top Right Corner) ---
         // For auto-detected screens, show delete button ONLY on Primary screen of its group
@@ -1551,7 +1550,7 @@
 
           // Log calculated relative coordinates for all monitors
           const coordsSummary = screens.map(s => `${s.name} [${s.groupName || 'Group'}]: (x=${s.layoutX}, y=${s.layoutY})`).join(' | ');
-          console.log(`📍 Calculated Relative Coordinates (Build v${BUILD_VERSION}): ${coordsSummary}`);
+          console.log(`Calculated Relative Coordinates (Build v${BUILD_VERSION}): ${coordsSummary}`);
         }
 
         saveProjectState();
@@ -1749,7 +1748,7 @@
           draw();
           updateJSON();
           updateBadgeStatus('synced');
-          console.log(`✅ Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} (${screens.length} screens, Build v${BUILD_VERSION})`);
+          console.log(`Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} (${screens.length} screens, Build v${BUILD_VERSION})`);
           return true;
         }
       } catch (err) {
@@ -1759,7 +1758,7 @@
     }
 
     async function initDriveSyncOnStartup() {
-      console.log(`🚀 [ESP32 KVM Switch] Web App Build v${BUILD_VERSION} initialized.`);
+      console.log(`[ESP32 KVM Switch] Web App Build v${BUILD_VERSION} initialized.`);
       resizeCanvas();
 
       driveFileHandle = await getStoredFileHandle();
@@ -1795,7 +1794,7 @@
       }
 
       if (screens.length > 0) {
-        console.log(`✅ Loaded layout from LocalStorage (Build v${BUILD_VERSION})`);
+        console.log(`Loaded layout from LocalStorage (Build v${BUILD_VERSION})`);
       }
 
       draw();

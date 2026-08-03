@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 16;
+    const BUILD_VERSION = 17;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -806,26 +806,48 @@
           const minTop = Math.min(...items.map(d => d.top));
           const maxBottom = Math.max(...items.map(d => d.bottom));
 
-          // Remove ONLY existing screens for currentDeviceId (preserve screens from other computers & manual screens)
+          // Check if this computer group already exists in layout
+          const existingGroupScreens = screens.filter(s => s.group === currentDeviceId);
+
+          let anchorLayoutX = 0;
+          let anchorLayoutY = 0;
+
+          if (existingGroupScreens.length > 0) {
+            // Group ALREADY EXISTS: preserve bottom-left coordinates of lowest monitor
+            anchorLayoutY = Math.min(...existingGroupScreens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
+            const lowestMonitors = existingGroupScreens.filter(s => (s.layoutY !== undefined ? s.layoutY : 0) === anchorLayoutY);
+            anchorLayoutX = Math.min(...lowestMonitors.map(s => s.layoutX !== undefined ? s.layoutX : 0));
+          } else {
+            // NEW GROUP: align with lowest Y coordinate rectangle across existing screens
+            if (screens.length > 0) {
+              anchorLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
+              const maxX = Math.max(...screens.map(s => (s.layoutX !== undefined ? s.layoutX : 0) + s.width));
+              anchorLayoutX = maxX + 60;
+            } else {
+              anchorLayoutX = 0;
+              anchorLayoutY = 0;
+            }
+          }
+
+          // Remove old screens for currentDeviceId
           screens = screens.filter(s => s.group !== currentDeviceId);
 
           const scale = 0.12;
-          let groupCanvasOffsetX = 60;
-          if (screens.length > 0) {
-            const maxExistingX = Math.max(...screens.map(s => s.x + (s.width * scale)));
-            groupCanvasOffsetX = maxExistingX + 35;
-          }
-          const groupCanvasOffsetY = 120;
+          const baseCanvasX = 50;
+          const baseCanvasBottomY = 280;
 
           parsed.forEach((d, idx) => {
             const item = items[idx];
             infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
 
-            const posX = groupCanvasOffsetX + (item.left - minLeft) * scale;
-            const posY = groupCanvasOffsetY + (item.top - minTop) * scale;
+            const rawRelX = item.left - minLeft;
+            const rawRelY = maxBottom - item.bottom;
 
-            const relX = item.left - minLeft;
-            const relY = maxBottom - item.bottom;
+            const finalLayoutX = anchorLayoutX + rawRelX;
+            const finalLayoutY = anchorLayoutY + rawRelY;
+
+            const posX = baseCanvasX + Math.round(finalLayoutX * scale);
+            const posY = baseCanvasBottomY - Math.round((finalLayoutY + d.height) * scale);
 
             screens.push({
               id: Date.now() + d.index,
@@ -834,8 +856,8 @@
               groupName: currentDeviceName,
               width: d.width,
               height: d.height,
-              layoutX: relX,
-              layoutY: relY,
+              layoutX: finalLayoutX,
+              layoutY: finalLayoutY,
               x: posX,
               y: posY,
               color: getGroupColor(currentDeviceId),

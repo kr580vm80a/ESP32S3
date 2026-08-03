@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 29;
+    const BUILD_VERSION = 30;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1030,16 +1030,20 @@
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
       }
 
-      // Draw Magnetic Snap Guide Lines
+      // Draw Magnetic Snap Guide Lines (Segmented to aligned screens)
       snapGuides.forEach(g => {
         ctx.strokeStyle = '#34d399';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
         if (g.type === 'v') {
-          ctx.moveTo(g.pos, 0); ctx.lineTo(g.pos, canvas.height);
+          const startY = g.y1 !== undefined ? g.y1 - 10 : 0;
+          const endY = g.y2 !== undefined ? g.y2 + 10 : canvas.height;
+          ctx.moveTo(g.pos, startY); ctx.lineTo(g.pos, endY);
         } else {
-          ctx.moveTo(0, g.pos); ctx.lineTo(canvas.width, g.pos);
+          const startX = g.x1 !== undefined ? g.x1 - 10 : 0;
+          const endX = g.x2 !== undefined ? g.x2 + 10 : canvas.width;
+          ctx.moveTo(startX, g.pos); ctx.lineTo(endX, g.pos);
         }
         ctx.stroke();
         ctx.setLineDash([]);
@@ -1397,9 +1401,15 @@
             const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - baseCanvasX) / scale)));
             const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
 
-            function addSnapGuide(type, pos) {
-              if (!snapGuides.some(g => g.type === type && Math.abs(g.pos - pos) <= 2)) {
-                snapGuides.push({ type, pos });
+            function addSnapGuide(type, pos, x1, x2, y1, y2) {
+              const existing = snapGuides.find(g => g.type === type && Math.abs(g.pos - pos) <= 2);
+              if (!existing) {
+                snapGuides.push({ type, pos, x1, x2, y1, y2 });
+              } else {
+                if (x1 !== undefined && (existing.x1 === undefined || x1 < existing.x1)) existing.x1 = x1;
+                if (x2 !== undefined && (existing.x2 === undefined || x2 > existing.x2)) existing.x2 = x2;
+                if (y1 !== undefined && (existing.y1 === undefined || y1 < existing.y1)) existing.y1 = y1;
+                if (y2 !== undefined && (existing.y2 === undefined || y2 > existing.y2)) existing.y2 = y2;
               }
             }
 
@@ -1412,7 +1422,9 @@
               // --- Snap to Global Bottom Baseline (y = 0) ---
               if (Math.abs(gly - 0) < SNAP_LAYOUT_DIST) {
                 deltaLayoutY = 0 - g.startLayoutY;
-                addSnapGuide('h', baseCanvasBottomY);
+                const gCanvasLeft = baseCanvasX + Math.round((g.startLayoutX + deltaLayoutX - minLayoutX) * scale);
+                const gCanvasRight = baseCanvasX + Math.round(((g.startLayoutX + deltaLayoutX + glw) - minLayoutX) * scale);
+                addSnapGuide('h', baseCanvasBottomY, gCanvasLeft, gCanvasRight);
               }
 
               for (let other of externalScreens) {
@@ -1421,39 +1433,49 @@
                 const olw = other.width;
                 const olh = other.height;
 
+                const gCanvasLeft = baseCanvasX + Math.round((glx - minLayoutX) * scale);
+                const gCanvasRight = baseCanvasX + Math.round(((glx + glw) - minLayoutX) * scale);
+                const gCanvasTop = baseCanvasBottomY - Math.round(((gly + glh) - minLayoutY) * scale);
+                const gCanvasBottom = baseCanvasBottomY - Math.round((gly - minLayoutY) * scale);
+
                 const otherCanvasLeft = baseCanvasX + Math.round((olx - minLayoutX) * scale);
                 const otherCanvasRight = baseCanvasX + Math.round(((olx + olw) - minLayoutX) * scale);
                 const otherCanvasTop = baseCanvasBottomY - Math.round(((oly + olh) - minLayoutY) * scale);
                 const otherCanvasBottom = baseCanvasBottomY - Math.round((oly - minLayoutY) * scale);
 
+                const segX1 = Math.min(gCanvasLeft, otherCanvasLeft);
+                const segX2 = Math.max(gCanvasRight, otherCanvasRight);
+                const segY1 = Math.min(gCanvasTop, otherCanvasTop);
+                const segY2 = Math.max(gCanvasBottom, otherCanvasBottom);
+
                 // Vertical snapping (X axis in exact layout units)
                 if (Math.abs(glx - (olx + olw)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx + olw) - g.startLayoutX;
-                  addSnapGuide('v', otherCanvasRight);
+                  addSnapGuide('v', otherCanvasRight, undefined, undefined, segY1, segY2);
                 } else if (Math.abs((glx + glw) - olx) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx - glw) - g.startLayoutX;
-                  addSnapGuide('v', otherCanvasLeft);
+                  addSnapGuide('v', otherCanvasLeft, undefined, undefined, segY1, segY2);
                 } else if (Math.abs(glx - olx) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = olx - g.startLayoutX;
-                  addSnapGuide('v', otherCanvasLeft);
+                  addSnapGuide('v', otherCanvasLeft, undefined, undefined, segY1, segY2);
                 } else if (Math.abs((glx + glw) - (olx + olw)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx + olw - glw) - g.startLayoutX;
-                  addSnapGuide('v', otherCanvasRight);
+                  addSnapGuide('v', otherCanvasRight, undefined, undefined, segY1, segY2);
                 }
 
                 // Horizontal snapping (Y axis in exact layout units)
                 if (Math.abs(gly - (oly + olh)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly + olh) - g.startLayoutY;
-                  addSnapGuide('h', otherCanvasTop);
+                  addSnapGuide('h', otherCanvasTop, segX1, segX2);
                 } else if (Math.abs((gly + glh) - oly) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly - glh) - g.startLayoutY;
-                  addSnapGuide('h', otherCanvasBottom);
+                  addSnapGuide('h', otherCanvasBottom, segX1, segX2);
                 } else if (Math.abs(gly - oly) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = oly - g.startLayoutY;
-                  addSnapGuide('h', otherCanvasBottom);
+                  addSnapGuide('h', otherCanvasBottom, segX1, segX2);
                 } else if (Math.abs((gly + glh) - (oly + olh)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly + olh - glh) - g.startLayoutY;
-                  addSnapGuide('h', otherCanvasTop);
+                  addSnapGuide('h', otherCanvasTop, segX1, segX2);
                 }
               }
             }

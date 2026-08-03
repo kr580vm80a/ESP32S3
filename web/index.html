@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 18;
+    const BUILD_VERSION = 19;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1374,10 +1374,10 @@
 
                 // Vertical snapping (X axis)
                 if (Math.abs(gx - (other.x + ow)) < SNAP_DIST) {
-                  targetDeltaX = (other.x + ow + 1) - g.startX;
-                  snapGuides.push({ type: 'v', pos: other.x + ow + 1 });
+                  targetDeltaX = (other.x + ow) - g.startX;
+                  snapGuides.push({ type: 'v', pos: other.x + ow });
                 } else if (Math.abs((gx + gsw) - other.x) < SNAP_DIST) {
-                  targetDeltaX = (other.x - gsw - 1) - g.startX;
+                  targetDeltaX = (other.x - gsw) - g.startX;
                   snapGuides.push({ type: 'v', pos: other.x });
                 } else if (Math.abs(gx - other.x) < SNAP_DIST) {
                   targetDeltaX = other.x - g.startX;
@@ -1389,10 +1389,10 @@
 
                 // Horizontal snapping (Y axis)
                 if (Math.abs(gy - (other.y + oh)) < SNAP_DIST) {
-                  targetDeltaY = (other.y + oh + 1) - g.startY;
-                  snapGuides.push({ type: 'h', pos: other.y + oh + 1 });
+                  targetDeltaY = (other.y + oh) - g.startY;
+                  snapGuides.push({ type: 'h', pos: other.y + oh });
                 } else if (Math.abs((gy + gsh) - other.y) < SNAP_DIST) {
-                  targetDeltaY = (other.y - gsh - 1) - g.startY;
+                  targetDeltaY = (other.y - gsh) - g.startY;
                   snapGuides.push({ type: 'h', pos: other.y });
                 } else if (Math.abs(gy - other.y) < SNAP_DIST) {
                   targetDeltaY = other.y - g.startY;
@@ -1452,11 +1452,11 @@
             const oh = other.height * scale;
 
             if (Math.abs(newX - (other.x + ow)) < SNAP_DIST) {
-              newX = other.x + ow + 1;
+              newX = other.x + ow;
               snapGuides.push({ type: 'v', pos: newX });
             }
             if (Math.abs((newX + sw) - other.x) < SNAP_DIST) {
-              newX = other.x - sw - 1;
+              newX = other.x - sw;
               snapGuides.push({ type: 'v', pos: other.x });
             }
             if (Math.abs(newX - other.x) < SNAP_DIST) {
@@ -1469,11 +1469,11 @@
             }
 
             if (Math.abs(newY - (other.y + oh)) < SNAP_DIST) {
-              newY = other.y + oh + 1;
+              newY = other.y + oh;
               snapGuides.push({ type: 'h', pos: newY });
             }
             if (Math.abs((newY + sh) - other.y) < SNAP_DIST) {
-              newY = other.y - sh - 1;
+              newY = other.y - sh;
               snapGuides.push({ type: 'h', pos: other.y });
             }
             if (Math.abs(newY - other.y) < SNAP_DIST) {

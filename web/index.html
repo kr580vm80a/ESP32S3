@@ -380,7 +380,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 17;
+    const BUILD_VERSION = 18;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -832,10 +832,6 @@
           // Remove old screens for currentDeviceId
           screens = screens.filter(s => s.group !== currentDeviceId);
 
-          const scale = 0.12;
-          const baseCanvasX = 50;
-          const baseCanvasBottomY = 280;
-
           parsed.forEach((d, idx) => {
             const item = items[idx];
             infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
@@ -846,9 +842,6 @@
             const finalLayoutX = anchorLayoutX + rawRelX;
             const finalLayoutY = anchorLayoutY + rawRelY;
 
-            const posX = baseCanvasX + Math.round(finalLayoutX * scale);
-            const posY = baseCanvasBottomY - Math.round((finalLayoutY + d.height) * scale);
-
             screens.push({
               id: Date.now() + d.index,
               name: d.label,
@@ -858,13 +851,26 @@
               height: d.height,
               layoutX: finalLayoutX,
               layoutY: finalLayoutY,
-              x: posX,
-              y: posY,
+              x: 0,
+              y: 0,
               color: getGroupColor(currentDeviceId),
               isDetected: true,
               isLocked: true,
               isPrimary: !!d.isPrimary
             });
+          });
+
+          // Synchronize canvas s.x and s.y for ALL screens in layout using global maxLayoutY baseline
+          const scale = 0.12;
+          const baseCanvasX = 50;
+          const maxLayoutY = Math.max(...screens.map(s => (s.layoutY !== undefined ? s.layoutY : 0) + s.height));
+          const baseCanvasBottomY = 120 + Math.round(maxLayoutY * scale);
+
+          screens.forEach(s => {
+            const ly = s.layoutY !== undefined ? s.layoutY : 0;
+            const lx = s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale);
+            s.x = baseCanvasX + Math.round(lx * scale);
+            s.y = baseCanvasBottomY - Math.round((ly + s.height) * scale);
           });
 
           document.getElementById('detectBox').innerHTML = infoHtml;

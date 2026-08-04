@@ -385,7 +385,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 40;
+    const BUILD_VERSION = 41;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -674,6 +674,7 @@
     let initialDetectedGroup = [];
     let snapGuides = [];
     let dragLockedScale = null; // Lock scale during drag to prevent size changes
+    let lastComputedScale = 0.12; // Track actual fitScale from last draw()
 
     const canvas = document.getElementById('screenCanvas');
     const ctx = canvas.getContext('2d');
@@ -1096,6 +1097,8 @@
       // Lock scale during drag so monitors don't change size while dragging
       if (isDragging && dragLockedScale !== null) {
         fitScale = dragLockedScale;
+      } else {
+        lastComputedScale = fitScale; // Remember actual scale for next drag start
       }
       const scale = fitScale;
 
@@ -1405,7 +1408,7 @@
           dragStartY = my - s.y;
 
           // Lock current scale to prevent size changes during drag
-          dragLockedScale = scale;
+          dragLockedScale = lastComputedScale;
 
           if (s.group) {
             // Group Drag: Record initial positions of screens in this specific computer group

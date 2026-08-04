@@ -385,7 +385,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 43;
+    const BUILD_VERSION = 44;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -988,7 +988,7 @@
       const newScreen = {
         id: Date.now(),
         name: name,
-        group: 'manual_' + Date.now(),
+        group: 'manual_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
         groupName: '',
         width: preset.width,
         height: preset.height,
@@ -1630,7 +1630,7 @@
 
           // --- Overlap Resolution: push overlapping monitors apart ---
           if (isDragging && selectedScreen) {
-            let maxIterations = 10;
+            let maxIterations = 20;
             while (maxIterations-- > 0) {
               let overlapFound = false;
 
@@ -1653,32 +1653,26 @@
                     overlapFound = true;
 
                     const isS1Dragged = s1.group === selectedScreen.group;
-                    const groupToMove = isS1Dragged ? s1.group : s2.group;
-                    const groupScreens = screens.filter(s => s.group === groupToMove);
 
-                    const center1X = s1lx + s1w / 2;
-                    const center2X = s2lx + s2w / 2;
-
-                    const pushRight = (s2lx + s2w) - s1lx;
-                    const pushLeft = (s1lx + s1w) - s2lx;
-                    const pushUp = (s2ly + s2h) - s1ly;
-
-                    const isSameRow = Math.abs(s1ly - s2ly) < 50;
-
-                    if (isSameRow) {
-                      if (center1X >= center2X) {
-                        groupScreens.forEach(s => s.layoutX += pushRight);
+                    if (isS1Dragged) {
+                      if (s1lx + s1w / 2 < s2lx + s2w / 2) {
+                        const shift = (s1lx + s1w) - s2lx;
+                        const s2Group = screens.filter(s => s.group === s2.group);
+                        s2Group.forEach(s => s.layoutX += shift);
                       } else {
-                        groupScreens.forEach(s => s.layoutX -= pushLeft);
+                        const shift = (s2lx + s2w) - s1lx;
+                        const s1Group = screens.filter(s => s.group === s1.group);
+                        s1Group.forEach(s => s.layoutX += shift);
                       }
                     } else {
-                      const minPush = Math.min(pushRight, pushLeft, pushUp);
-                      if (minPush === pushRight) {
-                        groupScreens.forEach(s => s.layoutX += pushRight);
-                      } else if (minPush === pushLeft) {
-                        groupScreens.forEach(s => s.layoutX -= pushLeft);
+                      if (s1lx >= s2lx) {
+                        const shift = (s2lx + s2w) - s1lx;
+                        const s1Group = screens.filter(s => s.group === s1.group);
+                        s1Group.forEach(s => s.layoutX += shift);
                       } else {
-                        groupScreens.forEach(s => s.layoutY += pushUp);
+                        const shift = (s1lx + s1w) - s2lx;
+                        const s2Group = screens.filter(s => s.group === s2.group);
+                        s2Group.forEach(s => s.layoutX += shift);
                       }
                     }
 

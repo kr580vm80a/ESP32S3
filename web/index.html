@@ -385,7 +385,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 42;
+    const BUILD_VERSION = 43;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1630,61 +1630,71 @@
 
           // --- Overlap Resolution: push overlapping monitors apart ---
           if (isDragging && selectedScreen) {
-            const draggedGroup = selectedScreen.group;
-            const draggedScreens = screens.filter(s => s.group === draggedGroup);
-            const otherScreens = screens.filter(s => s.group !== draggedGroup);
+            let maxIterations = 10;
+            while (maxIterations-- > 0) {
+              let overlapFound = false;
 
-            for (const ds of draggedScreens) {
-              for (const os of otherScreens) {
-                const dlx = ds.layoutX, dly = ds.layoutY;
-                const dlw = ds.width, dlh = ds.height;
-                const olx = os.layoutX, oly = os.layoutY;
-                const olw = os.width, olh = os.height;
+              for (let i = 0; i < screens.length; i++) {
+                for (let j = 0; j < screens.length; j++) {
+                  if (i === j) continue;
+                  const s1 = screens[i];
+                  const s2 = screens[j];
+                  if (s1.group && s2.group && s1.group === s2.group) continue;
 
-                // Check if rectangles overlap in layout space
-                const overlapX = dlx < olx + olw && dlx + dlw > olx;
-                const overlapY = dly < oly + olh && dly + dlh > oly;
+                  const s1lx = s1.layoutX, s1ly = s1.layoutY;
+                  const s1w = s1.width, s1h = s1.height;
+                  const s2lx = s2.layoutX, s2ly = s2.layoutY;
+                  const s2w = s2.width, s2h = s2.height;
 
-                if (overlapX && overlapY) {
-                  // Calculate minimal push distances in each direction
-                  const pushRight = (olx + olw) - dlx;
-                  const pushLeft = dlx + dlw - olx;
-                  const pushUp = (oly + olh) - dly;
-                  const pushDown = dly + dlh - oly;
+                  const overlapX = s1lx < s2lx + s2w && s1lx + s1w > s2lx;
+                  const overlapY = s1ly < s2ly + s2h && s1ly + s1h > s2ly;
 
-                  const minPush = Math.min(pushRight, pushLeft, pushUp, pushDown);
+                  if (overlapX && overlapY) {
+                    overlapFound = true;
 
-                  if (minPush === pushRight) {
-                    // Push dragged group right
-                    const shift = pushRight;
-                    draggedScreens.forEach(s => s.layoutX += shift);
-                  } else if (minPush === pushLeft) {
-                    // Push dragged group left
-                    const shift = pushLeft;
-                    draggedScreens.forEach(s => s.layoutX -= shift);
-                  } else if (minPush === pushUp) {
-                    // Push dragged group up (higher Y in layout)
-                    const shift = pushUp;
-                    draggedScreens.forEach(s => s.layoutY += shift);
-                  } else {
-                    // Push dragged group down (lower Y in layout)
-                    const shift = pushDown;
-                    draggedScreens.forEach(s => s.layoutY -= shift);
+                    const isS1Dragged = s1.group === selectedScreen.group;
+                    const groupToMove = isS1Dragged ? s1.group : s2.group;
+                    const groupScreens = screens.filter(s => s.group === groupToMove);
+
+                    const center1X = s1lx + s1w / 2;
+                    const center2X = s2lx + s2w / 2;
+
+                    const pushRight = (s2lx + s2w) - s1lx;
+                    const pushLeft = (s1lx + s1w) - s2lx;
+                    const pushUp = (s2ly + s2h) - s1ly;
+
+                    const isSameRow = Math.abs(s1ly - s2ly) < 50;
+
+                    if (isSameRow) {
+                      if (center1X >= center2X) {
+                        groupScreens.forEach(s => s.layoutX += pushRight);
+                      } else {
+                        groupScreens.forEach(s => s.layoutX -= pushLeft);
+                      }
+                    } else {
+                      const minPush = Math.min(pushRight, pushLeft, pushUp);
+                      if (minPush === pushRight) {
+                        groupScreens.forEach(s => s.layoutX += pushRight);
+                      } else if (minPush === pushLeft) {
+                        groupScreens.forEach(s => s.layoutX -= pushLeft);
+                      } else {
+                        groupScreens.forEach(s => s.layoutY += pushUp);
+                      }
+                    }
+
+                    const curMinX = Math.min(...screens.map(s => s.layoutX));
+                    const curMinY = Math.min(...screens.map(s => s.layoutY));
+                    screens.forEach(s => {
+                      s.layoutX -= curMinX;
+                      s.layoutY -= curMinY;
+                    });
+
+                    break;
                   }
-                  // Re-normalize after push
-                  const newMinX = Math.min(...screens.map(s => s.layoutX));
-                  const newMinY = Math.min(...screens.map(s => s.layoutY));
-                  screens.forEach(s => { s.layoutX -= newMinX; s.layoutY -= newMinY; });
-                  break; // one push per drop is enough
                 }
+                if (overlapFound) break;
               }
-              // Break outer loop too after first overlap resolved
-              const stillOverlaps = otherScreens.some(os => {
-                const ds2 = draggedScreens[0];
-                return ds2.layoutX < os.layoutX + os.width && ds2.layoutX + ds2.width > os.layoutX &&
-                       ds2.layoutY < os.layoutY + os.height && ds2.layoutY + ds2.height > os.layoutY;
-              });
-              if (!stillOverlaps) break;
+              if (!overlapFound) break;
             }
           }
 

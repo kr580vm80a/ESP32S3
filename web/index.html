@@ -385,7 +385,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 41;
+    const BUILD_VERSION = 42;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1054,21 +1054,6 @@
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
       }
 
-      // Draw Magnetic Snap Guide Lines (Full Canvas width & height)
-      snapGuides.forEach(g => {
-        ctx.strokeStyle = '#34d399';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 4]);
-        ctx.beginPath();
-        if (g.type === 'v') {
-          ctx.moveTo(g.pos, 0); ctx.lineTo(g.pos, canvas.height);
-        } else {
-          ctx.moveTo(0, g.pos); ctx.lineTo(canvas.width, g.pos);
-        }
-        ctx.stroke();
-        ctx.setLineDash([]);
-      });
-
       // Find Primary (or top-left fallback) screen for each computer group
       const primaryPerGroup = {};
       const topLeftPerGroup = {};
@@ -1108,6 +1093,23 @@
       // Compute relative Cartesian bottom-left coordinates (0,0) baseline for labels
       const minLayoutX = screens.length > 0 ? Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - baseCanvasX) / scale))) : 0;
       const minLayoutY = screens.length > 0 ? Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0)) : 0;
+
+      // Draw Magnetic Snap Guide Lines (Full Canvas width & height using exact layout coordinates)
+      snapGuides.forEach(g => {
+        ctx.strokeStyle = '#34d399';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        if (g.type === 'v') {
+          const cx = baseCanvasX + Math.round((g.layoutPos - minLayoutX) * scale);
+          ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
+        } else if (g.type === 'h') {
+          const cy = baseCanvasBottomY - Math.round((g.layoutPos - minLayoutY) * scale);
+          ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
 
       // Draw Screens
       screens.forEach(s => {
@@ -1506,33 +1508,36 @@
           let rawDeltaCanvasX = (mx - dragStartX) - anchorStartX;
           let rawDeltaCanvasY = (my - dragStartY) - anchorStartY;
 
-          let deltaLayoutX = Math.round(rawDeltaCanvasX / scale);
-          let deltaLayoutY = Math.round(-rawDeltaCanvasY / scale);
+          // Use locked scale (same as draw()) for consistent coordinate mapping
+          const activeScale = dragLockedScale !== null ? dragLockedScale : lastComputedScale;
+
+          let deltaLayoutX = Math.round(rawDeltaCanvasX / activeScale);
+          let deltaLayoutY = Math.round(-rawDeltaCanvasY / activeScale);
 
           snapGuides = [];
           const SNAP_LAYOUT_DIST = 120; // 120 layout units (~14px on canvas)
           const groupScreenIds = new Set(initialDetectedGroup.map(g => g.id));
           const externalScreens = screens.filter(s => !groupScreenIds.has(s.id));
 
-          // Check magnetic snapping directly in layout coordinates space for ZERO rounding error
+          // Compute canvas transform parameters (same formula as draw())
           if (screens.length > 0) {
-            let fitScale = 0.12;
-            const maxLX = Math.max(...screens.map(s => (s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / 0.12)) + s.width));
-            const maxLY = Math.max(...screens.map(s => (s.layoutY !== undefined ? s.layoutY : 0) + s.height));
-            const scaleX = (canvas.width - 140) / Math.max(maxLX, 1920);
-            const scaleY = (canvas.height - 140) / Math.max(maxLY, 1080);
-            fitScale = Math.min(0.12, Math.max(0.04, scaleX), Math.max(0.04, scaleY));
-
-            const scale = fitScale;
             const baseCanvasX = 60;
             const baseCanvasBottomY = canvas.height - 50;
 
-            const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - baseCanvasX) / scale)));
+            const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : 0));
             const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
 
-            function addSnapGuide(type, pos) {
-              if (!snapGuides.some(g => g.type === type && Math.abs(g.pos - pos) <= 2)) {
-                snapGuides.push({ type, pos });
+            // Helper: convert layout coords to canvas pixel position (same as draw())
+            function layoutToCanvasX(lx) {
+              return baseCanvasX + Math.round((lx - minLayoutX) * activeScale);
+            }
+            function layoutToCanvasY(ly, h) {
+              return baseCanvasBottomY - Math.round((ly - minLayoutY + h) * activeScale);
+            }
+
+            function addSnapGuide(type, layoutPos) {
+              if (!snapGuides.some(g => g.type === type && Math.abs(g.layoutPos - layoutPos) <= 1)) {
+                snapGuides.push({ type, layoutPos });
               }
             }
 
@@ -1545,54 +1550,50 @@
               // --- Snap to Global Bottom Baseline (y = 0) ---
               if (Math.abs(gly - 0) < SNAP_LAYOUT_DIST) {
                 deltaLayoutY = 0 - g.startLayoutY;
-                const bottomScreen = screens.find(s => s.layoutY === 0 || s.layoutY === undefined);
-                const baselineCanvasY = bottomScreen ? bottomScreen.y + Math.round(bottomScreen.height * scale) : canvas.height - 50;
-                addSnapGuide('h', baselineCanvasY);
+                addSnapGuide('h', 0);
               }
 
               for (let other of externalScreens) {
-                const olx = other.layoutX !== undefined ? other.layoutX : Math.round((other.x - baseCanvasX) / scale);
+                const olx = other.layoutX !== undefined ? other.layoutX : 0;
                 const oly = other.layoutY !== undefined ? other.layoutY : 0;
                 const olw = other.width;
                 const olh = other.height;
-                const ow = Math.round(other.width * scale);
-                const oh = Math.round(other.height * scale);
 
                 // Vertical snapping (X axis in exact layout units)
                 if (Math.abs(glx - (olx + olw)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx + olw) - g.startLayoutX;
-                  addSnapGuide('v', other.x + ow);
+                  addSnapGuide('v', olx + olw);
                 } else if (Math.abs((glx + glw) - olx) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx - glw) - g.startLayoutX;
-                  addSnapGuide('v', other.x);
+                  addSnapGuide('v', olx);
                 } else if (Math.abs(glx - olx) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = olx - g.startLayoutX;
-                  addSnapGuide('v', other.x);
+                  addSnapGuide('v', olx);
                 } else if (Math.abs((glx + glw) - (olx + olw)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutX = (olx + olw - glw) - g.startLayoutX;
-                  addSnapGuide('v', other.x + ow);
+                  addSnapGuide('v', olx + olw);
                 }
 
                 // Horizontal snapping (Y axis in exact layout units)
                 if (Math.abs(gly - (oly + olh)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly + olh) - g.startLayoutY;
-                  addSnapGuide('h', other.y);
+                  addSnapGuide('h', oly + olh);
                 } else if (Math.abs((gly + glh) - oly) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly - glh) - g.startLayoutY;
-                  addSnapGuide('h', other.y + oh);
+                  addSnapGuide('h', oly);
                 } else if (Math.abs(gly - oly) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = oly - g.startLayoutY;
-                  addSnapGuide('h', other.y + oh);
+                  addSnapGuide('h', oly);
                 } else if (Math.abs((gly + glh) - (oly + olh)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly + olh - glh) - g.startLayoutY;
-                  addSnapGuide('h', other.y);
+                  addSnapGuide('h', oly + olh);
                 }
               }
             }
           }
 
-          let targetDeltaX = Math.round(deltaLayoutX * scale);
-          let targetDeltaY = Math.round(-deltaLayoutY * scale);
+          let targetDeltaX = Math.round(deltaLayoutX * activeScale);
+          let targetDeltaY = Math.round(-deltaLayoutY * activeScale);
 
           initialDetectedGroup.forEach(g => {
             g.screen.x = g.startX + targetDeltaX;

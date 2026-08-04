@@ -374,7 +374,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 47;
+    const BUILD_VERSION = 48;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1358,9 +1358,11 @@
     // Canvas Interactivity (Drag, Delete & Preset-Snapping Stretch Resize)
     canvas.addEventListener('mousedown', (e) => {
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const scale = 0.12;
+      const scaleCanvasX = canvas.width / (rect.width || 1);
+      const scaleCanvasY = canvas.height / (rect.height || 1);
+      const mx = (e.clientX - rect.left) * scaleCanvasX;
+      const my = (e.clientY - rect.top) * scaleCanvasY;
+      const activeScale = dragLockedScale !== null ? dragLockedScale : lastComputedScale;
 
       for (let i = screens.length - 1; i >= 0; i--) {
         const s = screens[i];
@@ -1397,8 +1399,8 @@
         }
 
         // Check Click inside Screen Body
-        const sw = s.width * scale;
-        const sh = s.height * scale;
+        const sw = s.width * activeScale;
+        const sh = s.height * activeScale;
 
         if (mx >= s.x && mx <= s.x + sw && my >= s.y && my <= s.y + sh) {
           selectedScreen = s;
@@ -1443,9 +1445,11 @@
 
     canvas.addEventListener('mousemove', (e) => {
       const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const scale = 0.12;
+      const scaleCanvasX = canvas.width / (rect.width || 1);
+      const scaleCanvasY = canvas.height / (rect.height || 1);
+      const mx = (e.clientX - rect.left) * scaleCanvasX;
+      const my = (e.clientY - rect.top) * scaleCanvasY;
+      const activeScale = dragLockedScale !== null ? dragLockedScale : lastComputedScale;
 
       let hoveringDelete = false;
       let hoveringResize = false;
@@ -1481,8 +1485,8 @@
 
       // Handle Preset-Snapping Resize Stretch (Only for manual screens)
       if (isResizing && resizeScreen && !(resizeScreen.isDetected || resizeScreen.isLocked)) {
-        const rawDraggedWidth = (mx - resizeScreen.x) / scale;
-        const rawDraggedHeight = (my - resizeScreen.y) / scale;
+        const rawDraggedWidth = (mx - resizeScreen.x) / activeScale;
+        const rawDraggedHeight = (my - resizeScreen.y) / activeScale;
 
         // Snap strictly to closest allowed standard preset resolution (e.g. 1920x1080, 2560x1440, 3840x2160)
         const snappedPreset = getClosestPresetResolution(rawDraggedWidth, rawDraggedHeight);

@@ -180,6 +180,12 @@
       box-shadow: none;
     }
 
+    .inline-rename-input {
+      color: #34d399;
+      border: 2px solid #34d399;
+      box-shadow: 0 0 16px rgba(52, 211, 153, 0.5);
+    }
+
     .preset-list {
       display: flex;
       flex-direction: column;
@@ -379,7 +385,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 38;
+    const BUILD_VERSION = 39;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -970,33 +976,31 @@
       // Ensure preset standard resolution
       const preset = getClosestPresetResolution(width, height);
 
-      let maxX = 50;
-      screens.forEach(s => {
-        const rightEdge = s.x + (s.width * scale);
-        if (rightEdge > maxX) maxX = rightEdge;
-      });
-
-      let initX = maxX + 1;
-      let initY = 120;
-
-      if (initX + (preset.width * scale) > canvas.width - 10) {
-        initX = Math.max(10, (screens.length * 40) % (canvas.width - (preset.width * scale) - 10));
-        initY = 140;
+      // Calculate layout coordinates: place to the right of all existing screens at y=0 baseline
+      let newLayoutX = 0;
+      if (screens.length > 0) {
+        newLayoutX = Math.max(...screens.map(s => (s.layoutX !== undefined ? s.layoutX : 0) + s.width)) + 60;
       }
+      const newLayoutY = 0;
 
       const newScreen = {
         id: Date.now(),
         name: name,
+        group: 'manual_' + Date.now(),
+        groupName: '',
         width: preset.width,
         height: preset.height,
-        x: initX,
-        y: initY,
+        layoutX: newLayoutX,
+        layoutY: newLayoutY,
+        x: 0,
+        y: 0,
         color: COLOR_MANUAL,
         isDetected: false,
         isLocked: false
       };
       screens.push(newScreen);
       saveProjectState();
+      updateJSON();
       draw();
     }
 
@@ -1271,6 +1275,7 @@
       input.id = 'inlineRenameInput';
       input.type = 'text';
       input.value = hitBox.currentName;
+      input.className = 'inline-rename-input';
 
       const inputLeft = window.scrollX + canvasRect.left + hitBox.x - 4;
       const inputTop = window.scrollY + canvasRect.top + hitBox.y - 4;
@@ -1283,16 +1288,13 @@
         width: `${inputWidth}px`,
         height: '24px',
         background: '#0f172a',
-        color: '#34d399',
-        border: '2px solid #34d399',
         borderRadius: '6px',
         fontFamily: 'Outfit, sans-serif',
         fontSize: '12px',
         fontWeight: '600',
         padding: '2px 8px',
         zIndex: '9999',
-        outline: 'none',
-        boxShadow: '0 0 16px rgba(52, 211, 153, 0.5)'
+        outline: 'none'
       });
 
       document.body.appendChild(input);
@@ -1397,7 +1399,7 @@
           dragStartX = mx - s.x;
           dragStartY = my - s.y;
 
-          if (isDetected && s.group) {
+          if (s.group) {
             // Group Drag: Record initial positions of screens in this specific computer group
             initialDetectedGroup = screens
               .filter(scr => scr.group === s.group)
@@ -1409,19 +1411,16 @@
                 startLayoutX: scr.layoutX !== undefined ? scr.layoutX : 0,
                 startLayoutY: scr.layoutY !== undefined ? scr.layoutY : 0
               }));
-          } else if (isDetected) {
-            initialDetectedGroup = screens
-              .filter(scr => scr.isDetected || scr.isLocked)
-              .map(scr => ({
-                id: scr.id,
-                screen: scr,
-                startX: scr.x,
-                startY: scr.y,
-                startLayoutX: scr.layoutX !== undefined ? scr.layoutX : 0,
-                startLayoutY: scr.layoutY !== undefined ? scr.layoutY : 0
-              }));
           } else {
-            initialDetectedGroup = [];
+            // Single screen without group: treat as a group of one
+            initialDetectedGroup = [{
+              id: s.id,
+              screen: s,
+              startX: s.x,
+              startY: s.y,
+              startLayoutX: s.layoutX !== undefined ? s.layoutX : 0,
+              startLayoutY: s.layoutY !== undefined ? s.layoutY : 0
+            }];
           }
 
           draw();
@@ -1487,10 +1486,8 @@
 
       // Handle Drag & Drop
       if (isDragging && selectedScreen) {
-        const isDetected = selectedScreen.isDetected || selectedScreen.isLocked;
-
-        if (isDetected && initialDetectedGroup.length > 0) {
-          // --- Grouped Drag for Auto-Detected Screens with Rigid Magnetic Alignment Guides ---
+        if (initialDetectedGroup.length > 0) {
+          // --- Grouped Drag with Rigid Magnetic Alignment Guides (Layout Space) ---
           const anchor = initialDetectedGroup.find(g => g.id === selectedScreen.id);
           const anchorStartX = anchor ? anchor.startX : selectedScreen.x;
           const anchorStartY = anchor ? anchor.startY : selectedScreen.y;
@@ -1593,67 +1590,6 @@
             g.screen.layoutY = g.startLayoutY + deltaLayoutY;
           });
 
-          draw();
-          return;
-        } else if (!isDetected) {
-          // --- Individual Drag & Drop for Manual Screens ---
-          const sw = selectedScreen.width * scale;
-          const sh = selectedScreen.height * scale;
-
-          let newX = mx - dragStartX;
-          let newY = my - dragStartY;
-
-          snapGuides = [];
-          const SNAP_DIST = 16;
-
-          screens.forEach(other => {
-            if (other === selectedScreen) return;
-
-            const ow = other.width * scale;
-            const oh = other.height * scale;
-
-            if (Math.abs(newX - (other.x + ow)) < SNAP_DIST) {
-              newX = other.x + ow;
-              snapGuides.push({ type: 'v', pos: newX });
-            }
-            if (Math.abs((newX + sw) - other.x) < SNAP_DIST) {
-              newX = other.x - sw;
-              snapGuides.push({ type: 'v', pos: other.x });
-            }
-            if (Math.abs(newX - other.x) < SNAP_DIST) {
-              newX = other.x;
-              snapGuides.push({ type: 'v', pos: newX });
-            }
-            if (Math.abs((newX + sw) - (other.x + ow)) < SNAP_DIST) {
-              newX = other.x + ow - sw;
-              snapGuides.push({ type: 'v', pos: other.x + ow });
-            }
-
-            if (Math.abs(newY - (other.y + oh)) < SNAP_DIST) {
-              newY = other.y + oh;
-              snapGuides.push({ type: 'h', pos: newY });
-            }
-            if (Math.abs((newY + sh) - other.y) < SNAP_DIST) {
-              newY = other.y - sh;
-              snapGuides.push({ type: 'h', pos: other.y });
-            }
-            if (Math.abs(newY - other.y) < SNAP_DIST) {
-              newY = other.y;
-              snapGuides.push({ type: 'h', pos: newY });
-            }
-            if (Math.abs((newY + sh) - (other.y + oh)) < SNAP_DIST) {
-              newY = other.y + oh - sh;
-              snapGuides.push({ type: 'h', pos: other.y + oh });
-            }
-          });
-
-          if (newX < 0) newX = 0;
-          if (newX + sw > canvas.width) newX = canvas.width - sw;
-          if (newY < 0) newY = 0;
-          if (newY + sh > canvas.height) newY = canvas.height - sh;
-
-          selectedScreen.x = newX;
-          selectedScreen.y = newY;
           draw();
         }
       }

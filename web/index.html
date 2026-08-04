@@ -40,7 +40,7 @@
       min-height: 100vh;
       display: flex;
       flex-direction: column;
-      padding: 24px;
+      padding: 10px;
     }
 
     header {
@@ -50,123 +50,109 @@
       background: var(--bg-card);
       backdrop-filter: blur(12px);
       border: 1px solid var(--border-color);
-      border-radius: var(--radius);
-      padding: 20px 28px;
-      margin-bottom: 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      border-radius: 12px;
+      padding: 8px 16px;
+      margin-bottom: 10px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
     }
 
     .logo-container {
       display: flex;
       align-items: center;
-      gap: 14px;
-    }
-
-    .logo-icon {
-      width: 44px;
-      height: 44px;
-      background: linear-gradient(135deg, var(--primary), var(--accent));
-      border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      font-size: 20px;
-      color: #0f172a;
-      box-shadow: 0 0 20px var(--primary-glow);
+      gap: 10px;
     }
 
     h1 {
-      font-size: 22px;
-      font-weight: 600;
-      letter-spacing: -0.5px;
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
     }
 
     .status-badge {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       background: rgba(15, 23, 42, 0.6);
       border: 1px solid var(--border-color);
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 14px;
+      padding: 4px 12px;
+      border-radius: 16px;
+      font-size: 12px;
       font-weight: 500;
     }
 
     .status-dot {
-      width: 10px;
-      height: 10px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
       background-color: var(--danger);
-      box-shadow: 0 0 10px var(--danger);
+      box-shadow: 0 0 8px var(--danger);
       transition: all 0.3s ease;
     }
 
     .status-dot.connected {
       background-color: var(--success);
-      box-shadow: 0 0 12px var(--success);
+      box-shadow: 0 0 10px var(--success);
     }
 
     .main-grid {
       display: grid;
-      grid-template-columns: 360px 1fr;
-      gap: 24px;
+      grid-template-columns: 20% 80%;
+      gap: 10px;
       flex: 1;
     }
 
     .sidebar {
       display: flex;
       flex-direction: column;
-      gap: 24px;
+      gap: 10px;
     }
 
     .card {
       background: var(--bg-card);
       backdrop-filter: blur(12px);
       border: 1px solid var(--border-color);
-      border-radius: var(--radius);
-      padding: 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
     }
 
     .card-title {
-      font-size: 16px;
+      font-size: 13px;
       font-weight: 600;
-      margin-bottom: 16px;
+      margin-bottom: 8px;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       color: var(--primary);
     }
 
     .btn-group {
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 6px;
     }
 
     .btn {
       background: linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(129, 140, 248, 0.15));
       border: 1px solid var(--primary);
       color: var(--text-main);
-      padding: 12px 18px;
-      border-radius: 12px;
-      font-size: 14px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
       font-weight: 500;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 10px;
+      gap: 6px;
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .btn:hover {
       background: linear-gradient(135deg, var(--primary), var(--accent));
       color: #0f172a;
-      box-shadow: 0 0 20px var(--primary-glow);
-      transform: translateY(-2px);
+      box-shadow: 0 0 16px var(--primary-glow);
+      transform: translateY(-1px);
     }
 
     .btn-secondary {
@@ -189,18 +175,18 @@
     .preset-list {
       display: flex;
       flex-direction: column;
-      gap: 4px;
-      max-height: 240px;
+      gap: 3px;
+      max-height: 180px;
       overflow-y: auto;
-      padding-right: 4px;
+      padding-right: 2px;
     }
 
     .preset-item {
       background: rgba(15, 23, 42, 0.4);
       border: 1px solid rgba(255, 255, 255, 0.05);
       border-radius: 6px;
-      padding: 5px 10px;
-      font-size: 12px;
+      padding: 4px 8px;
+      font-size: 11px;
       cursor: pointer;
       display: flex;
       justify-content: space-between;
@@ -215,13 +201,13 @@
 
     .preset-res {
       font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
+      font-size: 11px;
       font-weight: 600;
       color: var(--primary);
     }
 
     .preset-name {
-      font-size: 11px;
+      font-size: 10px;
       color: var(--text-muted);
       white-space: nowrap;
       text-overflow: ellipsis;
@@ -231,27 +217,29 @@
     .editor-container {
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      flex: 1;
     }
 
     .canvas-wrapper {
       position: relative;
       background: rgba(15, 23, 42, 0.8);
       border: 1px solid var(--border-color);
-      border-radius: var(--radius);
+      border-radius: 12px;
       overflow: hidden;
-      min-height: 620px;
+      flex: 1;
+      min-height: 600px;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      box-shadow: inset 0 0 40px rgba(0,0,0,0.5);
+      box-shadow: inset 0 0 30px rgba(0,0,0,0.5);
     }
 
     #screenCanvas {
       background: transparent;
       width: 100%;
-      height: 620px;
+      height: 100%;
+      min-height: 600px;
       cursor: grab;
     }
 
@@ -260,44 +248,46 @@
     }
 
     .canvas-instructions {
-      position: absolute;
-      bottom: 16px;
-      left: 20px;
-      font-size: 13px;
+      font-size: 11px;
       color: var(--text-muted);
-      background: rgba(15, 23, 42, 0.8);
-      padding: 6px 14px;
-      border-radius: 20px;
-      border: 1px solid var(--border-color);
-      pointer-events: none;
-    }
-
-    .json-output {
-      background: rgba(15, 23, 42, 0.9);
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 14px;
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      color: var(--success);
-      max-height: 120px;
-      overflow-y: auto;
-      white-space: pre-wrap;
+      margin-top: 6px;
+      text-align: center;
     }
 
     .detected-info {
       background: rgba(56, 189, 248, 0.08);
       border: 1px solid rgba(56, 189, 248, 0.2);
-      border-radius: 12px;
-      padding: 12px 16px;
-      margin-bottom: 14px;
-      font-size: 13px;
-      line-height: 1.5;
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      font-size: 11px;
+      line-height: 1.4;
     }
 
     .detected-info span {
       font-weight: 600;
       color: var(--primary);
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 6px;
+      }
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 8px 12px;
+      }
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+      .canvas-wrapper {
+        min-height: 400px;
+      }
+      #screenCanvas {
+        min-height: 400px;
+      }
     }
   </style>
 </head>
@@ -307,7 +297,7 @@
     <div class="logo-container">
       <div>
         <h1>ESP32 Bluetooth KVM Switcher</h1>
-        <p style="font-size: 12px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
+        <p style="font-size: 11px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
       </div>
     </div>
     <div class="status-badge">
@@ -336,9 +326,9 @@
       <!-- Multi-Screen Detection Card -->
       <div class="card">
         <div class="card-title">2. Auto Detect</div>
-        <div style="margin-bottom: 10px;">
-          <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 4px;">Computer Label / Group Name:</label>
-          <input type="text" id="pcNameInput" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 6px 10px; font-size: 13px;" placeholder="e.g. Lenovo Laptop, PC 1">
+        <div style="margin-bottom: 8px;">
+          <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 3px;">Computer Label / Group Name:</label>
+          <input type="text" id="pcNameInput" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 4px 8px; font-size: 12px;" placeholder="e.g. Lenovo Laptop, PC 1">
         </div>
         <div class="detected-info" id="detectBox">
           Detects connected displays from OS.
@@ -358,34 +348,28 @@
 
     </div>
 
-    <!-- Main Canvas & JSON Editor -->
+    <!-- Main Canvas & Editor Controls -->
     <div class="editor-container">
       <div class="card" style="flex: 1; display: flex; flex-direction: column;">
-        <div class="card-title" style="justify-content: space-between;">
-          <span>Screen Layout</span>
-          <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 6px 12px; font-size: 12px;">Clear All</button>
+        <div class="card-title" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <span style="font-size: 14px;">Screen Layout</span>
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <div id="driveSyncBadge" style="font-size: 11px; color: #94a3b8; cursor: pointer;" title="Click to sync with G:\My Drive\ESP32\kvm_config.json">Drive Sync</div>
+            <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 4px 10px; font-size: 11px;">Clear All</button>
+            <button class="btn" id="btnSyncESP32" style="padding: 4px 12px; font-size: 11px;">Save to ESP32 Flash</button>
+          </div>
         </div>
 
         <div class="canvas-wrapper">
           <canvas id="screenCanvas"></canvas>
-          <div class="canvas-instructions">Drag screens to position. Auto-detected screens move together as a fixed group and cannot be resized.</div>
         </div>
-
-        <div style="margin-top: 16px; display: flex; justify-content: space-between; align-items: center;">
-          <div class="card-title" style="font-size: 14px;">ESP32 Config (JSON):</div>
-          <div id="driveSyncBadge" style="font-size: 12px; color: #94a3b8; cursor: pointer;" title="Click to sync with G:\My Drive\ESP32\kvm_config.json">Drive Sync</div>
-        </div>
-        <div class="json-output" id="jsonOutput">{}</div>
-
-        <button class="btn" id="btnSyncESP32" style="margin-top: 16px;">
-          <span>Save to ESP32 Flash</span>
-        </button>
+        <div class="canvas-instructions">Drag screens to position. Auto-detected screens move together as a fixed group and cannot be resized.</div>
       </div>
     </div>
   </div>
 
   <script>
-    const BUILD_VERSION = 44;
+    const BUILD_VERSION = 45;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -675,6 +659,7 @@
     let snapGuides = [];
     let dragLockedScale = null; // Lock scale during drag to prevent size changes
     let lastComputedScale = 0.12; // Track actual fitScale from last draw()
+    let currentConfigJSON = '{}';
 
     const canvas = document.getElementById('screenCanvas');
     const ctx = canvas.getContext('2d');
@@ -1232,11 +1217,13 @@
 
     function updateJSON() {
       if (!screens || screens.length === 0) {
-        document.getElementById('jsonOutput').textContent = JSON.stringify({
+        currentConfigJSON = JSON.stringify({
           device: "ESP32-KVM-Switch",
           total_screens: 0,
           layout: []
         }, null, 2);
+        const elem = document.getElementById('jsonOutput');
+        if (elem) elem.textContent = currentConfigJSON;
         return;
       }
 
@@ -1273,7 +1260,9 @@
         })
       };
 
-      document.getElementById('jsonOutput').textContent = JSON.stringify(config, null, 2);
+      currentConfigJSON = JSON.stringify(config, null, 2);
+      const jsonElem = document.getElementById('jsonOutput');
+      if (jsonElem) jsonElem.textContent = currentConfigJSON;
     }
 
     function startInlineGroupRename(screenObj, hitBox) {
@@ -1709,7 +1698,7 @@
     });
 
     document.getElementById('btnSyncESP32').addEventListener('click', async () => {
-      const jsonText = document.getElementById('jsonOutput').textContent;
+      const jsonText = currentConfigJSON;
       
       if (!driveFileHandle && 'showSaveFilePicker' in window) {
         try {

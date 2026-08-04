@@ -385,7 +385,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 39;
+    const BUILD_VERSION = 40;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -673,6 +673,7 @@
     let dragStartX = 0, dragStartY = 0;
     let initialDetectedGroup = [];
     let snapGuides = [];
+    let dragLockedScale = null; // Lock scale during drag to prevent size changes
 
     const canvas = document.getElementById('screenCanvas');
     const ctx = canvas.getContext('2d');
@@ -1092,6 +1093,10 @@
         const scaleY = (canvas.height - 140) / Math.max(maxLY, 1080);
         fitScale = Math.min(0.12, Math.max(0.04, scaleX), Math.max(0.04, scaleY));
       }
+      // Lock scale during drag so monitors don't change size while dragging
+      if (isDragging && dragLockedScale !== null) {
+        fitScale = dragLockedScale;
+      }
       const scale = fitScale;
 
       const baseCanvasX = 60;
@@ -1399,6 +1404,9 @@
           dragStartX = mx - s.x;
           dragStartY = my - s.y;
 
+          // Lock current scale to prevent size changes during drag
+          dragLockedScale = scale;
+
           if (s.group) {
             // Group Drag: Record initial positions of screens in this specific computer group
             initialDetectedGroup = screens
@@ -1616,6 +1624,66 @@
             }
           });
 
+          // --- Overlap Resolution: push overlapping monitors apart ---
+          if (isDragging && selectedScreen) {
+            const draggedGroup = selectedScreen.group;
+            const draggedScreens = screens.filter(s => s.group === draggedGroup);
+            const otherScreens = screens.filter(s => s.group !== draggedGroup);
+
+            for (const ds of draggedScreens) {
+              for (const os of otherScreens) {
+                const dlx = ds.layoutX, dly = ds.layoutY;
+                const dlw = ds.width, dlh = ds.height;
+                const olx = os.layoutX, oly = os.layoutY;
+                const olw = os.width, olh = os.height;
+
+                // Check if rectangles overlap in layout space
+                const overlapX = dlx < olx + olw && dlx + dlw > olx;
+                const overlapY = dly < oly + olh && dly + dlh > oly;
+
+                if (overlapX && overlapY) {
+                  // Calculate minimal push distances in each direction
+                  const pushRight = (olx + olw) - dlx;
+                  const pushLeft = dlx + dlw - olx;
+                  const pushUp = (oly + olh) - dly;
+                  const pushDown = dly + dlh - oly;
+
+                  const minPush = Math.min(pushRight, pushLeft, pushUp, pushDown);
+
+                  if (minPush === pushRight) {
+                    // Push dragged group right
+                    const shift = pushRight;
+                    draggedScreens.forEach(s => s.layoutX += shift);
+                  } else if (minPush === pushLeft) {
+                    // Push dragged group left
+                    const shift = pushLeft;
+                    draggedScreens.forEach(s => s.layoutX -= shift);
+                  } else if (minPush === pushUp) {
+                    // Push dragged group up (higher Y in layout)
+                    const shift = pushUp;
+                    draggedScreens.forEach(s => s.layoutY += shift);
+                  } else {
+                    // Push dragged group down (lower Y in layout)
+                    const shift = pushDown;
+                    draggedScreens.forEach(s => s.layoutY -= shift);
+                  }
+                  // Re-normalize after push
+                  const newMinX = Math.min(...screens.map(s => s.layoutX));
+                  const newMinY = Math.min(...screens.map(s => s.layoutY));
+                  screens.forEach(s => { s.layoutX -= newMinX; s.layoutY -= newMinY; });
+                  break; // one push per drop is enough
+                }
+              }
+              // Break outer loop too after first overlap resolved
+              const stillOverlaps = otherScreens.some(os => {
+                const ds2 = draggedScreens[0];
+                return ds2.layoutX < os.layoutX + os.width && ds2.layoutX + ds2.width > os.layoutX &&
+                       ds2.layoutY < os.layoutY + os.height && ds2.layoutY + ds2.height > os.layoutY;
+              });
+              if (!stillOverlaps) break;
+            }
+          }
+
           // Log calculated relative coordinates for all monitors
           const coordsSummary = screens.map(s => `${s.name} [${s.groupName || 'Group'}]: (x=${s.layoutX}, y=${s.layoutY})`).join(' | ');
           console.log(`Calculated Relative Coordinates (Build v${BUILD_VERSION}): ${coordsSummary}`);
@@ -1628,6 +1696,7 @@
       isResizing = false;
       resizeScreen = null;
       snapGuides = [];
+      dragLockedScale = null; // Unlock scale so draw() recalculates fitScale
       draw();
     });
 

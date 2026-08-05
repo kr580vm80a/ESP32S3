@@ -412,7 +412,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 60;
+    const BUILD_VERSION = 61;
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
     const GROUP_COLORS = ['#34d399', '#38bdf8', '#a855f7', '#f43f5e', '#fbbf24', '#818cf8'];
@@ -782,6 +782,8 @@
       const active = getActiveLayout();
       screens = active.screens;
     }
+
+    function saveProjectState() {}
 
     function loadSavedProjectState() {
       layoutsData = {
@@ -2025,7 +2027,6 @@
           console.log(`Calculated Relative Coordinates (Build v${BUILD_VERSION}): ${coordsSummary}`);
         }
 
-        saveProjectState();
         updateJSON();
       }
       isDragging = false;

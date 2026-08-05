@@ -412,8 +412,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 59;
-    const STORAGE_KEY = 'esp32_kvm_project_config_v7';
+    const BUILD_VERSION = 60;
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
     const GROUP_COLORS = ['#34d399', '#38bdf8', '#a855f7', '#f43f5e', '#fbbf24', '#818cf8'];
@@ -428,12 +427,8 @@
       return GROUP_COLORS[index];
     }
 
-    // Persistent Device Identification for Multi-Computer KVM Layout
-    let currentDeviceId = localStorage.getItem('kvm_device_id');
-    if (!currentDeviceId) {
-      currentDeviceId = 'PC_' + Math.random().toString(36).substring(2, 7).toUpperCase();
-      localStorage.setItem('kvm_device_id', currentDeviceId);
-    }
+    // Device Identification for Multi-Computer KVM Layout (In-memory)
+    let currentDeviceId = 'PC_' + Math.random().toString(36).substring(2, 7).toUpperCase();
 
     function isMobileOrTabletDevice() {
       const ua = (navigator.userAgent || '').toUpperCase();
@@ -734,9 +729,6 @@
     async function saveESP32Config(configData) {
       const jsonText = typeof configData === 'string' ? configData : currentConfigJSON;
 
-      // 1. Save to LocalStorage (browser cache) ONLY on explicit Save click
-      saveProjectState();
-
       if (driveFileHandle) {
         try {
           if (await verifyFilePermission(driveFileHandle, true)) {
@@ -750,7 +742,7 @@
         }
       }
 
-      // 3. ESP32 Hardware Flash Sync
+      // ESP32 Hardware Flash Sync
       if (window.esp32SerialPort && window.esp32SerialPort.writable) {
         try {
           const writer = window.esp32SerialPort.writable.getWriter();
@@ -791,35 +783,7 @@
       screens = active.screens;
     }
 
-    function saveProjectState() {
-      localStorage.setItem(STORAGE_KEY, currentConfigJSON);
-    }
-
     function loadSavedProjectState() {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed && typeof parsed === 'object' && parsed.layouts && Array.isArray(parsed.layouts) && parsed.layouts.length > 0) {
-            const activeId = parsed.active_layout_id || parsed.activeLayoutId || (parsed.layouts[0] ? parsed.layouts[0].id : 'layout_1');
-            layoutsData = {
-              activeLayoutId: activeId,
-              layouts: parsed.layouts.map(l => ({
-                id: l.id || ('layout_' + Math.random()),
-                name: l.name || 'Layout',
-                screens: parseLayoutToScreens(l.screens || l.layout || [])
-              }))
-            };
-            if (!layoutsData.layouts.some(l => l.id === layoutsData.activeLayoutId)) {
-              layoutsData.activeLayoutId = layoutsData.layouts[0].id;
-            }
-            syncScreensReference();
-            return;
-          }
-        } catch (e) {
-          console.warn('Error parsing saved project config:', e);
-        }
-      }
       layoutsData = {
         activeLayoutId: 'layout_1',
         layouts: [
@@ -2335,7 +2299,7 @@
       }
 
       if (screens.length > 0) {
-        console.log(`Loaded layout from LocalStorage (Build v${BUILD_VERSION})`);
+        console.log(`Loaded layout configuration (Build v${BUILD_VERSION})`);
       }
 
       draw();

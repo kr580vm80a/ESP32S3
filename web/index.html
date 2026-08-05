@@ -203,9 +203,29 @@
       border-color: rgba(248, 113, 113, 0.4);
     }
 
+    .icon-btn-primary {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(129, 140, 248, 0.2));
+      border: 1px solid var(--primary);
+      color: var(--primary);
+    }
+
+    .icon-btn-primary:hover {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: #0f172a;
+      box-shadow: 0 0 12px var(--primary-glow);
+      transform: translateY(-1px);
+    }
+
     .inline-rename-input {
-      color: #34d399;
+      background: #0f172a;
       border: 2px solid #34d399;
+      color: #34d399;
+      font-weight: 700;
+      border-radius: 6px;
+      padding: 3px 8px;
+      font-size: 12px;
+      font-family: 'Outfit', sans-serif;
+      outline: none;
       box-shadow: 0 0 16px rgba(52, 211, 153, 0.5);
     }
 
@@ -440,10 +460,16 @@
           </div>
 
           <!-- Right: Sync & Clear Actions -->
-          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
             <div id="driveSyncBadge" style="font-size: 11px; color: #94a3b8; cursor: pointer;" title="Click to sync with Google Drive / ESP32 Flash">Drive Sync</div>
-            <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 4px 10px; font-size: 11px;">Clear</button>
-            <button class="btn" id="btnSyncESP32" style="padding: 4px 12px; font-size: 11px;">Save to ESP32 Flash</button>
+            
+            <button class="icon-btn icon-btn-danger" onclick="clearScreens()" title="Clear Active Layout Screens">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+            </button>
+
+            <button class="icon-btn icon-btn-primary" id="btnSyncESP32" title="Save to ESP32 Flash">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            </button>
           </div>
         </div>
 
@@ -456,7 +482,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 62;
+    const BUILD_VERSION = 63;
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
     const GROUP_COLORS = ['#34d399', '#38bdf8', '#a855f7', '#f43f5e', '#fbbf24', '#818cf8'];
@@ -911,7 +937,9 @@
       const input = document.createElement('input');
       input.type = 'text';
       input.value = active.name;
-      input.style.cssText = 'background: #0f172a; border: 2px solid var(--primary); color: #34d399; font-weight: 700; border-radius: 6px; padding: 3px 8px; font-size: 12px; font-family: inherit; width: 140px; height: 28px; outline: none; box-shadow: 0 0 12px var(--primary-glow);';
+      input.className = 'inline-rename-input';
+      input.style.width = '140px';
+      input.style.height = '28px';
 
       wrapper.innerHTML = '';
       wrapper.appendChild(input);

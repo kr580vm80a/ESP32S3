@@ -261,7 +261,7 @@
       width: 100%;
       height: 100%;
       background: transparent;
-      cursor: grab;
+      cursor: default;
     }
 
     #screenCanvas:active {
@@ -399,7 +399,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 52;
+    const BUILD_VERSION = 53;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1496,6 +1496,7 @@
       let hoveringDelete = false;
       let hoveringResize = false;
       let hoveringName = false;
+      let hoveringScreen = false;
 
       screens.forEach(s => {
         const isDetected = s.isDetected || s.isLocked;
@@ -1513,6 +1514,12 @@
             hoveringName = true;
           }
         }
+
+        const sw = s.width * activeScale;
+        const sh = s.height * activeScale;
+        if (mx >= s.x && mx <= s.x + sw && my >= s.y && my <= s.y + sh) {
+          hoveringScreen = true;
+        }
       });
 
       if (hoveringDelete || hoveringName) {
@@ -1521,8 +1528,10 @@
         canvas.style.cursor = 'nwse-resize';
       } else if (isDragging) {
         canvas.style.cursor = 'grabbing';
-      } else {
+      } else if (hoveringScreen) {
         canvas.style.cursor = 'grab';
+      } else {
+        canvas.style.cursor = 'default';
       }
 
       // Handle Preset-Snapping Resize Stretch (Only for manual screens)

@@ -389,7 +389,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 50;
+    const BUILD_VERSION = 51;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -693,6 +693,11 @@
     }
     window.addEventListener('resize', resizeCanvas);
     window.addEventListener('load', resizeCanvas);
+
+    if (window.ResizeObserver && canvas && canvas.parentElement) {
+      const ro = new ResizeObserver(() => resizeCanvas());
+      ro.observe(canvas.parentElement);
+    }
 
     // Multi-Monitor Detection using strict preset snapping
     document.getElementById('btnAutoDetect').addEventListener('click', async () => {

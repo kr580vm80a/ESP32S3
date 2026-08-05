@@ -412,7 +412,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 58;
+    const BUILD_VERSION = 59;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -732,12 +732,9 @@
 
     // --- Modular ESP32 Storage Function (Reusable for ESP32 hardware Flash/Serial sync) ---
     async function saveESP32Config(configData) {
-      const jsonText = typeof configData === 'string' ? configData : JSON.stringify(configData, null, 2);
+      const jsonText = typeof configData === 'string' ? configData : currentConfigJSON;
 
-      // 1. Save to LocalStorage (browser cache)
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
-
-      // 1. Save to LocalStorage (browser cache)
+      // 1. Save to LocalStorage (browser cache) ONLY on explicit Save click
       saveProjectState();
 
       if (driveFileHandle) {
@@ -746,14 +743,14 @@
             const writable = await driveFileHandle.createWritable();
             await writable.write(jsonText);
             await writable.close();
-            console.log('Auto-saved config to Google Drive file: ' + driveFileHandle.name);
+            console.log('Saved config to Google Drive file: ' + driveFileHandle.name);
           }
         } catch (err) {
           console.warn('Google Drive file save failed:', err);
         }
       }
 
-      // 3. ESP32 Hardware Flash Sync (Ready for AliExpress board arrival)
+      // 3. ESP32 Hardware Flash Sync
       if (window.esp32SerialPort && window.esp32SerialPort.writable) {
         try {
           const writer = window.esp32SerialPort.writable.getWriter();
@@ -795,7 +792,7 @@
     }
 
     function saveProjectState() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(layoutsData));
+      localStorage.setItem(STORAGE_KEY, currentConfigJSON);
     }
 
     function loadSavedProjectState() {
@@ -804,8 +801,16 @@
         try {
           const parsed = JSON.parse(saved);
           if (parsed && typeof parsed === 'object' && parsed.layouts && Array.isArray(parsed.layouts) && parsed.layouts.length > 0) {
-            layoutsData = parsed;
-            if (!layoutsData.activeLayoutId || !layoutsData.layouts.some(l => l.id === layoutsData.activeLayoutId)) {
+            const activeId = parsed.active_layout_id || parsed.activeLayoutId || (parsed.layouts[0] ? parsed.layouts[0].id : 'layout_1');
+            layoutsData = {
+              activeLayoutId: activeId,
+              layouts: parsed.layouts.map(l => ({
+                id: l.id || ('layout_' + Math.random()),
+                name: l.name || 'Layout',
+                screens: parseLayoutToScreens(l.screens || l.layout || [])
+              }))
+            };
+            if (!layoutsData.layouts.some(l => l.id === layoutsData.activeLayoutId)) {
               layoutsData.activeLayoutId = layoutsData.layouts[0].id;
             }
             syncScreensReference();
@@ -1353,15 +1358,17 @@
       if (selectedScreen && !screens.includes(selectedScreen)) {
         selectedScreen = null;
       }
-      saveProjectState();
+      updateJSON();
       draw();
     }
 
     function clearScreens() {
+      const active = getActiveLayout();
+      active.screens = [];
       screens = [];
       selectedScreen = null;
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      updateLayoutSelectorUI();
+      updateJSON();
       draw();
     }
 

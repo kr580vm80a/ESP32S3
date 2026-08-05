@@ -331,7 +331,7 @@
       <header>
         <div class="logo-container">
           <div>
-            <h1>ESP32 Bluetooth KVM Switcher <span id="appBuildVersion" style="font-size: 10px; font-weight: 500; color: var(--primary); background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle;">v55</span></h1>
+            <h1>ESP32 Bluetooth KVM Switcher <span id="appBuildVersion" style="font-size: 10px; font-weight: 500; color: var(--primary); background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle;">v56</span></h1>
             <p style="font-size: 10px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
           </div>
         </div>
@@ -400,7 +400,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 55;
+    const BUILD_VERSION = 56;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -556,6 +556,9 @@
     const PRESET_RESOLUTIONS = [
       [7680, 4320, '8K UHD (16:9)'],
       [5120, 2880, '5K UHD (16:9)'],
+      [5120, 2160, '5K2K / UW-5K (21:9)'],
+      [5120, 1440, 'DQHD (32:9)'],
+      [3840, 2400, 'WQUXGA (16:10)'],
       [3840, 2160, '4K UHD (16:9)'],
       [3840, 1600, 'UWQHD+ (21:9)'],
       [3440, 1440, 'UWQHD (21:9)'],

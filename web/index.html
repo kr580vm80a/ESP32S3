@@ -175,6 +175,34 @@
       box-shadow: none;
     }
 
+    .icon-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-color);
+      color: var(--text-muted);
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      padding: 0;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .icon-btn:hover {
+      background: rgba(255, 255, 255, 0.15);
+      color: var(--text-main);
+      border-color: rgba(255, 255, 255, 0.3);
+      transform: translateY(-1px);
+    }
+
+    .icon-btn-danger:hover {
+      background: rgba(248, 113, 113, 0.15);
+      color: #f87171;
+      border-color: rgba(248, 113, 113, 0.4);
+    }
+
     .inline-rename-input {
       color: #34d399;
       border: 2px solid #34d399;
@@ -382,17 +410,33 @@
     <!-- Main Canvas & Editor Controls -->
     <div class="editor-container">
       <div class="card" style="flex: 1; display: flex; flex-direction: column;">
-        <div class="card-title" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-          <!-- Left: Layout Selector & Profile Actions -->
-          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+        <div class="card-title" style="justify-content: space-between; flex-wrap: wrap; gap: 8px; align-items: center;">
+          <!-- Left: Layout Selector & Material Icon Actions -->
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;" id="layoutControlsContainer">
             <span style="font-size: 13px; font-weight: 700; color: var(--primary);">Layout:</span>
-            <select id="layoutSelect" onchange="switchLayout(this.value)" style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer;">
-              <!-- Populated dynamically -->
-            </select>
-            <button class="btn btn-secondary" onclick="addBlankLayout()" style="padding: 2px 7px; font-size: 11px;" title="Add New Blank Layout">+ New</button>
-            <button class="btn btn-secondary" onclick="duplicateCurrentLayout()" style="padding: 2px 7px; font-size: 11px;" title="Duplicate Active Layout">📋 Copy</button>
-            <button class="btn btn-secondary" onclick="renameCurrentLayout()" style="padding: 2px 7px; font-size: 11px;" title="Rename Active Layout">✏️</button>
-            <button class="btn btn-secondary" onclick="deleteCurrentLayout()" style="padding: 2px 7px; font-size: 11px; color: #f87171;" title="Delete Active Layout">🗑️</button>
+            
+            <div id="layoutSelectWrapper" style="display: inline-flex; align-items: center;">
+              <select id="layoutSelect" onchange="switchLayout(this.value)" style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: #f8fafc; border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer; height: 28px;">
+                <!-- Populated dynamically -->
+              </select>
+            </div>
+
+            <!-- Material Icon Buttons (Clean Muted Monochrome) -->
+            <button class="icon-btn" onclick="addBlankLayout()" title="Add New Layout">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            </button>
+            
+            <button class="icon-btn" onclick="duplicateCurrentLayout()" title="Duplicate Active Layout">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            </button>
+
+            <button class="icon-btn" onclick="startInlineLayoutRename()" title="Rename Active Layout">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+            </button>
+
+            <button class="icon-btn icon-btn-danger" onclick="deleteCurrentLayout()" title="Delete Active Layout">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
           </div>
 
           <!-- Right: Sync & Clear Actions -->
@@ -412,7 +456,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 61;
+    const BUILD_VERSION = 62;
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
     const GROUP_COLORS = ['#34d399', '#38bdf8', '#a855f7', '#f43f5e', '#fbbf24', '#818cf8'];
@@ -859,14 +903,54 @@
       draw();
     }
 
-    function renameCurrentLayout() {
+    function startInlineLayoutRename() {
       const active = getActiveLayout();
-      const name = prompt('Змінити назву поточної конфігурації:', active.name);
-      if (name === null) return;
-      const cleanName = name.trim() || active.name;
-      active.name = cleanName;
-      updateLayoutSelectorUI();
-      updateJSON();
+      const wrapper = document.getElementById('layoutSelectWrapper');
+      if (!wrapper) return;
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = active.name;
+      input.style.cssText = 'background: #0f172a; border: 2px solid var(--primary); color: #34d399; font-weight: 700; border-radius: 6px; padding: 3px 8px; font-size: 12px; font-family: inherit; width: 140px; height: 28px; outline: none; box-shadow: 0 0 12px var(--primary-glow);';
+
+      wrapper.innerHTML = '';
+      wrapper.appendChild(input);
+      input.focus();
+      input.select();
+
+      let finished = false;
+      function commitRename(shouldSave) {
+        if (finished) return;
+        finished = true;
+
+        if (shouldSave && input.value.trim()) {
+          active.name = input.value.trim();
+        }
+
+        wrapper.innerHTML = '';
+        const select = document.createElement('select');
+        select.id = 'layoutSelect';
+        select.onchange = function() { switchLayout(this.value); };
+        select.style.cssText = 'background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: #f8fafc; border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer; height: 28px;';
+        wrapper.appendChild(select);
+
+        updateLayoutSelectorUI();
+        updateJSON();
+      }
+
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          commitRename(true);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          commitRename(false);
+        }
+      });
+
+      input.addEventListener('blur', () => {
+        setTimeout(() => commitRename(true), 150);
+      });
     }
 
     function deleteCurrentLayout() {

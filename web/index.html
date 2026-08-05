@@ -262,6 +262,7 @@
       height: 100%;
       background: transparent;
       cursor: default;
+      touch-action: none;
     }
 
     #screenCanvas:active {
@@ -330,7 +331,7 @@
       <header>
         <div class="logo-container">
           <div>
-            <h1>ESP32 Bluetooth KVM Switcher</h1>
+            <h1>ESP32 Bluetooth KVM Switcher <span id="appBuildVersion" style="font-size: 10px; font-weight: 500; color: var(--primary); background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle;">v55</span></h1>
             <p style="font-size: 10px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
           </div>
         </div>
@@ -399,7 +400,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 54;
+    const BUILD_VERSION = 55;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -422,10 +423,87 @@
       localStorage.setItem('kvm_device_id', currentDeviceId);
     }
 
+    function isMobileOrTabletDevice() {
+      const ua = (navigator.userAgent || '').toUpperCase();
+      const platform = (navigator.platform || '').toUpperCase();
+      const isAndroid = ua.includes('ANDROID') || (navigator.userAgentData && navigator.userAgentData.platform === 'Android');
+      const isIOS = ua.includes('IPHONE') || ua.includes('IPAD') || ua.includes('IPOD') || (platform.includes('MACINTEL') && navigator.maxTouchPoints > 1);
+      const isMobileUA = ua.includes('MOBI') || (navigator.userAgentData && navigator.userAgentData.mobile);
+      return isAndroid || isIOS || isMobileUA;
+    }
+
+    function detectIPhoneModel(w, h, ratio) {
+      const minDim = Math.min(w, h);
+      const maxDim = Math.max(w, h);
+      if (minDim === 430 && maxDim === 932) return 'iPhone 14 Pro Max / 15 Pro Max';
+      if (minDim === 402 && maxDim === 874) return 'iPhone 16 Pro';
+      if (minDim === 393 && maxDim === 852) return 'iPhone 14 Pro / 15 / 16';
+      if (minDim === 428 && maxDim === 926) return 'iPhone 12/13 Pro Max';
+      if (minDim === 390 && maxDim === 844) return 'iPhone 12 / 13 / 14';
+      if (minDim === 375 && maxDim === 812) return 'iPhone 11 Pro / XS / X / 12 mini';
+      if (minDim === 414 && maxDim === 896 && ratio >= 3) return 'iPhone XS Max / 11 Pro Max';
+      if (minDim === 414 && maxDim === 896) return 'iPhone 11 / XR';
+      if (minDim === 414 && maxDim === 736) return 'iPhone 8 Plus / 7 Plus';
+      if (minDim === 375 && maxDim === 667) return 'iPhone SE / 8 / 7';
+      if (minDim === 320 && maxDim === 568) return 'iPhone SE (1st gen)';
+      return 'iPhone';
+    }
+
+    function detectIPadModel(w, h) {
+      const minDim = Math.min(w, h);
+      const maxDim = Math.max(w, h);
+      if (minDim === 1024 && maxDim === 1366) return 'iPad Pro 12.9"';
+      if (minDim === 834 && maxDim === 1194) return 'iPad Pro 11"';
+      if (minDim === 820 && maxDim === 1180) return 'iPad Air / iPad 10th gen';
+      if (minDim === 834 && maxDim === 1112) return 'iPad Pro 10.5"';
+      if (minDim === 744 && maxDim === 1133) return 'iPad mini';
+      if (minDim === 768 && maxDim === 1024) return 'iPad';
+      return 'iPad';
+    }
+
     async function getDetectedOSName() {
       const platform = (navigator.platform || '').toUpperCase();
-      const ua = (navigator.userAgent || '').toUpperCase();
+      const rawUA = navigator.userAgent || '';
+      const ua = rawUA.toUpperCase();
+      const ratio = window.devicePixelRatio || 1;
+      const sw = window.screen.width;
+      const sh = window.screen.height;
 
+      // 1. iOS Devices (iPhone / iPad)
+      const isIPhone = ua.includes('IPHONE') || ua.includes('IPOD');
+      const isIPad = ua.includes('IPAD') || (platform.includes('MACINTEL') && navigator.maxTouchPoints > 1);
+
+      if (isIPhone) return detectIPhoneModel(sw, sh, ratio);
+      if (isIPad) return detectIPadModel(sw, sh);
+
+      // 2. Android Devices
+      const isAndroid = ua.includes('ANDROID') || (navigator.userAgentData && navigator.userAgentData.platform === 'Android');
+      if (isAndroid) {
+        if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
+          try {
+            const hints = await navigator.userAgentData.getHighEntropyValues(['platform', 'model']);
+            if (hints.model && hints.model.trim()) {
+              const m = hints.model.trim();
+              if (m.toUpperCase().startsWith('ANDROID')) return m;
+              return `Android (${m})`;
+            }
+          } catch (e) {}
+        }
+
+        const match = rawUA.match(/Android\s+[^;]+;\s*([^;)]+)\s*(?:Build|\))/i);
+        if (match && match[1]) {
+          const modelStr = match[1].trim();
+          if (modelStr && !modelStr.toLowerCase().includes('wv') && modelStr.length < 30) {
+            if (modelStr.toUpperCase().startsWith('ANDROID')) return modelStr;
+            return `Android (${modelStr})`;
+          }
+        }
+
+        const isMobile = ua.includes('MOBI') || (navigator.userAgentData && navigator.userAgentData.mobile);
+        return isMobile ? 'Android Smartphone' : 'Android Tablet';
+      }
+
+      // 3. Desktop OS Detection
       let osType = 'Windows';
       if (platform.includes('MAC') || ua.includes('MACINTOSH')) {
         osType = 'MacBook';
@@ -438,7 +516,7 @@
       if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) {
         try {
           const hints = await navigator.userAgentData.getHighEntropyValues(['platform', 'model']);
-          if (hints.model) {
+          if (hints.model && hints.model.trim()) {
             if (hints.platform === 'Windows' || osType === 'Windows') {
               return `Windows ${hints.model}`;
             } else if (hints.platform === 'macOS' || osType === 'MacBook') {
@@ -478,17 +556,23 @@
     const PRESET_RESOLUTIONS = [
       [7680, 4320, '8K UHD (16:9)'],
       [5120, 2880, '5K UHD (16:9)'],
-      [5120, 2160, '5K2K / UW-5K (21:9)'],
-      [5120, 1440, 'DQHD (32:9)'],
-      [3840, 2400, 'WQUXGA (16:10)'],
       [3840, 2160, '4K UHD (16:9)'],
       [3840, 1600, 'UWQHD+ (21:9)'],
       [3440, 1440, 'UWQHD (21:9)'],
+      [2796, 1290, 'iPhone 14/15/16 Pro Max'],
+      [2778, 1284, 'iPhone 12/13 Pro Max'],
+      [2688, 1242, 'iPhone XS Max / 11 Pro Max'],
+      [2622, 1206, 'iPhone 16 Pro'],
+      [2556, 1179, 'iPhone 14 Pro / 15 / 16'],
+      [2532, 1170, 'iPhone 12 / 13 / 14'],
       [2560, 1664, 'MacBook Pro 14" / Air 13"'],
       [2560, 1656, 'MacBook Pro 16"'],
       [2560, 1600, 'WQXGA (16:10)'],
       [2560, 1440, 'QHD / WQHD (16:9)'],
       [2560, 1080, 'UW-FHD (21:9)'],
+      [2436, 1125, 'iPhone 11 Pro / XS / X'],
+      [2400, 1080, 'Android Smartphone FHD+ (20:9)'],
+      [2340, 1080, 'Android Smartphone FHD+ (19.5:9)'],
       [2304, 1488, 'MacBook Pro 16"'],
       [2240, 1450, 'MacBook Air 15"'],
       [2056, 1337, 'MacBook Pro 14"'],
@@ -501,12 +585,14 @@
       [1920, 1080, 'FHD (16:9)'],
       [1800, 1169, 'MacBook Pro 14"'],
       [1792, 1120, 'MacBook Pro 16" Intel'],
+      [1792, 828, 'iPhone 11 / XR'],
       [1728, 1117, 'MacBook Pro 16"'],
       [1710, 1112, 'MacBook Air 13"'],
       [1710, 1107, 'MacBook Air 15"'],
       [1680, 1050, 'WSXGA+ (16:10) / MacBook Pro 15"'],
       [1600, 1200, 'UXGA (4:3)'],
       [1600, 900, 'HD+ (16:9)'],
+      [1600, 720, 'Android Smartphone HD+ (20:9)'],
       [1512, 982, 'MacBook Pro 14"'],
       [1496, 967, 'MacBook Pro 16"'],
       [1470, 956, 'MacBook Air 13"'],
@@ -516,6 +602,7 @@
       [1366, 768, 'WXGA (16:9)'],
       [1360, 768, 'WXGA (16:9)'],
       [1344, 840, 'MacBook Pro 16" Intel'],
+      [1334, 750, 'iPhone SE / 8 / 7'],
       [1312, 848, 'MacBook Pro 16"'],
       [1280, 1024, 'SXGA (5:4)'],
       [1280, 960, 'UVGA (4:3)'],
@@ -548,16 +635,18 @@
     }
     renderPresetList();
 
-    // Find closest standard preset for any dimension (tests logical and DPR-scaled dimensions)
+    // Find closest standard preset for any dimension (tests logical, swapped, and DPR-scaled dimensions)
     function getClosestPresetResolution(w, h, ratio = 1) {
       let closest = { width: PRESET_RESOLUTIONS[0][0], height: PRESET_RESOLUTIONS[0][1], name: PRESET_RESOLUTIONS[0][2] };
       let minDiff = Infinity;
 
       const candidates = [
-        { width: Math.round(w), height: Math.round(h) }
+        { width: Math.round(w), height: Math.round(h) },
+        { width: Math.round(h), height: Math.round(w) }
       ];
       if (ratio && ratio !== 1) {
         candidates.push({ width: Math.round(w * ratio), height: Math.round(h * ratio) });
+        candidates.push({ width: Math.round(h * ratio), height: Math.round(w * ratio) });
       }
 
       candidates.forEach(c => {
@@ -575,7 +664,6 @@
     // --- IndexedDB File Handle Storage Helpers ---
     const DB_NAME = 'ESP32KVM_Storage';
     const DB_STORE = 'handles';
-    let driveFileHandle = null;
 
     function openDB() {
       return new Promise((resolve, reject) => {
@@ -709,21 +797,29 @@
       ro.observe(canvas.parentElement);
     }
 
-    // Multi-Monitor Detection using strict preset snapping
+    // Multi-Monitor & Smartphone Detection using strict preset snapping
     document.getElementById('btnAutoDetect').addEventListener('click', async () => {
       const pcNameInput = document.getElementById('pcNameInput');
-      if (!pcNameInput || !pcNameInput.value.trim()) {
+      const isMobile = isMobileOrTabletDevice();
+
+      if (isMobile || !pcNameInput || !pcNameInput.value.trim()) {
         currentDeviceName = await getDetectedOSName();
         if (pcNameInput) pcNameInput.value = currentDeviceName;
       } else {
         currentDeviceName = pcNameInput.value.trim();
       }
 
-      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-      const osLabel = isMac ? 'macOS 🍏' : 'Windows 🪟';
+      const rawUA = navigator.userAgent || '';
+      const ua = rawUA.toUpperCase();
+      const platform = (navigator.platform || '').toUpperCase();
+      const isIOS = ua.includes('IPHONE') || ua.includes('IPAD') || ua.includes('IPOD') || (platform.includes('MACINTEL') && navigator.maxTouchPoints > 1);
+      const isAndroid = ua.includes('ANDROID') || (navigator.userAgentData && navigator.userAgentData.platform === 'Android');
+      const isMac = platform.includes('MAC');
+      const osLabel = isIOS ? 'iOS 📱' : (isAndroid ? 'Android 🤖' : (isMac ? 'macOS 🍏' : 'Windows 🪟'));
+
       const getDetailsFn = window.getScreenDetails || window.getScreenDetails;
 
-      if (!window.isSecureContext) {
+      if (!window.isSecureContext && !isMobile) {
         document.getElementById('detectBox').innerHTML = `
           ⚠️ <span>HTTPS Required (${osLabel}):</span><br>
           • Chrome requires HTTPS or localhost for Multi-Screen Detection.<br>
@@ -731,7 +827,7 @@
         `;
       }
 
-      if (getDetailsFn) {
+      if (getDetailsFn && !isMobile) {
         try {
           const screenDetails = await getDetailsFn();
           const detectedScreens = screenDetails.screens;
@@ -932,14 +1028,67 @@
         }
       }
 
-      // Fallback (If getScreenDetails fails or permission denied)
+      // Fallback (If getScreenDetails fails, permission denied, or on Smartphone/Tablet)
       const ratio = window.devicePixelRatio || 1;
       const rawW = window.screen.width;
       const rawH = window.screen.height;
-      const preset = getClosestPresetResolution(rawW, rawH, ratio);
       const isMultiMonitor = window.screen.isExtended;
 
-      console.log('[OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio, isExtended: isMultiMonitor });
+      console.log('[OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio, isExtended: isMultiMonitor, isMobile: isMobile });
+
+      if (isMobile) {
+        const physW = Math.round(rawW * ratio);
+        const physH = Math.round(rawH * ratio);
+        const preset = getClosestPresetResolution(rawW, rawH, ratio);
+
+        const screenW = (preset && Math.abs(preset.width - physW) < 120) ? preset.width : (physW > 0 ? physW : rawW);
+        const screenH = (preset && Math.abs(preset.height - physH) < 120) ? preset.height : (physH > 0 ? physH : rawH);
+
+        document.getElementById('detectBox').innerHTML = `
+          🎯 <span>Smartphone/Tablet (${osLabel}):</span><br>
+          • Device: <b>${currentDeviceName}</b><br>
+          • Screen Size: <b>${screenW} × ${screenH} px</b><br>
+          • Viewport: <sup>${rawW}×${rawH} (DPR: ${ratio.toFixed(1)})</sup>
+        `;
+
+        const pcInput = document.getElementById('pcNameInput');
+        if (pcInput) pcInput.value = currentDeviceName;
+
+        screens = screens.filter(s => s.group !== currentDeviceId);
+
+        screens.push({
+          id: Date.now(),
+          name: `${currentDeviceName}`,
+          group: currentDeviceId,
+          groupName: currentDeviceName,
+          width: screenW,
+          height: screenH,
+          layoutX: 0,
+          layoutY: 0,
+          x: 60,
+          y: 120,
+          color: COLOR_DETECTED,
+          isDetected: true,
+          isLocked: true,
+          isPrimary: true
+        });
+
+        const scale = 0.12;
+        const baseCanvasX = 50;
+        const maxLayoutY = Math.max(...screens.map(s => (s.layoutY !== undefined ? s.layoutY : 0) + s.height));
+        const baseCanvasBottomY = 120 + Math.round(maxLayoutY * scale);
+
+        screens.forEach(s => {
+          const ly = s.layoutY !== undefined ? s.layoutY : 0;
+          const lx = s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale);
+          s.x = baseCanvasX + Math.round(lx * scale);
+          s.y = baseCanvasBottomY - Math.round((ly + s.height) * scale);
+        });
+
+        saveProjectState();
+        draw();
+        return;
+      }
 
       if (isMultiMonitor) {
         document.getElementById('detectBox').innerHTML = `
@@ -951,7 +1100,9 @@
         screens = [
           {
             id: Date.now(),
-            name: isMac ? 'MacBook Display (Primary)' : 'Display 1 (Primary)',
+            name: isMac ? 'MacBook Display (Primary)' : `${currentDeviceName} (Primary)`,
+            group: currentDeviceId,
+            groupName: currentDeviceName,
             width: preset.width,
             height: preset.height,
             x: 60,
@@ -963,6 +1114,8 @@
           {
             id: Date.now() + 1,
             name: 'DELL P2425HE (Display 2)',
+            group: currentDeviceId,
+            groupName: currentDeviceName,
             width: 1920,
             height: 1080,
             x: 175,
@@ -975,12 +1128,15 @@
       } else {
         document.getElementById('detectBox').innerHTML = `
           🎯 <span>Physical Resolution (${osLabel}):</span><br>
+          • Device: <b>${currentDeviceName}</b><br>
           • Preset: <b>${preset.width} x ${preset.height} px</b>
         `;
 
         screens = [{
           id: Date.now(),
-          name: isMac ? 'MacBook Display' : 'DELL P2425HE',
+          name: isMac ? 'MacBook Display' : (currentDeviceName || 'DELL P2425HE'),
+          group: currentDeviceId,
+          groupName: currentDeviceName,
           width: preset.width,
           height: preset.height,
           x: 60,
@@ -1759,6 +1915,29 @@
       dragLockedScale = null; // Unlock scale so draw() recalculates fitScale
       draw();
     });
+
+    // Mobile Touch Event Listeners for Screen Canvas
+    function handleTouch(e, mouseEventType) {
+      if (e.touches && e.touches.length > 0) {
+        const touch = e.touches[0];
+        const mouseEvent = new MouseEvent(mouseEventType, {
+          clientX: touch.clientX,
+          clientY: touch.clientY,
+          bubbles: true
+        });
+        canvas.dispatchEvent(mouseEvent);
+        if (e.cancelable) e.preventDefault();
+      } else if (mouseEventType === 'mouseup') {
+        const mouseEvent = new MouseEvent('mouseup', { bubbles: true });
+        window.dispatchEvent(mouseEvent);
+      }
+    }
+
+    if (canvas) {
+      canvas.addEventListener('touchstart', (e) => handleTouch(e, 'mousedown'), { passive: false });
+      canvas.addEventListener('touchmove', (e) => handleTouch(e, 'mousemove'), { passive: false });
+      canvas.addEventListener('touchend', (e) => handleTouch(e, 'mouseup'), { passive: false });
+    }
 
     document.getElementById('btnSyncESP32').addEventListener('click', async () => {
       const jsonText = currentConfigJSON;

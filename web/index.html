@@ -389,7 +389,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 49;
+    const BUILD_VERSION = 50;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -1079,14 +1079,29 @@
 
       // Compute dynamic fitScale & viewport bounds so ALL screens fit 100% inside canvas
       let fitScale = 0.12;
+      let baseCanvasX = 60;
+      let baseCanvasBottomY = canvas.height - 65;
+
       if (screens.length > 0) {
+        const minLX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / 0.12)));
         const maxLX = Math.max(...screens.map(s => (s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / 0.12)) + s.width));
+        const minLY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
         const maxLY = Math.max(...screens.map(s => (s.layoutY !== undefined ? s.layoutY : 0) + s.height));
 
-        const scaleX = (canvas.width - 140) / Math.max(maxLX, 1920);
-        const scaleY = (canvas.height - 140) / Math.max(maxLY, 1080);
-        fitScale = Math.min(0.12, Math.max(0.04, scaleX), Math.max(0.04, scaleY));
+        const spanLX = Math.max(maxLX - minLX, 1920);
+        const spanLY = Math.max(maxLY - minLY, 1080);
+
+        const marginX = Math.min(60, canvas.width * 0.1);
+        const marginY = Math.min(65, canvas.height * 0.15);
+
+        const scaleX = (canvas.width - marginX * 2) / spanLX;
+        const scaleY = (canvas.height - marginY * 2) / spanLY;
+
+        fitScale = Math.min(0.12, scaleX, scaleY);
+        baseCanvasX = marginX;
+        baseCanvasBottomY = canvas.height - marginY;
       }
+
       // Lock scale during drag so monitors don't change size while dragging
       if (isDragging && dragLockedScale !== null) {
         fitScale = dragLockedScale;
@@ -1094,9 +1109,6 @@
         lastComputedScale = fitScale; // Remember actual scale for next drag start
       }
       const scale = fitScale;
-
-      const baseCanvasX = 60;
-      const baseCanvasBottomY = canvas.height - 65;
 
       // Compute relative Cartesian bottom-left coordinates (0,0) baseline for labels
       const minLayoutX = screens.length > 0 ? Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - baseCanvasX) / scale))) : 0;

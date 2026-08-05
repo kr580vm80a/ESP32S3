@@ -412,7 +412,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 57;
+    const BUILD_VERSION = 58;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -803,25 +803,13 @@
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (parsed && typeof parsed === 'object') {
-            if (parsed.layouts && Array.isArray(parsed.layouts) && parsed.layouts.length > 0) {
-              layoutsData = parsed;
-              if (!layoutsData.activeLayoutId || !layoutsData.layouts.some(l => l.id === layoutsData.activeLayoutId)) {
-                layoutsData.activeLayoutId = layoutsData.layouts[0].id;
-              }
-              syncScreensReference();
-              return;
-            } else if (Array.isArray(parsed)) {
-              // Migrate legacy single array of screens -> Default Layout
-              layoutsData = {
-                activeLayoutId: 'layout_1',
-                layouts: [
-                  { id: 'layout_1', name: 'Default Layout', screens: parsed }
-                ]
-              };
-              syncScreensReference();
-              return;
+          if (parsed && typeof parsed === 'object' && parsed.layouts && Array.isArray(parsed.layouts) && parsed.layouts.length > 0) {
+            layoutsData = parsed;
+            if (!layoutsData.activeLayoutId || !layoutsData.layouts.some(l => l.id === layoutsData.activeLayoutId)) {
+              layoutsData.activeLayoutId = layoutsData.layouts[0].id;
             }
+            syncScreensReference();
+            return;
           }
         } catch (e) {
           console.warn('Error parsing saved project config:', e);
@@ -856,7 +844,6 @@
       selectedScreen = null;
       snapGuides = [];
       dragLockedScale = null;
-      saveProjectState();
       updateLayoutSelectorUI();
       updateJSON();
       draw();
@@ -878,7 +865,6 @@
       selectedScreen = null;
       snapGuides = [];
       dragLockedScale = null;
-      saveProjectState();
       updateLayoutSelectorUI();
       updateJSON();
       draw();
@@ -897,7 +883,6 @@
       selectedScreen = null;
       snapGuides = [];
       dragLockedScale = null;
-      saveProjectState();
       updateLayoutSelectorUI();
       updateJSON();
       draw();
@@ -909,7 +894,6 @@
       if (name === null) return;
       const cleanName = name.trim() || active.name;
       active.name = cleanName;
-      saveProjectState();
       updateLayoutSelectorUI();
       updateJSON();
     }
@@ -928,7 +912,6 @@
       selectedScreen = null;
       snapGuides = [];
       dragLockedScale = null;
-      saveProjectState();
       updateLayoutSelectorUI();
       updateJSON();
       draw();
@@ -2284,7 +2267,7 @@
         const file = await driveFileHandle.getFile();
         const text = await file.text();
         const parsed = JSON.parse(text);
-        if (parsed && Array.isArray(parsed.layouts)) {
+        if (parsed && Array.isArray(parsed.layouts) && parsed.layouts.length > 0) {
           layoutsData = {
             activeLayoutId: parsed.active_layout_id || (parsed.layouts[0] ? parsed.layouts[0].id : 'layout_1'),
             layouts: parsed.layouts.map(l => ({
@@ -2294,27 +2277,11 @@
             }))
           };
           syncScreensReference();
-          saveProjectState();
           updateLayoutSelectorUI();
           draw();
           updateJSON();
           updateBadgeStatus('synced');
           console.log(`Loaded multi-layout config from Google Drive (${layoutsData.layouts.length} layouts, Build v${BUILD_VERSION})`);
-          return true;
-        } else if (parsed && Array.isArray(parsed.layout)) {
-          layoutsData = {
-            activeLayoutId: 'layout_1',
-            layouts: [
-              { id: 'layout_1', name: 'Default Layout', screens: parseLayoutToScreens(parsed.layout) }
-            ]
-          };
-          syncScreensReference();
-          saveProjectState();
-          updateLayoutSelectorUI();
-          draw();
-          updateJSON();
-          updateBadgeStatus('synced');
-          console.log(`Loaded legacy layout from Google Drive (${screens.length} screens, Build v${BUILD_VERSION})`);
           return true;
         }
       } catch (err) {

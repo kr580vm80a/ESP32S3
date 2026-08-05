@@ -383,10 +383,22 @@
     <div class="editor-container">
       <div class="card" style="flex: 1; display: flex; flex-direction: column;">
         <div class="card-title" style="justify-content: space-between; flex-wrap: wrap; gap: 8px;">
-          <span style="font-size: 14px;">Screen Layout</span>
+          <!-- Left: Layout Selector & Profile Actions -->
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span style="font-size: 13px; font-weight: 700; color: var(--primary);">Layout:</span>
+            <select id="layoutSelect" onchange="switchLayout(this.value)" style="background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; cursor: pointer;">
+              <!-- Populated dynamically -->
+            </select>
+            <button class="btn btn-secondary" onclick="addBlankLayout()" style="padding: 2px 7px; font-size: 11px;" title="Add New Blank Layout">+ New</button>
+            <button class="btn btn-secondary" onclick="duplicateCurrentLayout()" style="padding: 2px 7px; font-size: 11px;" title="Duplicate Active Layout">📋 Copy</button>
+            <button class="btn btn-secondary" onclick="renameCurrentLayout()" style="padding: 2px 7px; font-size: 11px;" title="Rename Active Layout">✏️</button>
+            <button class="btn btn-secondary" onclick="deleteCurrentLayout()" style="padding: 2px 7px; font-size: 11px; color: #f87171;" title="Delete Active Layout">🗑️</button>
+          </div>
+
+          <!-- Right: Sync & Clear Actions -->
           <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-            <div id="driveSyncBadge" style="font-size: 11px; color: #94a3b8; cursor: pointer;" title="Click to sync with G:\My Drive\ESP32\kvm_config.json">Drive Sync</div>
-            <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 4px 10px; font-size: 11px;">Clear All</button>
+            <div id="driveSyncBadge" style="font-size: 11px; color: #94a3b8; cursor: pointer;" title="Click to sync with Google Drive / ESP32 Flash">Drive Sync</div>
+            <button class="btn btn-secondary" onclick="clearScreens()" style="padding: 4px 10px; font-size: 11px;">Clear</button>
             <button class="btn" id="btnSyncESP32" style="padding: 4px 12px; font-size: 11px;">Save to ESP32 Flash</button>
           </div>
         </div>
@@ -400,7 +412,7 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 56;
+    const BUILD_VERSION = 57;
     const STORAGE_KEY = 'esp32_kvm_project_config_v7';
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
@@ -725,6 +737,9 @@
       // 1. Save to LocalStorage (browser cache)
       localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
 
+      // 1. Save to LocalStorage (browser cache)
+      saveProjectState();
+
       if (driveFileHandle) {
         try {
           if (await verifyFilePermission(driveFileHandle, true)) {
@@ -751,8 +766,36 @@
       }
     }
 
+    let layoutsData = {
+      activeLayoutId: 'layout_1',
+      layouts: [
+        { id: 'layout_1', name: 'Default Layout', screens: [] }
+      ]
+    };
+    let screens = [];
+
+    function getActiveLayout() {
+      if (!layoutsData || !layoutsData.layouts || layoutsData.layouts.length === 0) {
+        layoutsData = {
+          activeLayoutId: 'layout_1',
+          layouts: [{ id: 'layout_1', name: 'Default Layout', screens: [] }]
+        };
+      }
+      let layout = layoutsData.layouts.find(l => l.id === layoutsData.activeLayoutId);
+      if (!layout) {
+        layout = layoutsData.layouts[0];
+        layoutsData.activeLayoutId = layout.id;
+      }
+      return layout;
+    }
+
+    function syncScreensReference() {
+      const active = getActiveLayout();
+      screens = active.screens;
+    }
+
     function saveProjectState() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(screens));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(layoutsData));
     }
 
     function loadSavedProjectState() {
@@ -760,17 +803,138 @@
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed;
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.layouts && Array.isArray(parsed.layouts) && parsed.layouts.length > 0) {
+              layoutsData = parsed;
+              if (!layoutsData.activeLayoutId || !layoutsData.layouts.some(l => l.id === layoutsData.activeLayoutId)) {
+                layoutsData.activeLayoutId = layoutsData.layouts[0].id;
+              }
+              syncScreensReference();
+              return;
+            } else if (Array.isArray(parsed)) {
+              // Migrate legacy single array of screens -> Default Layout
+              layoutsData = {
+                activeLayoutId: 'layout_1',
+                layouts: [
+                  { id: 'layout_1', name: 'Default Layout', screens: parsed }
+                ]
+              };
+              syncScreensReference();
+              return;
+            }
           }
         } catch (e) {
           console.warn('Error parsing saved project config:', e);
         }
       }
-      return [];
+      layoutsData = {
+        activeLayoutId: 'layout_1',
+        layouts: [
+          { id: 'layout_1', name: 'Default Layout', screens: [] }
+        ]
+      };
+      syncScreensReference();
     }
 
-    let screens = loadSavedProjectState();
+    function updateLayoutSelectorUI() {
+      const select = document.getElementById('layoutSelect');
+      if (!select) return;
+      select.innerHTML = '';
+      layoutsData.layouts.forEach(l => {
+        const opt = document.createElement('option');
+        opt.value = l.id;
+        opt.textContent = `${l.name} (${l.screens.length} 🖥️)`;
+        if (l.id === layoutsData.activeLayoutId) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+
+    function switchLayout(layoutId) {
+      if (layoutsData.activeLayoutId === layoutId) return;
+      layoutsData.activeLayoutId = layoutId;
+      syncScreensReference();
+      selectedScreen = null;
+      snapGuides = [];
+      dragLockedScale = null;
+      saveProjectState();
+      updateLayoutSelectorUI();
+      updateJSON();
+      draw();
+    }
+
+    function addBlankLayout() {
+      const count = layoutsData.layouts.length + 1;
+      const name = prompt('Введіть назву нової конфігурації (Layout):', `Layout ${count}`);
+      if (name === null) return;
+      const cleanName = name.trim() || `Layout ${count}`;
+      const newLayout = {
+        id: 'layout_' + Date.now(),
+        name: cleanName,
+        screens: []
+      };
+      layoutsData.layouts.push(newLayout);
+      layoutsData.activeLayoutId = newLayout.id;
+      syncScreensReference();
+      selectedScreen = null;
+      snapGuides = [];
+      dragLockedScale = null;
+      saveProjectState();
+      updateLayoutSelectorUI();
+      updateJSON();
+      draw();
+    }
+
+    function duplicateCurrentLayout() {
+      const active = getActiveLayout();
+      const newLayout = {
+        id: 'layout_' + Date.now(),
+        name: `${active.name} (Copy)`,
+        screens: JSON.parse(JSON.stringify(active.screens))
+      };
+      layoutsData.layouts.push(newLayout);
+      layoutsData.activeLayoutId = newLayout.id;
+      syncScreensReference();
+      selectedScreen = null;
+      snapGuides = [];
+      dragLockedScale = null;
+      saveProjectState();
+      updateLayoutSelectorUI();
+      updateJSON();
+      draw();
+    }
+
+    function renameCurrentLayout() {
+      const active = getActiveLayout();
+      const name = prompt('Змінити назву поточної конфігурації:', active.name);
+      if (name === null) return;
+      const cleanName = name.trim() || active.name;
+      active.name = cleanName;
+      saveProjectState();
+      updateLayoutSelectorUI();
+      updateJSON();
+    }
+
+    function deleteCurrentLayout() {
+      if (layoutsData.layouts.length <= 1) {
+        alert('Неможливо видалити єдину конфігурацію!');
+        return;
+      }
+      const active = getActiveLayout();
+      if (!confirm(`Ви дійсно бажаєте видалити конфігурацію "${active.name}"?`)) return;
+
+      layoutsData.layouts = layoutsData.layouts.filter(l => l.id !== active.id);
+      layoutsData.activeLayoutId = layoutsData.layouts[0].id;
+      syncScreensReference();
+      selectedScreen = null;
+      snapGuides = [];
+      dragLockedScale = null;
+      saveProjectState();
+      updateLayoutSelectorUI();
+      updateJSON();
+      draw();
+    }
+
+    loadSavedProjectState();
     let selectedScreen = null;
     let isDragging = false;
     let isResizing = false;
@@ -1425,46 +1589,45 @@
     }
 
     function updateJSON() {
-      if (!screens || screens.length === 0) {
-        currentConfigJSON = JSON.stringify({
-          device: "ESP32-KVM-Switch",
-          total_screens: 0,
-          layout: []
-        }, null, 2);
-        const elem = document.getElementById('jsonOutput');
-        if (elem) elem.textContent = currentConfigJSON;
-        return;
-      }
-
+      const activeLayout = getActiveLayout();
       const scale = 0.12;
-      const sorted = [...screens].sort((a, b) => (a.layoutX !== undefined ? a.layoutX : a.x) - (b.layoutX !== undefined ? b.layoutX : b.x) || (b.layoutY !== undefined ? b.layoutY : b.y) - (a.layoutY !== undefined ? a.layoutY : a.y));
-
-      const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale)));
-      const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
 
       const config = {
         device: "ESP32-KVM-Switch",
-        total_screens: sorted.length,
-        layout: sorted.map((s, index) => {
-          const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
-          const groupVal = s.group || (isDetected ? currentDeviceId : 'manual');
-          const groupNameVal = s.groupName || (isDetected ? currentDeviceName : 'Manual Preset');
-          const isPrimaryVal = !!(s.isPrimary || (s.name && s.name.includes('Primary')));
+        active_layout_id: layoutsData.activeLayoutId,
+        total_layouts: layoutsData.layouts.length,
+        layouts: layoutsData.layouts.map(l => {
+          const sorted = [...l.screens].sort((a, b) => (a.layoutX !== undefined ? a.layoutX : a.x) - (b.layoutX !== undefined ? b.layoutX : b.x) || (b.layoutY !== undefined ? b.layoutY : b.y) - (a.layoutY !== undefined ? a.layoutY : a.y));
 
-          const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale)) - minLayoutX);
-          const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLayoutY);
+          const minLX = sorted.length > 0 ? Math.min(...sorted.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale))) : 0;
+          const minLY = sorted.length > 0 ? Math.min(...sorted.map(s => s.layoutY !== undefined ? s.layoutY : 0)) : 0;
 
           return {
-            index: index + 1,
-            name: s.name,
-            group: groupVal,
-            group_name: groupNameVal,
-            x: relX,
-            y: relY,
-            width: s.width,
-            height: s.height,
-            is_detected: isDetected,
-            is_primary: isPrimaryVal
+            id: l.id,
+            name: l.name,
+            total_screens: sorted.length,
+            screens: sorted.map((s, index) => {
+              const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
+              const groupVal = s.group || (isDetected ? currentDeviceId : 'manual');
+              const groupNameVal = s.groupName || (isDetected ? currentDeviceName : 'Manual Preset');
+              const isPrimaryVal = !!(s.isPrimary || (s.name && s.name.includes('Primary')));
+
+              const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale)) - minLX);
+              const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLY);
+
+              return {
+                index: index + 1,
+                name: s.name,
+                group: groupVal,
+                group_name: groupNameVal,
+                x: relX,
+                y: relY,
+                width: s.width,
+                height: s.height,
+                is_detected: isDetected,
+                is_primary: isPrimaryVal
+              };
+            })
           };
         })
       };
@@ -2121,17 +2284,41 @@
         const file = await driveFileHandle.getFile();
         const text = await file.text();
         const parsed = JSON.parse(text);
-        if (parsed && Array.isArray(parsed.layout)) {
-          screens = parseLayoutToScreens(parsed.layout);
+        if (parsed && Array.isArray(parsed.layouts)) {
+          layoutsData = {
+            activeLayoutId: parsed.active_layout_id || (parsed.layouts[0] ? parsed.layouts[0].id : 'layout_1'),
+            layouts: parsed.layouts.map(l => ({
+              id: l.id || ('layout_' + Math.random()),
+              name: l.name || 'Layout',
+              screens: parseLayoutToScreens(l.screens || l.layout || [])
+            }))
+          };
+          syncScreensReference();
           saveProjectState();
+          updateLayoutSelectorUI();
           draw();
           updateJSON();
           updateBadgeStatus('synced');
-          console.log(`Loaded layout from ${TARGET_DRIVE_FOLDER_HINT} (${screens.length} screens, Build v${BUILD_VERSION})`);
+          console.log(`Loaded multi-layout config from Google Drive (${layoutsData.layouts.length} layouts, Build v${BUILD_VERSION})`);
+          return true;
+        } else if (parsed && Array.isArray(parsed.layout)) {
+          layoutsData = {
+            activeLayoutId: 'layout_1',
+            layouts: [
+              { id: 'layout_1', name: 'Default Layout', screens: parseLayoutToScreens(parsed.layout) }
+            ]
+          };
+          syncScreensReference();
+          saveProjectState();
+          updateLayoutSelectorUI();
+          draw();
+          updateJSON();
+          updateBadgeStatus('synced');
+          console.log(`Loaded legacy layout from Google Drive (${screens.length} screens, Build v${BUILD_VERSION})`);
           return true;
         }
       } catch (err) {
-        console.warn(`Direct read from ${TARGET_DRIVE_FOLDER_HINT} requires permission:`, err);
+        console.warn(`Direct read from Google Drive requires permission:`, err);
       }
       return false;
     }
@@ -2139,6 +2326,7 @@
     async function initDriveSyncOnStartup() {
       console.log(`[ESP32 KVM Switch] Web App Build v${BUILD_VERSION} initialized.`);
       resizeCanvas();
+      updateLayoutSelectorUI();
 
       driveFileHandle = await getStoredFileHandle();
       if (driveFileHandle) {

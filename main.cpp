@@ -145,8 +145,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     String targetMac = monitors[currentMonitorIndex].mac;
     targetMac.toLowerCase();
 
-    // Send Standard HID Report (5 bytes: Report ID, Buttons, dX, dY, Scroll)
-    uint8_t report[5] = { 1, buttons, (uint8_t)constrain(dx, -127, 127), (uint8_t)constrain(dy, -127, 127), (uint8_t)constrain(scroll, -127, 127) };
+    // Send Standard HID Report (4 bytes for BLE GATT HOGP: Buttons, dX, dY, Scroll)
+    // Note: Report ID is handled by BLE GATT Report Reference Descriptor (0x2908), NOT in the payload!
+    uint8_t report[4] = { buttons, (uint8_t)constrain(dx, -127, 127), (uint8_t)constrain(dy, -127, 127), (uint8_t)constrain(scroll, -127, 127) };
 
     inputChar->setValue(report, sizeof(report));
     inputChar->notify();

@@ -425,6 +425,22 @@
         </div>
       </div>
 
+      <!-- KVM Clients Card -->
+      <div class="card">
+        <div class="card-title">4. KVM Clients</div>
+        <div id="clientsList" class="preset-list" style="max-height: 180px; margin-bottom: 6px;"></div>
+        <div class="btn-group">
+          <button class="btn" id="btnDetectClients">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+            <span>Detect from KVM</span>
+          </button>
+          <button class="btn btn-secondary" id="btnAddClient">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>Add Manually</span>
+          </button>
+        </div>
+      </div>
+
     </div>
 
     <!-- Main Canvas & Editor Controls -->
@@ -482,7 +498,142 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 113;
+    const BUILD_VERSION = 114;
+
+    // --- KVM Clients Registry ---
+    let kvmClients = [];
+
+    function renderClientsList() {
+      const container = document.getElementById('clientsList');
+      if (!container) return;
+      if (kvmClients.length === 0) {
+        container.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px 6px;">No clients registered. Use Detect or Add.</div>';
+        return;
+      }
+      container.innerHTML = kvmClients.map((c, idx) => {
+        const connDot = c.connected ? '<span style="color: #34d399;">●</span>' : '<span style="color: #64748b;">○</span>';
+        return `
+          <div class="preset-item" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 6px 8px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div style="display: flex; align-items: center; gap: 5px;">
+                ${connDot}
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--primary);">${c.mac}</span>
+              </div>
+              <div style="display: flex; gap: 3px;">
+                <button class="icon-btn" onclick="editClient(${idx})" title="Edit" style="width: 22px; height: 22px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                </button>
+                <button class="icon-btn icon-btn-danger" onclick="deleteClient(${idx})" title="Delete" style="width: 22px; height: 22px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>
+              </div>
+            </div>
+            <div style="font-size: 11px; font-weight: 600; color: var(--text-main);">${c.name || 'Unnamed'}</div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function addClientEntry(mac, name, connected = false) {
+      const normalized = mac.toLowerCase().trim();
+      const existing = kvmClients.find(c => c.mac.toLowerCase() === normalized);
+      if (existing) {
+        existing.connected = connected || existing.connected;
+        if (name && name !== 'Unnamed') existing.name = name;
+        renderClientsList();
+        updateJSON();
+        return;
+      }
+      kvmClients.push({ mac: normalized, name: name || 'Unnamed', connected });
+      renderClientsList();
+      updateJSON();
+    }
+
+    function editClient(idx) {
+      const c = kvmClients[idx];
+      if (!c) return;
+      const newMac = prompt('MAC Address:', c.mac);
+      if (newMac === null) return;
+      const newName = prompt('Client Name:', c.name);
+      if (newName === null) return;
+      c.mac = newMac.toLowerCase().trim() || c.mac;
+      c.name = newName.trim() || c.name;
+      renderClientsList();
+      updateJSON();
+    }
+
+    function deleteClient(idx) {
+      const c = kvmClients[idx];
+      if (!c) return;
+      if (!confirm(`Delete client "${c.name}" (${c.mac})?`)) return;
+      kvmClients.splice(idx, 1);
+      renderClientsList();
+      updateJSON();
+    }
+
+    async function detectClientsFromKVM() {
+      if (!window.esp32SerialPort || !window.esp32SerialPort.writable) {
+        alert('❌ ESP32 not connected via USB. Please connect first.');
+        return;
+      }
+      try {
+        const writer = window.esp32SerialPort.writable.getWriter();
+        await writer.write(new TextEncoder().encode('GET_CLIENTS\n'));
+        writer.releaseLock();
+
+        // Read response from ESP32
+        const reader = window.esp32SerialPort.readable.getReader();
+        let buffer = '';
+        const deadline = Date.now() + 3000; // 3s timeout
+        while (Date.now() < deadline) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += new TextDecoder().decode(value);
+          const lineEnd = buffer.indexOf('\n');
+          if (lineEnd !== -1) {
+            const lines = buffer.split('\n');
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('CLIENTS ')) {
+                const jsonStr = trimmed.substring(8);
+                try {
+                  const clients = JSON.parse(jsonStr);
+                  let added = 0;
+                  clients.forEach(c => {
+                    addClientEntry(c.mac, c.name || 'Detected Device', c.connected);
+                    added++;
+                  });
+                  reader.releaseLock();
+                  alert(`✅ Detected ${added} connected device(s) from KVM!`);
+                  return;
+                } catch(e) {
+                  console.warn('Failed to parse CLIENTS response:', e);
+                }
+              }
+            }
+            buffer = lines[lines.length - 1];
+          }
+        }
+        reader.releaseLock();
+        alert('⚠️ No response from ESP32. Make sure devices are connected to ESP32 KVM Mouse via Bluetooth.');
+      } catch(e) {
+        alert('❌ Error communicating with ESP32: ' + e.message);
+      }
+    }
+
+    function addClientManually() {
+      const mac = prompt('Enter BLE MAC Address (e.g. aa:bb:cc:dd:ee:ff):');
+      if (!mac) return;
+      const name = prompt('Enter client name (e.g. Lenovo Laptop):');
+      if (name === null) return;
+      addClientEntry(mac, name || 'Unnamed', false);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('btnDetectClients')?.addEventListener('click', detectClientsFromKVM);
+      document.getElementById('btnAddClient')?.addEventListener('click', addClientManually);
+      renderClientsList();
+    });
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
     const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
     const GROUP_COLORS = ['#34d399', '#38bdf8', '#a855f7', '#f43f5e', '#fbbf24', '#818cf8'];
@@ -1708,6 +1859,8 @@
         })
       };
 
+      config.clients = kvmClients.map(c => ({ mac: c.mac, name: c.name }));
+
       currentConfigJSON = JSON.stringify(config, null, 2);
       const jsonElem = document.getElementById('jsonOutput');
       if (jsonElem) jsonElem.textContent = currentConfigJSON;
@@ -2369,6 +2522,11 @@
               screens: parseLayoutToScreens(l.screens || l.layout || [])
             }))
           };
+          // Load clients from config
+          if (Array.isArray(parsed.clients)) {
+            kvmClients = parsed.clients.map(c => ({ mac: c.mac || '', name: c.name || 'Unnamed', connected: false }));
+            renderClientsList();
+          }
           syncScreensReference();
           updateLayoutSelectorUI();
           draw();

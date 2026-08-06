@@ -338,13 +338,26 @@ void loop() {
     if (input.startsWith("SAVE_CONFIG ")) {
       String jsonStr = input.substring(12);
       jsonStr.trim();
-      if (jsonStr.startsWith("[") && jsonStr.endsWith("]")) {
+      if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
         JsonDocument doc;
         if (!deserializeJson(doc, jsonStr)) {
           saveConfiguration(jsonStr);
           loadConfiguration();
         }
       }
+    } else if (input == "GET_CLIENTS") {
+      JsonDocument doc;
+      JsonArray arr = doc.to<JsonArray>();
+      for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active) {
+          JsonObject client = arr.add<JsonObject>();
+          client["mac"] = kvmClients[i].mac;
+          client["connected"] = true;
+        }
+      }
+      String response;
+      serializeJson(doc, response);
+      Serial.println("CLIENTS " + response);
     }
   }
 }

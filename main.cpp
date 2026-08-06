@@ -43,6 +43,7 @@ const uint8_t hidReportMap[] = {
     0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
     0x09, 0x02,        // Usage (Mouse)
     0xA1, 0x01,        // Collection (Application)
+    0x85, 0x01,        //   Report ID (1)
     0x09, 0x01,        //   Usage (Pointer)
     0xA1, 0x00,        //   Collection (Physical)
     0x05, 0x09,        //     Usage Page (Button)
@@ -144,8 +145,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     String targetMac = monitors[currentMonitorIndex].mac;
     targetMac.toLowerCase();
 
-    // Send Standard HID Report
-    uint8_t report[4] = { buttons, (uint8_t)constrain(dx, -127, 127), (uint8_t)constrain(dy, -127, 127), (uint8_t)constrain(scroll, -127, 127) };
+    // Send Standard HID Report (5 bytes because of Report ID)
+    uint8_t report[5] = { 1, buttons, (uint8_t)constrain(dx, -127, 127), (uint8_t)constrain(dy, -127, 127), (uint8_t)constrain(scroll, -127, 127) };
 
     // Route to correct PC (Option A logic)
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {

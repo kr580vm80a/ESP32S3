@@ -145,25 +145,11 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     String targetMac = monitors[currentMonitorIndex].mac;
     targetMac.toLowerCase();
 
-    // Send Standard HID Report (5 bytes because of Report ID)
+    // Send Standard HID Report (5 bytes: Report ID, Buttons, dX, dY, Scroll)
     uint8_t report[5] = { 1, buttons, (uint8_t)constrain(dx, -127, 127), (uint8_t)constrain(dy, -127, 127), (uint8_t)constrain(scroll, -127, 127) };
 
-    // Route to correct PC (Option A logic)
-    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active) {
-            String clientMac = kvmClients[i].mac;
-            clientMac.toLowerCase();
-            
-            // If targetMac is empty, broadcast to all. If not, only to matching MAC
-            if (targetMac == "" || clientMac == targetMac) {
-                // Send targeted notification using ESP-IDF NimBLE API
-                struct os_mbuf *om = ble_hs_mbuf_from_flat(report, sizeof(report));
-                if (om) {
-                    ble_gatts_notify_custom(kvmClients[i].conn_id, inputChar->getHandle(), om);
-                }
-            }
-        }
-    }
+    inputChar->setValue(report, sizeof(report));
+    inputChar->notify();
 }
 
 // Callback when HID data is received from the mouse
@@ -181,6 +167,10 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         if (y & 0x800) y |= 0xF000; // Sign extend to 16-bit
         
         int8_t scroll = (int8_t)pData[5];
+
+        Serial.printf("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: %d, dX: %d, dY: %d, Scroll: %d\n",
+                      pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], pData[6],
+                      buttons, x, y, scroll);
 
         updateVirtualCursorAndSend(buttons, x, y, scroll);
     }

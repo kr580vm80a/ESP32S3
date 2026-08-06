@@ -823,9 +823,13 @@
           await writer.write(new TextEncoder().encode(`SAVE_CONFIG ${minifiedJson}\n`));
           writer.releaseLock();
           console.log('Config synced to ESP32 Flash memory!');
+          alert('✅ Дані успішно відправлені на ESP32 через USB!');
         } catch (e) {
           console.warn('ESP32 Serial Flash sync failed:', e);
+          alert('❌ Помилка передачі даних на ESP32: ' + e.message);
         }
+      } else {
+        console.warn('USB port not connected or not writable. Skipping ESP32 sync.');
       }
     }
 
@@ -2209,6 +2213,7 @@
         try {
           const port = await navigator.serial.requestPort();
           await port.open({ baudRate: 115200 });
+          window.esp32SerialPort = port; // FIX: Save the port globally!
           setConnectedStatus(true, 'USB Serial Connected');
         } catch (err) {
           alert('Failed to connect via USB: ' + err.message);

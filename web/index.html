@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 133;
+    const BUILD_VERSION = 134;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -538,14 +538,26 @@
     function addClientEntry(mac, name, connected = false) {
       const normalized = mac.toLowerCase().trim();
       const existing = kvmClients.find(c => c.mac.toLowerCase() === normalized);
+
+      // Auto-lookup matching group name from Canvas screens if available
+      let matchedName = name;
+      if (!matchedName || matchedName === 'Unnamed' || matchedName === 'Detected Device') {
+        const matchingScreen = screens.find(s => (s.group && s.group.toLowerCase() === normalized) || (s.mac && s.mac.toLowerCase() === normalized));
+        if (matchingScreen && matchingScreen.groupName) {
+          matchedName = matchingScreen.groupName;
+        } else {
+          matchedName = 'PC (' + normalized.slice(-5).toUpperCase() + ')';
+        }
+      }
+
       if (existing) {
         existing.connected = connected || existing.connected;
-        if (name && name !== 'Unnamed') existing.name = name;
+        if (matchedName && (existing.name === 'Unnamed' || existing.name.startsWith('PC ('))) existing.name = matchedName;
         renderClientsList();
         updateJSON();
         return;
       }
-      kvmClients.push({ mac: normalized, name: name || 'Unnamed', connected });
+      kvmClients.push({ mac: normalized, name: matchedName, connected });
       renderClientsList();
       updateJSON();
     }

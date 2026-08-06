@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 132;
+    const BUILD_VERSION = 133;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2404,6 +2404,26 @@
     window.esp32BleTxChar = null;
     window.onBleResponseCallback = null;
 
+    let bleNotifyBuffer = '';
+
+    function handleBleNotification(e) {
+      const chunkStr = new TextDecoder('utf-8').decode(e.target.value);
+      bleNotifyBuffer += chunkStr;
+      if (bleNotifyBuffer.includes('\n')) {
+        const lines = bleNotifyBuffer.split('\n');
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lines[i].trim();
+          if (line.length > 0) {
+            console.log('[BLE Config Response Line]:', line);
+            if (window.onBleResponseCallback) {
+              window.onBleResponseCallback(line);
+            }
+          }
+        }
+        bleNotifyBuffer = lines[lines.length - 1];
+      }
+    }
+
     async function ensureBleConnected() {
       if (!window.esp32BleDevice) return false;
       if (!window.esp32BleDevice.gatt.connected) {
@@ -2413,13 +2433,7 @@
         window.esp32BleRxChar = await window.esp32BleService.getCharacteristic(CONFIG_RX_UUID);
         window.esp32BleTxChar = await window.esp32BleService.getCharacteristic(CONFIG_TX_UUID);
         await window.esp32BleTxChar.startNotifications();
-        window.esp32BleTxChar.addEventListener('characteristicvaluechanged', (e) => {
-          const valueStr = new TextDecoder().decode(e.target.value);
-          console.log('[BLE Config Response]:', valueStr);
-          if (window.onBleResponseCallback) {
-            window.onBleResponseCallback(valueStr);
-          }
-        });
+        window.esp32BleTxChar.addEventListener('characteristicvaluechanged', handleBleNotification);
         setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
       }
       return true;
@@ -2495,13 +2509,7 @@
           window.esp32BleTxChar = await service.getCharacteristic(CONFIG_TX_UUID);
 
           await window.esp32BleTxChar.startNotifications();
-          window.esp32BleTxChar.addEventListener('characteristicvaluechanged', (e) => {
-            const valueStr = new TextDecoder().decode(e.target.value);
-            console.log('[BLE Config Response]:', valueStr);
-            if (window.onBleResponseCallback) {
-              window.onBleResponseCallback(valueStr);
-            }
-          });
+          window.esp32BleTxChar.addEventListener('characteristicvaluechanged', handleBleNotification);
 
           setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
           alert('✅ Успішно підключено до ESP32 KVM Server по Bluetooth BLE!');

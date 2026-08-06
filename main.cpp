@@ -303,7 +303,8 @@ void processCommand(String input) {
         saveConfiguration(jsonStr);
         loadConfiguration();
         if (configTxChar) {
-          configTxChar->setValue("OK_SAVE\n");
+          String resp = "OK_SAVE\n";
+          configTxChar->setValue((const uint8_t*)resp.c_str(), resp.length());
           configTxChar->notify();
         }
       }
@@ -323,7 +324,7 @@ void processCommand(String input) {
     String fullResponse = "CLIENTS " + response + "\n";
     Serial.print(fullResponse);
     if (configTxChar) {
-      configTxChar->setValue(fullResponse.c_str());
+      configTxChar->setValue((const uint8_t*)fullResponse.c_str(), fullResponse.length());
       configTxChar->notify();
     }
   }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 130;
+    const BUILD_VERSION = 131;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2444,8 +2444,18 @@
             ],
             optionalServices: [CONFIG_SERVICE_UUID, 0x1812]
           });
+          console.log('[BLE] Connecting to GATT server for device:', device.name);
           const server = await device.gatt.connect();
-          const service = await server.getPrimaryService(CONFIG_SERVICE_UUID);
+
+          let service;
+          try {
+            service = await server.getPrimaryService(CONFIG_SERVICE_UUID);
+          } catch(serviceErr) {
+            console.warn('[BLE] Config service not found:', serviceErr);
+            alert('⚠️ Не знайдено Config Service на ESP32!\n\n1. Перевірте, що ви прошили плату через PlatformIO (Build 129+).\n2. Видаліть "ESP32 KVM Mouse" з налаштувань Bluetooth у Windows та підключіться знову, щоб оновити кеш.');
+            return;
+          }
+
           window.esp32BleRxChar = await service.getCharacteristic(CONFIG_RX_UUID);
           window.esp32BleTxChar = await service.getCharacteristic(CONFIG_TX_UUID);
 
@@ -2459,8 +2469,9 @@
           });
 
           setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
-          alert('✅ Successfully connected to ESP32 KVM Server via Bluetooth BLE!');
+          alert('✅ Успішно підключено до ESP32 KVM Server по Bluetooth BLE!');
         } catch (err) {
+          console.error('[BLE Error]:', err);
           alert('Failed to connect via Bluetooth: ' + err.message);
         }
       } else {

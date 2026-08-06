@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 131;
+    const BUILD_VERSION = 132;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2397,17 +2397,46 @@
     const CONFIG_RX_UUID      = '12345678-1234-1234-1234-1234567890ac';
     const CONFIG_TX_UUID      = '12345678-1234-1234-1234-1234567890ad';
 
+    window.esp32BleDevice = null;
+    window.esp32BleServer = null;
+    window.esp32BleService = null;
     window.esp32BleRxChar = null;
     window.esp32BleTxChar = null;
     window.onBleResponseCallback = null;
 
+    async function ensureBleConnected() {
+      if (!window.esp32BleDevice) return false;
+      if (!window.esp32BleDevice.gatt.connected) {
+        console.log('[BLE] Reconnecting GATT server...');
+        window.esp32BleServer = await window.esp32BleDevice.gatt.connect();
+        window.esp32BleService = await window.esp32BleServer.getPrimaryService(CONFIG_SERVICE_UUID);
+        window.esp32BleRxChar = await window.esp32BleService.getCharacteristic(CONFIG_RX_UUID);
+        window.esp32BleTxChar = await window.esp32BleService.getCharacteristic(CONFIG_TX_UUID);
+        await window.esp32BleTxChar.startNotifications();
+        window.esp32BleTxChar.addEventListener('characteristicvaluechanged', (e) => {
+          const valueStr = new TextDecoder().decode(e.target.value);
+          console.log('[BLE Config Response]:', valueStr);
+          if (window.onBleResponseCallback) {
+            window.onBleResponseCallback(valueStr);
+          }
+        });
+        setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
+      }
+      return true;
+    }
+
     async function sendESP32Command(cmd) {
-      if (window.esp32BleRxChar) {
+      if (window.esp32BleDevice) {
+        await ensureBleConnected();
         const encoder = new TextEncoder();
         const data = encoder.encode(cmd);
         for (let i = 0; i < data.length; i += 200) {
           const chunk = data.slice(i, i + 200);
-          await window.esp32BleRxChar.writeValue(chunk);
+          if (window.esp32BleRxChar.writeValueWithResponse) {
+            await window.esp32BleRxChar.writeValueWithResponse(chunk);
+          } else {
+            await window.esp32BleRxChar.writeValue(chunk);
+          }
         }
         return true;
       } else if (window.esp32SerialPort && window.esp32SerialPort.writable) {
@@ -2444,6 +2473,12 @@
             ],
             optionalServices: [CONFIG_SERVICE_UUID, 0x1812]
           });
+          window.esp32BleDevice = device;
+          device.addEventListener('gattserverdisconnected', () => {
+            console.warn('[BLE] GATT server disconnected');
+            setConnectedStatus(false, 'ESP32 Disconnected');
+          });
+
           console.log('[BLE] Connecting to GATT server for device:', device.name);
           const server = await device.gatt.connect();
 

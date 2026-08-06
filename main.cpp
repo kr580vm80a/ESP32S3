@@ -66,6 +66,13 @@ const uint8_t hidReportMap[] = {
     0x75, 0x08,        //     Report Size (8)
     0x95, 0x03,        //     Report Count (3)
     0x81, 0x06,        //     Input (Data,Var,Rel,No Wrap,Linear,Preferred State,No Null Position)
+    0x05, 0x0C,        //     Usage Page (Consumer)
+    0x0A, 0x38, 0x02,  //     Usage (AC Pan)
+    0x15, 0x81,        //     Logical Minimum (-127)
+    0x25, 0x7F,        //     Logical Maximum (127)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x01,        //     Report Count (1)
+    0x81, 0x06,        //     Input (Data,Var,Rel,No Wrap,Linear,Preferred State,No Null Position)
     0xC0,              //   End Collection
     0xC0               // End Collection
 };
@@ -112,7 +119,7 @@ static NimBLEClient* pClient = nullptr;
 static NimBLEUUID hidServiceUUID("1812");
 static NimBLEUUID reportCharUUID("2a4d");
 
-void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t scroll) {
+void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t scroll, int8_t hScroll) {
     if (monitorCount == 0) return;
 
     virtualX += dx;
@@ -145,9 +152,14 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     String targetMac = monitors[currentMonitorIndex].mac;
     targetMac.toLowerCase();
 
-    // Send Standard HID Report (4 bytes for BLE GATT HOGP: Buttons, dX, dY, Scroll)
-    // Note: Report ID is handled by BLE GATT Report Reference Descriptor (0x2908), NOT in the payload!
-    uint8_t report[4] = { buttons, (uint8_t)constrain(dx, -127, 127), (uint8_t)constrain(dy, -127, 127), (uint8_t)constrain(scroll, -127, 127) };
+    // Send Standard HID Report (5 bytes: Buttons, dX, dY, VScroll, HScroll)
+    uint8_t report[5] = { 
+        buttons, 
+        (uint8_t)constrain(dx, -127, 127), 
+        (uint8_t)constrain(dy, -127, 127), 
+        (uint8_t)constrain(scroll, -127, 127),
+        (uint8_t)constrain(hScroll, -127, 127) 
+    };
 
     inputChar->setValue(report, sizeof(report));
     inputChar->notify();
@@ -168,12 +180,13 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         if (y & 0x800) y |= 0xF000; // Sign extend to 16-bit
         
         int8_t scroll = (int8_t)pData[5];
+        int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
 
-        Serial.printf("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, Scroll: %d\n",
+        Serial.printf("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VScroll: %d, HScroll: %d\n",
                       pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
-                      buttons, x, y, scroll);
+                      buttons, x, y, scroll, hScroll);
 
-        updateVirtualCursorAndSend(buttons, x, y, scroll);
+        updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
     }
 }
 

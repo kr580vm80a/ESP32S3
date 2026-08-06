@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ESP32 Bluetooth KVM Switcher v124 - Configuration Center</title>
+  <script>
+    const BUILD_VERSION = 125;
+    document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -379,7 +382,7 @@
       <header>
         <div class="logo-container">
           <div>
-            <h1>ESP32 Bluetooth KVM Switcher <span id="appBuildVersion" style="font-size: 10px; font-weight: 500; color: var(--primary); background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle;">v124</span></h1>
+            <h1>ESP32 Bluetooth KVM Switcher <span id="appBuildVersion" style="font-size: 10px; font-weight: 500; color: var(--primary); background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle;"><script>document.write('v' + BUILD_VERSION);</script></span></h1>
             <p style="font-size: 10px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
           </div>
         </div>
@@ -498,8 +501,6 @@
   </div>
 
   <script>
-    const BUILD_VERSION = 124;
-
     // --- KVM Clients Registry ---
     let kvmClients = [];
 

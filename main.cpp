@@ -305,8 +305,12 @@ void setup() {
   
   hidDevice->reportMap((uint8_t*)hidReportMap, sizeof(hidReportMap));
   hidDevice->startServices();
-  NimBLEDevice::startAdvertising();
-  Serial.println("[BLE Server] Advertising as 'ESP32 KVM Mouse'...");
+  
+  NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
+  pAdvertising->setAppearance(0x03C2); // HID Mouse Appearance
+  pAdvertising->addServiceUUID(hidDevice->hidService()->getUUID());
+  pAdvertising->start();
+  Serial.println("[BLE Server] Advertising as 'ESP32 KVM Mouse' with HID Profile...");
 
   // Setup BLE Client (Host)
   NimBLEScan* pScan = NimBLEDevice::getScan();

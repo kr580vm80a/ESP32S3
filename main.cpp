@@ -155,9 +155,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
 // Callback when HID data is received from the mouse
 void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-    if (length == 7) {
-        // Decode Logitech 12-bit packed report
-        uint8_t buttons = pData[1];
+    if (length >= 6) {
+        // Logitech MX Master 3S HID report button mask can be in byte 0 or byte 1
+        uint8_t buttons = pData[0] | pData[1];
         
         // 12-bit X extraction
         int16_t x = pData[2] | ((pData[3] & 0x0F) << 8);
@@ -169,8 +169,8 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         
         int8_t scroll = (int8_t)pData[5];
 
-        Serial.printf("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: %d, dX: %d, dY: %d, Scroll: %d\n",
-                      pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], pData[6],
+        Serial.printf("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, Scroll: %d\n",
+                      pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
                       buttons, x, y, scroll);
 
         updateVirtualCursorAndSend(buttons, x, y, scroll);

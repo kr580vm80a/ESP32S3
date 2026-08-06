@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 128;
+    const BUILD_VERSION = 129;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -573,8 +573,34 @@
     }
 
     async function detectClientsFromKVM() {
+      if (window.esp32BleRxChar) {
+        try {
+          window.onBleResponseCallback = (responseStr) => {
+            const trimmed = responseStr.trim();
+            if (trimmed.startsWith('CLIENTS ')) {
+              const jsonStr = trimmed.substring(8);
+              try {
+                const clients = JSON.parse(jsonStr);
+                let added = 0;
+                clients.forEach(c => {
+                  addClientEntry(c.mac, c.name || 'Detected Device', c.connected);
+                  added++;
+                });
+                alert(`✅ Detected ${added} connected device(s) via Bluetooth!`);
+              } catch(e) {
+                console.warn('Failed to parse CLIENTS response:', e);
+              }
+            }
+          };
+          await sendESP32Command('GET_CLIENTS\n');
+        } catch(e) {
+          alert('❌ Помилка передачі по Bluetooth: ' + e.message);
+        }
+        return;
+      }
+
       if (!window.esp32SerialPort || !window.esp32SerialPort.writable) {
-        alert('❌ ESP32 not connected via USB. Please connect first.');
+        alert('❌ ESP32 not connected. Please connect via USB or Bluetooth first.');
         return;
       }
       try {
@@ -965,23 +991,28 @@
       }
 
       // ESP32 Hardware Flash Sync
-      if (window.esp32SerialPort && window.esp32SerialPort.writable) {
+      let minifiedJson = jsonText;
+      try { minifiedJson = JSON.stringify(JSON.parse(jsonText)); } catch(e) {}
+
+      if (window.esp32BleRxChar) {
         try {
-          const writer = window.esp32SerialPort.writable.getWriter();
-          // Minify JSON for Serial transmission to avoid \n breaking the Arduino readStringUntil('\n')
-          let minifiedJson = jsonText;
-          try { minifiedJson = JSON.stringify(JSON.parse(jsonText)); } catch(e) {}
-          
-          await writer.write(new TextEncoder().encode(`SAVE_CONFIG ${minifiedJson}\n`));
-          writer.releaseLock();
-          console.log('Config synced to ESP32 Flash memory!');
+          await sendESP32Command(`SAVE_CONFIG ${minifiedJson}\n`);
+          console.log('Config synced to ESP32 Flash memory over Bluetooth!');
+          alert('✅ Дані успішно відправлені на ESP32 через Bluetooth!');
+        } catch (e) {
+          alert('❌ Помилка передачі по Bluetooth: ' + e.message);
+        }
+      } else if (window.esp32SerialPort && window.esp32SerialPort.writable) {
+        try {
+          await sendESP32Command(`SAVE_CONFIG ${minifiedJson}\n`);
+          console.log('Config synced to ESP32 Flash memory over USB Serial!');
           alert('✅ Дані успішно відправлені на ESP32 через USB!');
         } catch (e) {
           console.warn('ESP32 Serial Flash sync failed:', e);
           alert('❌ Помилка передачі даних на ESP32: ' + e.message);
         }
       } else {
-        console.warn('USB port not connected or not writable. Skipping ESP32 sync.');
+        console.warn('Neither USB nor Bluetooth connected. Skipping ESP32 sync.');
       }
     }
 
@@ -2362,12 +2393,38 @@
 
 
 
+    const CONFIG_SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
+    const CONFIG_RX_UUID      = '12345678-1234-1234-1234-1234567890ac';
+    const CONFIG_TX_UUID      = '12345678-1234-1234-1234-1234567890ad';
+
+    window.esp32BleRxChar = null;
+    window.esp32BleTxChar = null;
+    window.onBleResponseCallback = null;
+
+    async function sendESP32Command(cmd) {
+      if (window.esp32BleRxChar) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(cmd);
+        for (let i = 0; i < data.length; i += 200) {
+          const chunk = data.slice(i, i + 200);
+          await window.esp32BleRxChar.writeValue(chunk);
+        }
+        return true;
+      } else if (window.esp32SerialPort && window.esp32SerialPort.writable) {
+        const writer = window.esp32SerialPort.writable.getWriter();
+        await writer.write(new TextEncoder().encode(cmd));
+        writer.releaseLock();
+        return true;
+      }
+      return false;
+    }
+
     document.getElementById('btnConnectUSB').addEventListener('click', async () => {
       if ('serial' in navigator) {
         try {
           const port = await navigator.serial.requestPort();
           await port.open({ baudRate: 115200 });
-          window.esp32SerialPort = port; // FIX: Save the port globally!
+          window.esp32SerialPort = port;
           setConnectedStatus(true, 'USB Serial Connected');
         } catch (err) {
           alert('Failed to connect via USB: ' + err.message);
@@ -2380,8 +2437,26 @@
     document.getElementById('btnConnectBT').addEventListener('click', async () => {
       if ('bluetooth' in navigator) {
         try {
-          const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true });
-          setConnectedStatus(true, 'Bluetooth Connected: ' + device.name);
+          const device = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [CONFIG_SERVICE_UUID] }],
+            optionalServices: [CONFIG_SERVICE_UUID]
+          });
+          const server = await device.gatt.connect();
+          const service = await server.getPrimaryService(CONFIG_SERVICE_UUID);
+          window.esp32BleRxChar = await service.getCharacteristic(CONFIG_RX_UUID);
+          window.esp32BleTxChar = await service.getCharacteristic(CONFIG_TX_UUID);
+
+          await window.esp32BleTxChar.startNotifications();
+          window.esp32BleTxChar.addEventListener('characteristicvaluechanged', (e) => {
+            const valueStr = new TextDecoder().decode(e.target.value);
+            console.log('[BLE Config Response]:', valueStr);
+            if (window.onBleResponseCallback) {
+              window.onBleResponseCallback(valueStr);
+            }
+          });
+
+          setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
+          alert('✅ Successfully connected to ESP32 KVM Server via Bluetooth BLE!');
         } catch (err) {
           alert('Failed to connect via Bluetooth: ' + err.message);
         }

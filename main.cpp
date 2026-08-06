@@ -254,6 +254,13 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
     }
 };
 
+#define CONFIG_SERVICE_UUID "12345678-1234-1234-1234-1234567890ab"
+#define CONFIG_RX_UUID      "12345678-1234-1234-1234-1234567890ac"
+#define CONFIG_TX_UUID      "12345678-1234-1234-1234-1234567890ad"
+
+NimBLECharacteristic* configTxChar = nullptr;
+NimBLECharacteristic* configRxChar = nullptr;
+
 void loadConfiguration() {
   preferences.begin("kvm_config", true);
   String json = preferences.getString("layout", "[]");
@@ -285,6 +292,53 @@ void saveConfiguration(const String& jsonString) {
   Serial.println("Configuration saved to NVS!");
 }
 
+void processCommand(String input) {
+  input.trim();
+  if (input.startsWith("SAVE_CONFIG ")) {
+    String jsonStr = input.substring(12);
+    jsonStr.trim();
+    if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
+      JsonDocument doc;
+      if (!deserializeJson(doc, jsonStr)) {
+        saveConfiguration(jsonStr);
+        loadConfiguration();
+        if (configTxChar) {
+          configTxChar->setValue("OK_SAVE\n");
+          configTxChar->notify();
+        }
+      }
+    }
+  } else if (input == "GET_CLIENTS") {
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+      if (kvmClients[i].active) {
+        JsonObject client = arr.add<JsonObject>();
+        client["mac"] = kvmClients[i].mac;
+        client["connected"] = true;
+      }
+    }
+    String response;
+    serializeJson(doc, response);
+    String fullResponse = "CLIENTS " + response + "\n";
+    Serial.print(fullResponse);
+    if (configTxChar) {
+      configTxChar->setValue(fullResponse.c_str());
+      configTxChar->notify();
+    }
+  }
+}
+
+class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic) {
+        std::string rxValue = pCharacteristic->getValue();
+        if (rxValue.length() > 0) {
+            String input = String(rxValue.c_str());
+            processCommand(input);
+        }
+    }
+};
+
 void setup() {
   Serial.setRxBufferSize(2048);
   Serial.begin(115200);
@@ -311,11 +365,25 @@ void setup() {
   hidDevice->reportMap((uint8_t*)hidReportMap, sizeof(hidReportMap));
   hidDevice->startServices();
   
+  // Setup Custom Config Service ("ESP32 KVM Server")
+  NimBLEService* pConfigService = pServer->createService(CONFIG_SERVICE_UUID);
+  configTxChar = pConfigService->createCharacteristic(
+                    CONFIG_TX_UUID,
+                    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
+                 );
+  configRxChar = pConfigService->createCharacteristic(
+                    CONFIG_RX_UUID,
+                    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
+                 );
+  configRxChar->setCallbacks(new ConfigRxCallbacks());
+  pConfigService->start();
+
   NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
   pAdvertising->setAppearance(0x03C2); // HID Mouse Appearance
   pAdvertising->addServiceUUID(hidDevice->hidService()->getUUID());
+  pAdvertising->addServiceUUID(CONFIG_SERVICE_UUID);
   pAdvertising->start();
-  Serial.println("[BLE Server] Advertising as 'ESP32 KVM Mouse' with HID Profile...");
+  Serial.println("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
 
   // Setup BLE Client (Host)
   NimBLEScan* pScan = NimBLEDevice::getScan();
@@ -334,30 +402,6 @@ void loop() {
 
   if (Serial.available()) {
     String input = Serial.readStringUntil('\n');
-    input.trim();
-    if (input.startsWith("SAVE_CONFIG ")) {
-      String jsonStr = input.substring(12);
-      jsonStr.trim();
-      if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
-        JsonDocument doc;
-        if (!deserializeJson(doc, jsonStr)) {
-          saveConfiguration(jsonStr);
-          loadConfiguration();
-        }
-      }
-    } else if (input == "GET_CLIENTS") {
-      JsonDocument doc;
-      JsonArray arr = doc.to<JsonArray>();
-      for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active) {
-          JsonObject client = arr.add<JsonObject>();
-          client["mac"] = kvmClients[i].mac;
-          client["connected"] = true;
-        }
-      }
-      String response;
-      serializeJson(doc, response);
-      Serial.println("CLIENTS " + response);
-    }
+    processCommand(input);
   }
 }

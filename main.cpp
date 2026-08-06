@@ -1,98 +1,98 @@
 #include <Arduino.h>
-#include <BleCombo.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+
+Preferences preferences;
+
+// Structure to store monitor configuration
+struct MonitorConfig {
+  String id;
+  int x;
+  int y;
+  int width;
+  int height;
+  String mac;
+};
+
+#define MAX_MONITORS 10
+MonitorConfig monitors[MAX_MONITORS];
+int monitorCount = 0;
+
+void loadConfiguration() {
+  preferences.begin("kvm_config", true); // true = readonly
+  String json = preferences.getString("layout", "[]");
+  preferences.end();
+
+  if (json != "[]") {
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, json);
+
+    if (!error && doc.is<JsonArray>()) {
+      JsonArray arr = doc.as<JsonArray>();
+      monitorCount = 0;
+      for (JsonObject repo : arr) {
+        if (monitorCount >= MAX_MONITORS) break;
+        monitors[monitorCount].id = repo["id"].as<String>();
+        monitors[monitorCount].x = repo["x"];
+        monitors[monitorCount].y = repo["y"];
+        monitors[monitorCount].width = repo["width"];
+        monitors[monitorCount].height = repo["height"];
+        monitors[monitorCount].mac = repo["mac"].as<String>();
+        monitorCount++;
+      }
+      Serial.print("Loaded ");
+      Serial.print(monitorCount);
+      Serial.println(" monitors from NVS.");
+    }
+  } else {
+    Serial.println("No saved configuration found.");
+  }
+}
+
+void saveConfiguration(const String& jsonString) {
+  preferences.begin("kvm_config", false); // false = rw
+  preferences.putString("layout", jsonString);
+  preferences.end();
+  Serial.println("Configuration saved to NVS!");
+}
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Starting work!");
-  Keyboard.begin();
-  Mouse.begin();
+  delay(2000); // Wait for serial monitor to connect
+  
+  Serial.println("\n--- ESP32 KVM Switcher Started ---");
+  loadConfiguration();
 }
 
 void loop() {
-  if (Keyboard.isConnected()) {
-    Serial.println("Sending 'Hello world'");
-    Keyboard.println("Hello World");
-
-    delay(1000);
-    Serial.println("Sending Enter key...");
-    Keyboard.write(KEY_RETURN);
-
-    delay(1000);
-  
-    Serial.println("Sending Play/Pause media key...");
-    Keyboard.write(KEY_MEDIA_PLAY_PAUSE);
-
-    delay(1000);
-
-    Serial.println("Sending Ctrl+Alt+Delete...");
-    Keyboard.press(KEY_LEFT_CTRL);
-    Keyboard.press(KEY_LEFT_ALT);
-    Keyboard.press(KEY_DELETE);
-    delay(100);
-    Keyboard.releaseAll();
-
-    unsigned long startTime;
-
-    Serial.println("Move mouse pointer up");
-    startTime = millis();
-    while (millis() < startTime + 1000) {
-      Mouse.move(0, -1);
-      delay(5);
-    }
-
-    Serial.println("Move mouse pointer left");
-    startTime = millis();
-    while (millis() < startTime + 1000) {
-      Mouse.move(-1, 0);
-      delay(5);
-    }
-
-    Serial.println("Move mouse pointer down");
-    startTime = millis();
-    while (millis() < startTime + 1000) {
-      Mouse.move(0, 1);
-      delay(5);
-    }
-
-    Serial.println("Move mouse pointer right");
-    startTime = millis();
-    while (millis() < startTime + 1000) {
-      Mouse.move(1, 0);
-      delay(5);
-    }
+  // Listen for configuration JSON from Web Serial API
+  if (Serial.available()) {
+    String input = Serial.readStringUntil('\n');
+    input.trim();
     
-    Serial.println("Scroll Down");
-    Mouse.move(0, 0, -1);
+    // The Web UI sends: SAVE_CONFIG [{"id":...}]
+    if (input.startsWith("SAVE_CONFIG ")) {
+      String jsonStr = input.substring(12); // Remove "SAVE_CONFIG " prefix
+      jsonStr.trim();
+      
+      if (jsonStr.startsWith("[") && jsonStr.endsWith("]")) {
+        Serial.println("Received new configuration JSON from Web UI...");
+        
+        JsonDocument doc;
+        DeserializationError error = deserializeJson(doc, jsonStr);
+        
+        if (error) {
+          Serial.print("deserializeJson() failed: ");
+          Serial.println(error.c_str());
+          return;
+        }
 
-    Serial.println("Left click");
-    Mouse.click(MOUSE_LEFT);
-    delay(500);
-
-    Serial.println("Right click");
-    Mouse.click(MOUSE_RIGHT);
-    delay(500);
-
-    Serial.println("Scroll wheel click");
-    Mouse.click(MOUSE_MIDDLE);
-    delay(500);
-
-    Serial.println("Back button click");
-    Mouse.click(MOUSE_BACK);
-    delay(500);
-
-    Serial.println("Forward button click");
-    Mouse.click(MOUSE_FORWARD);
-    delay(500);
-
-    Serial.println("Click left+right mouse button at the same time");
-    Mouse.click(MOUSE_LEFT | MOUSE_RIGHT);
-    delay(500);
-
-    Serial.println("Click left+right mouse button and scroll wheel at the same time");
-    Mouse.click(MOUSE_LEFT | MOUSE_RIGHT | MOUSE_MIDDLE);
-    delay(500);
+        // Save raw JSON to NVS
+        saveConfiguration(jsonStr);
+        
+        // Reload into memory
+        loadConfiguration();
+      }
+    }
   }
-  
-  Serial.println("Waiting 2 seconds...");
-  delay(2000);
 }

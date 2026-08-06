@@ -816,7 +816,11 @@
       if (window.esp32SerialPort && window.esp32SerialPort.writable) {
         try {
           const writer = window.esp32SerialPort.writable.getWriter();
-          await writer.write(new TextEncoder().encode(`SAVE_CONFIG ${jsonText}\n`));
+          // Minify JSON for Serial transmission to avoid \n breaking the Arduino readStringUntil('\n')
+          let minifiedJson = jsonText;
+          try { minifiedJson = JSON.stringify(JSON.parse(jsonText)); } catch(e) {}
+          
+          await writer.write(new TextEncoder().encode(`SAVE_CONFIG ${minifiedJson}\n`));
           writer.releaseLock();
           console.log('Config synced to ESP32 Flash memory!');
         } catch (e) {

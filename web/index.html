@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 134;
+    const BUILD_VERSION = 135;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -511,10 +511,27 @@
         container.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px 6px;">No clients registered. Use Detect or Add.</div>';
         return;
       }
+
+      // Collect unique monitor groups from current screens
+      const availableGroups = [];
+      const seenGroups = new Set();
+      screens.forEach(s => {
+        if (s.group && !seenGroups.has(s.group)) {
+          seenGroups.add(s.group);
+          availableGroups.push({ id: s.group, name: s.groupName || s.group });
+        }
+      });
+
       container.innerHTML = kvmClients.map((c, idx) => {
         const connDot = c.connected ? '<span style="color: #34d399;">●</span>' : '<span style="color: #64748b;">○</span>';
+        
+        const groupOptionsHtml = availableGroups.map(g => {
+          const isSelected = (c.assignedGroup === g.id) || screens.some(s => s.group === g.id && s.mac && s.mac.toLowerCase() === c.mac.toLowerCase());
+          return `<option value="${g.id}" ${isSelected ? 'selected' : ''}>🖥️ ${g.name}</option>`;
+        }).join('');
+
         return `
-          <div class="preset-item" style="flex-direction: column; align-items: stretch; gap: 3px; padding: 6px 8px;">
+          <div class="preset-item" style="flex-direction: column; align-items: stretch; gap: 4px; padding: 6px 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <div style="display: flex; align-items: center; gap: 5px;">
                 ${connDot}
@@ -530,9 +547,32 @@
               </div>
             </div>
             <div style="font-size: 11px; font-weight: 600; color: var(--text-main);">${c.name || 'Unnamed'}</div>
+            <select onchange="assignClientToGroup(${idx}, this.value)" style="background: #0f172a; border: 1px solid #334155; color: #38bdf8; border-radius: 4px; padding: 2px 4px; font-size: 10px; cursor: pointer; outline: none; margin-top: 2px;">
+              <option value="">🔗 Link to Monitor Group...</option>
+              ${groupOptionsHtml}
+            </select>
           </div>
         `;
       }).join('');
+    }
+
+    function assignClientToGroup(clientIdx, groupKey) {
+      const client = kvmClients[clientIdx];
+      if (!client) return;
+
+      screens.forEach(s => {
+        if (groupKey && s.group === groupKey) {
+          s.mac = client.mac;
+          s.groupName = client.name;
+        } else if (s.mac && s.mac.toLowerCase() === client.mac.toLowerCase()) {
+          if (!groupKey) delete s.mac;
+        }
+      });
+
+      client.assignedGroup = groupKey;
+      saveProjectState();
+      updateJSON();
+      draw();
     }
 
     function addClientEntry(mac, name, connected = false) {
@@ -1886,11 +1926,15 @@
               const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale)) - minLX);
               const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLY);
 
+              const assignedClient = kvmClients.find(c => c.mac.toLowerCase() === groupVal.toLowerCase() || c.name === groupNameVal);
+              const macVal = s.mac || (assignedClient ? assignedClient.mac : "");
+
               return {
                 index: index + 1,
                 name: s.name,
                 group: groupVal,
                 group_name: groupNameVal,
+                mac: macVal,
                 x: relX,
                 y: relY,
                 width: s.width,

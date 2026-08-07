@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 138;
+    const BUILD_VERSION = 139;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -411,22 +411,19 @@
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="layoutControlsContainer">
             
             <!-- Connection Buttons (USB & Bluetooth) -->
-            <div style="display: flex; align-items: center; gap: 4px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px 4px;">
-              <button class="btn" id="btnConnectUSB" style="padding: 3px 8px; font-size: 11px; height: 26px;">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"></path><path d="M4.93 10.93l4.24 4.24"></path><path d="M19.07 10.93l-4.24 4.24"></path><rect x="9" y="14" width="6" height="8" rx="1"></rect><circle cx="12" cy="5" r="1"></circle></svg>
-                <span>USB</span>
+            <div style="display: flex; align-items: center; gap: 4px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px 5px;">
+              <!-- Connection Status Dot (Placed First, No Text) -->
+              <div class="status-dot" id="statusDot" style="width: 8px; height: 8px; margin: 0 4px;" title="ESP32 Disconnected"></div>
+
+              <!-- USB Icon-Only Button -->
+              <button class="icon-btn" id="btnConnectUSB" title="USB (Web Serial)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"></path><path d="M4.93 10.93l4.24 4.24"></path><path d="M19.07 10.93l-4.24 4.24"></path><rect x="9" y="14" width="6" height="8" rx="1"></rect><circle cx="12" cy="5" r="1"></circle></svg>
               </button>
               
-              <button class="btn btn-secondary" id="btnConnectBT" style="padding: 3px 8px; font-size: 11px; height: 26px;">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
-                <span>Bluetooth</span>
+              <!-- Bluetooth Icon-Only Button -->
+              <button class="icon-btn" id="btnConnectBT" title="Bluetooth BLE">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
               </button>
-
-              <!-- Connection Status Badge -->
-              <div class="status-badge" style="padding: 2px 6px; font-size: 10px; margin-left: 2px;">
-                <div class="status-dot" id="statusDot"></div>
-                <span id="statusText">Disconnected</span>
-              </div>
             </div>
 
             <div style="width: 1px; height: 18px; background: var(--border-color); margin: 0 2px;"></div>
@@ -2677,13 +2674,13 @@
 
     function setConnectedStatus(connected, text) {
       const dot = document.getElementById('statusDot');
-      const label = document.getElementById('statusText');
-      if (connected) {
-        dot.classList.add('connected');
-        label.textContent = text;
-      } else {
-        dot.classList.remove('connected');
-        label.textContent = 'ESP32 Disconnected';
+      if (dot) {
+        if (connected) {
+          dot.classList.add('connected');
+        } else {
+          dot.classList.remove('connected');
+        }
+        dot.title = text || (connected ? 'ESP32 Connected' : 'ESP32 Disconnected');
       }
     }
 

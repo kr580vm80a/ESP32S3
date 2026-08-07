@@ -323,6 +323,12 @@ void processCommand(String input) {
     serializeJson(doc, response);
     String fullResponse = "CLIENTS " + response + "\n";
     Serial.print(fullResponse);
+  } else if (input == "GET_CONFIG") {
+    preferences.begin("kvm_config", true);
+    String json = preferences.getString("layout", "[]");
+    preferences.end();
+    String fullResponse = "CONFIG " + json + "\n";
+    Serial.print(fullResponse);
     if (configTxChar) {
       configTxChar->setValue((const uint8_t*)fullResponse.c_str(), fullResponse.length());
       configTxChar->notify();

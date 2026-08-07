@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 137;
+    const BUILD_VERSION = 138;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -386,28 +386,9 @@
             <p style="font-size: 10px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
           </div>
         </div>
-        <div class="status-badge">
-          <div class="status-dot" id="statusDot"></div>
-          <span id="statusText">ESP32 Disconnected</span>
-        </div>
-      </header>
-
-      <!-- Connection Card -->
-      <div class="card">
-        <div class="card-title">1. Connection</div>
-        <div class="btn-group">
-          <button class="btn" id="btnConnectUSB">
-            <span>USB (Web Serial)</span>
-          </button>
-          <button class="btn btn-secondary" id="btnConnectBT">
-            <span>Bluetooth</span>
-          </button>
-        </div>
-      </div>
-
       <!-- Multi-Screen Detection Card -->
       <div class="card">
-        <div class="card-title">2. Auto Detect</div>
+        <div class="card-title">Auto Detect</div>
         <div style="margin-bottom: 8px;">
           <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 3px;">Computer Label / Group Name:</label>
           <input type="text" id="pcNameInput" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 4px 8px; font-size: 12px;" placeholder="e.g. Lenovo Laptop, PC 1">
@@ -420,34 +401,40 @@
         </button>
       </div>
 
-      <!-- KVM Clients Card -->
-      <div class="card">
-        <div class="card-title">3. KVM Clients</div>
-        <div id="clientsList" class="preset-list" style="max-height: 180px; margin-bottom: 6px;"></div>
-        <div class="btn-group">
-          <button class="btn" id="btnDetectClients">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-            <span>Detect from KVM</span>
-          </button>
-          <button class="btn btn-secondary" id="btnAddClient">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-            <span>Add Manually</span>
-          </button>
-        </div>
-      </div>
-
     </div>
 
     <!-- Main Canvas & Editor Controls -->
     <div class="editor-container">
       <div class="card" style="flex: 1; display: flex; flex-direction: column;">
         <div class="card-title" style="justify-content: space-between; flex-wrap: wrap; gap: 8px; align-items: center;">
-          <!-- Left: Layout Selector & Material Icon Actions -->
-          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;" id="layoutControlsContainer">
-            <span style="font-size: 13px; font-weight: 700; color: var(--primary);">Layout:</span>
+          <!-- Left: Connection Controls & Layout Selector -->
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="layoutControlsContainer">
+            
+            <!-- Connection Buttons (USB & Bluetooth) -->
+            <div style="display: flex; align-items: center; gap: 4px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px 4px;">
+              <button class="btn" id="btnConnectUSB" style="padding: 3px 8px; font-size: 11px; height: 26px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"></path><path d="M4.93 10.93l4.24 4.24"></path><path d="M19.07 10.93l-4.24 4.24"></path><rect x="9" y="14" width="6" height="8" rx="1"></rect><circle cx="12" cy="5" r="1"></circle></svg>
+                <span>USB</span>
+              </button>
+              
+              <button class="btn btn-secondary" id="btnConnectBT" style="padding: 3px 8px; font-size: 11px; height: 26px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
+                <span>Bluetooth</span>
+              </button>
+
+              <!-- Connection Status Badge -->
+              <div class="status-badge" style="padding: 2px 6px; font-size: 10px; margin-left: 2px;">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Disconnected</span>
+              </div>
+            </div>
+
+            <div style="width: 1px; height: 18px; background: var(--border-color); margin: 0 2px;"></div>
+
+            <span style="font-size: 12px; font-weight: 700; color: var(--primary);">Layout:</span>
             
             <div id="layoutSelectWrapper" style="display: inline-flex; align-items: center;">
-              <select id="layoutSelect" onchange="switchLayout(this.value)" style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: #f8fafc; border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer; height: 28px;">
+              <select id="layoutSelect" onchange="switchLayout(this.value)" style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: #f8fafc; border-radius: 6px; padding: 2px 6px; font-size: 11px; font-weight: 600; cursor: pointer; height: 26px;">
                 <!-- Populated dynamically -->
               </select>
             </div>
@@ -463,6 +450,29 @@
                 <div class="preset-list" id="presetList" style="max-height: 252px; overflow-y: auto;">
                   <!-- Populated dynamically from PRESET_RESOLUTIONS -->
                 </div>
+              </div>
+            </div>
+
+            <!-- Material Icon Button: KVM Clients Popover -->
+            <div style="position: relative; display: inline-block;">
+              <button class="icon-btn" id="btnClientsDropdown" onclick="toggleClientsMenu(event)" title="KVM Clients (MAC)">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+              </button>
+
+              <!-- Floating Clients Dropdown Menu -->
+              <div id="clientsMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 280px; max-height: 320px; overflow: hidden; z-index: 10000; padding: 6px;">
+                <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                  <span>💻 KVM Clients (MAC)</span>
+                  <div style="display: flex; gap: 4px;">
+                    <button class="icon-btn" id="btnDetectClients" title="Detect connected BLE devices" style="width: 22px; height: 22px;">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    </button>
+                    <button class="icon-btn" id="btnAddClient" title="Add Client Manually" style="width: 22px; height: 22px;">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    </button>
+                  </div>
+                </div>
+                <div id="clientsList" class="preset-list" style="max-height: 260px; overflow-y: auto;"></div>
               </div>
             </div>
 
@@ -482,16 +492,16 @@
             <button class="icon-btn icon-btn-danger" onclick="deleteCurrentLayout()" title="Delete Active Layout">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
             </button>
+
+            <button class="icon-btn icon-btn-danger" onclick="clearScreens()" title="Clear Active Layout Screens">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
+            </button>
           </div>
 
           <!-- Right: Sync & Clear Actions -->
           <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
             <div id="driveSyncBadge" style="font-size: 11px; color: #94a3b8; cursor: pointer;" title="Click to sync with Google Drive / ESP32 Flash">Drive Sync</div>
             
-            <button class="icon-btn icon-btn-danger" onclick="clearScreens()" title="Clear Active Layout Screens">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
-            </button>
-
             <button class="icon-btn icon-btn-primary" id="btnSyncESP32" title="Save to ESP32 Flash">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
             </button>
@@ -1641,7 +1651,7 @@
       menu.style.display = isOpen ? 'none' : 'block';
       if (!isOpen) {
         setTimeout(() => {
-          const targetItem = document.getElementById('presetItem_28');
+          const targetItem = document.getElementById('presetItem_34');
           if (targetItem) {
             targetItem.scrollIntoView({ block: 'center' });
           }
@@ -1649,12 +1659,28 @@
       }
     }
 
+    function toggleClientsMenu(e) {
+      if (e) e.stopPropagation();
+      const menu = document.getElementById('clientsMenu');
+      if (!menu) return;
+      const isOpen = menu.style.display === 'block';
+      menu.style.display = isOpen ? 'none' : 'block';
+    }
+
     document.addEventListener('click', (e) => {
-      const menu = document.getElementById('presetMenu');
-      const btn = document.getElementById('btnPresetDropdown');
-      if (menu && menu.style.display === 'block') {
-        if (!menu.contains(e.target) && !btn.contains(e.target)) {
-          menu.style.display = 'none';
+      const presetMenu = document.getElementById('presetMenu');
+      const presetBtn = document.getElementById('btnPresetDropdown');
+      if (presetMenu && presetMenu.style.display === 'block') {
+        if (!presetMenu.contains(e.target) && !presetBtn.contains(e.target)) {
+          presetMenu.style.display = 'none';
+        }
+      }
+
+      const clientsMenu = document.getElementById('clientsMenu');
+      const clientsBtn = document.getElementById('btnClientsDropdown');
+      if (clientsMenu && clientsMenu.style.display === 'block') {
+        if (!clientsMenu.contains(e.target) && !clientsBtn.contains(e.target)) {
+          clientsMenu.style.display = 'none';
         }
       }
     });
@@ -2494,6 +2520,38 @@
     window.esp32BleTxChar = null;
     window.onBleResponseCallback = null;
 
+    function parseESP32ConfigResponse(jsonStr) {
+      try {
+        const doc = JSON.parse(jsonStr);
+        if (doc) {
+          if (doc.layouts) {
+            layoutsData = doc;
+            if (doc.clients) kvmClients = doc.clients;
+          } else if (Array.isArray(doc) && doc.length > 0) {
+            layoutsData = {
+              activeLayoutId: 'layout_1',
+              layouts: [{ id: 'layout_1', name: 'ESP32 Restored Layout', screens: doc }]
+            };
+          }
+          syncScreensReference();
+          updateLayoutSelectorUI();
+          renderClientsList();
+          draw();
+          console.log('[ESP32] Restored configuration & clients from device!');
+        }
+      } catch(e) {
+        console.warn('Failed to parse CONFIG response:', e);
+      }
+    }
+
+    async function fetchESP32DataOnConnect() {
+      console.log('[ESP32] Auto-fetching stored monitors & clients...');
+      setTimeout(async () => {
+        await sendESP32Command('GET_CLIENTS\n');
+        await sendESP32Command('GET_CONFIG\n');
+      }, 400);
+    }
+
     let bleNotifyBuffer = '';
 
     function handleBleNotification(e) {
@@ -2505,6 +2563,9 @@
           const line = lines[i].trim();
           if (line.length > 0) {
             console.log('[BLE Config Response Line]:', line);
+            if (line.startsWith('CONFIG ')) {
+              parseESP32ConfigResponse(line.substring(7));
+            }
             if (window.onBleResponseCallback) {
               window.onBleResponseCallback(line);
             }
@@ -2559,6 +2620,7 @@
           await port.open({ baudRate: 115200 });
           window.esp32SerialPort = port;
           setConnectedStatus(true, 'USB Serial Connected');
+          fetchESP32DataOnConnect();
         } catch (err) {
           alert('Failed to connect via USB: ' + err.message);
         }
@@ -2603,6 +2665,7 @@
 
           setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
           alert('✅ Успішно підключено до ESP32 KVM Server по Bluetooth BLE!');
+          fetchESP32DataOnConnect();
         } catch (err) {
           console.error('[BLE Error]:', err);
           alert('Failed to connect via Bluetooth: ' + err.message);

@@ -302,6 +302,7 @@ void processCommand(String input) {
       if (!deserializeJson(doc, jsonStr)) {
         saveConfiguration(jsonStr);
         loadConfiguration();
+        Serial.println("OK_SAVE");
         if (configTxChar) {
           String resp = "OK_SAVE\n";
           configTxChar->setValue((const uint8_t*)resp.c_str(), resp.length());
@@ -323,6 +324,16 @@ void processCommand(String input) {
     serializeJson(doc, response);
     String fullResponse = "CLIENTS " + response + "\n";
     Serial.print(fullResponse);
+    if (configTxChar) {
+      size_t len = fullResponse.length();
+      size_t chunkSize = 120;
+      for (size_t i = 0; i < len; i += chunkSize) {
+        String chunk = fullResponse.substring(i, min(i + chunkSize, len));
+        configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
+        configTxChar->notify();
+        delay(20);
+      }
+    }
   } else if (input == "GET_CONFIG") {
     preferences.begin("kvm_config", true);
     String json = preferences.getString("layout", "[]");
@@ -330,18 +341,34 @@ void processCommand(String input) {
     String fullResponse = "CONFIG " + json + "\n";
     Serial.print(fullResponse);
     if (configTxChar) {
-      configTxChar->setValue((const uint8_t*)fullResponse.c_str(), fullResponse.length());
-      configTxChar->notify();
+      size_t len = fullResponse.length();
+      size_t chunkSize = 120;
+      for (size_t i = 0; i < len; i += chunkSize) {
+        String chunk = fullResponse.substring(i, min(i + chunkSize, len));
+        configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
+        configTxChar->notify();
+        delay(20);
+      }
     }
   }
 }
+
+static String bleRxBuffer = "";
 
 class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string rxValue = pCharacteristic->getValue();
         if (rxValue.length() > 0) {
-            String input = String(rxValue.c_str());
-            processCommand(input);
+            bleRxBuffer += String(rxValue.c_str());
+            while (bleRxBuffer.indexOf('\n') != -1) {
+              int lineEnd = bleRxBuffer.indexOf('\n');
+              String cmd = bleRxBuffer.substring(0, lineEnd);
+              bleRxBuffer = bleRxBuffer.substring(lineEnd + 1);
+              cmd.trim();
+              if (cmd.length() > 0) {
+                processCommand(cmd);
+              }
+            }
         }
     }
 };

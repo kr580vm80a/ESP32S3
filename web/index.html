@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 135;
+    const BUILD_VERSION = 136;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -420,17 +420,9 @@
         </button>
       </div>
 
-      <!-- Presets Card -->
-      <div class="card">
-        <div class="card-title">3. Presets</div>
-        <div class="preset-list" id="presetList">
-          <!-- Populated dynamically from PRESET_RESOLUTIONS -->
-        </div>
-      </div>
-
       <!-- KVM Clients Card -->
       <div class="card">
-        <div class="card-title">4. KVM Clients</div>
+        <div class="card-title">3. KVM Clients</div>
         <div id="clientsList" class="preset-list" style="max-height: 180px; margin-bottom: 6px;"></div>
         <div class="btn-group">
           <button class="btn" id="btnDetectClients">
@@ -458,6 +450,24 @@
               <select id="layoutSelect" onchange="switchLayout(this.value)" style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); color: #f8fafc; border-radius: 6px; padding: 4px 8px; font-size: 12px; font-weight: 600; cursor: pointer; height: 28px;">
                 <!-- Populated dynamically -->
               </select>
+            </div>
+
+            <!-- Material Icon Button: Add Preset Screen Popover -->
+            <div style="position: relative; display: inline-block;">
+              <button class="icon-btn" id="btnPresetDropdown" onclick="togglePresetMenu(event)" title="Add Screen Preset">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line><line x1="12" y1="7" x2="12" y2="13"></line><line x1="9" y1="10" x2="15" y2="10"></line></svg>
+              </button>
+
+              <!-- Floating Presets Dropdown Menu -->
+              <div id="presetMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 260px; max-height: 280px; overflow-y: auto; z-index: 10000; padding: 6px;">
+                <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+                  <span>🖥️ Resolution Presets</span>
+                  <span style="font-size: 9px; font-weight: 400; color: var(--text-muted);">Click to add</span>
+                </div>
+                <div class="preset-list" id="presetList" style="max-height: 230px;">
+                  <!-- Populated dynamically from PRESET_RESOLUTIONS -->
+                </div>
+              </div>
             </div>
 
             <!-- Material Icon Buttons (Clean Muted Monochrome) -->
@@ -1627,7 +1637,26 @@
       draw();
     });
 
+    function togglePresetMenu(e) {
+      if (e) e.stopPropagation();
+      const menu = document.getElementById('presetMenu');
+      if (!menu) return;
+      menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
+    }
+
+    document.addEventListener('click', (e) => {
+      const menu = document.getElementById('presetMenu');
+      const btn = document.getElementById('btnPresetDropdown');
+      if (menu && menu.style.display === 'block') {
+        if (!menu.contains(e.target) && !btn.contains(e.target)) {
+          menu.style.display = 'none';
+        }
+      }
+    });
+
     function addScreen(name, width, height) {
+      const menu = document.getElementById('presetMenu');
+      if (menu) menu.style.display = 'none';
       const scale = 0.12;
 
       // Ensure preset standard resolution

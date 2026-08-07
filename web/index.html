@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 165;
+    const BUILD_VERSION = 166;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2524,14 +2524,40 @@
       alert('🔍 Запит DUMP_FLASH відправлено! Відкрийте консоль браузера (F12) або термінал Serial Monitor, щоб переглянути вміст Flash NVS.');
     });
 
-    // Backup Layout JSON to local device file (Cross-Platform: Windows, Mac, Android, iOS)
-    document.getElementById('btnBackupJSON').addEventListener('click', () => {
+    // Backup Layout JSON to local device file (Using native Save File Picker with kvm_config.json)
+    document.getElementById('btnBackupJSON').addEventListener('click', async () => {
       const jsonStr = currentConfigJSON || JSON.stringify(layoutsData, null, 2);
+      const fileName = 'kvm_config.json';
+
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: fileName,
+            types: [{
+              description: 'JSON Configuration File',
+              accept: { 'application/json': ['.json'] }
+            }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(jsonStr);
+          await writable.close();
+          console.log(`[BACKUP LOG] Successfully saved layout to ${handle.name}`);
+          return;
+        } catch (err) {
+          if (err.name === 'AbortError') {
+            console.log('[BACKUP LOG] User cancelled file save dialog.');
+            return;
+          }
+          console.warn('[BACKUP LOG] showSaveFilePicker failed, falling back to standard download:', err);
+        }
+      }
+
+      // Fallback for browsers without showSaveFilePicker support
       const blob = new Blob([jsonStr], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `kvm_layout_backup_v${BUILD_VERSION}.json`;
+      a.download = fileName;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

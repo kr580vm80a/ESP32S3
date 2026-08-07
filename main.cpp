@@ -292,23 +292,35 @@ void saveConfiguration(const String& jsonString) {
   Serial.println("Configuration saved to NVS!");
 }
 
+static String pendingSaveJson = "";
+static bool doSaveConfig = false;
+
+void executePendingSave() {
+  if (doSaveConfig && pendingSaveJson.length() > 0) {
+    doSaveConfig = false;
+    JsonDocument doc;
+    if (!deserializeJson(doc, pendingSaveJson)) {
+      saveConfiguration(pendingSaveJson);
+      loadConfiguration();
+      Serial.println("OK_SAVE");
+      if (configTxChar) {
+        String resp = "OK_SAVE\n";
+        configTxChar->setValue((const uint8_t*)resp.c_str(), resp.length());
+        configTxChar->notify();
+      }
+    }
+    pendingSaveJson = "";
+  }
+}
+
 void processCommand(String input) {
   input.trim();
   if (input.startsWith("SAVE_CONFIG ")) {
     String jsonStr = input.substring(12);
     jsonStr.trim();
     if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
-      JsonDocument doc;
-      if (!deserializeJson(doc, jsonStr)) {
-        saveConfiguration(jsonStr);
-        loadConfiguration();
-        Serial.println("OK_SAVE");
-        if (configTxChar) {
-          String resp = "OK_SAVE\n";
-          configTxChar->setValue((const uint8_t*)resp.c_str(), resp.length());
-          configTxChar->notify();
-        }
-      }
+      pendingSaveJson = jsonStr;
+      doSaveConfig = true;
     }
   } else if (input == "GET_CLIENTS") {
     JsonDocument doc;
@@ -429,6 +441,10 @@ void setup() {
 }
 
 void loop() {
+  if (doSaveConfig) {
+    executePendingSave();
+  }
+
   if (doConnect) {
     connectToServer();
     doConnect = false;

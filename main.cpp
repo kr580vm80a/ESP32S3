@@ -377,7 +377,12 @@ void processCommand(String input) {
     }
 
     // Dynamic merge of active connected BLE clients into unified JSON
-    JsonArray clientsArr = doc["clients"].to<JsonArray>();
+    JsonArray clientsArr;
+    if (doc["clients"].is<JsonArray>()) {
+      clientsArr = doc["clients"].as<JsonArray>();
+    } else {
+      clientsArr = doc["clients"].to<JsonArray>();
+    }
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
       if (kvmClients[i].active) {
         bool exists = false;

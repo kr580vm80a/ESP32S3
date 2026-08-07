@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 164;
+    const BUILD_VERSION = 165;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -687,7 +687,7 @@
               }
             }
           };
-          await sendESP32Command('GET_CLIENTS\n');
+          await sendESP32Command('GET_CONFIG\n');
         } catch(e) {
           alert('❌ Помилка передачі по Bluetooth: ' + e.message);
         }
@@ -699,8 +699,7 @@
         return;
       }
       try {
-        const writer = window.esp32SerialPort.writable.getWriter();
-        await writer.write(new TextEncoder().encode('GET_CLIENTS\n'));
+        await sendESP32Command('GET_CONFIG\n');
         writer.releaseLock();
 
         // Read response from ESP32

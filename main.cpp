@@ -355,7 +355,7 @@ void processCommand(String input) {
       pendingSaveJson = jsonStr;
       doSaveConfig = true;
     }
-  } else if (input == "GET_CONFIG" || input == "GET_CLIENTS") {
+  } else if (input == "GET_CONFIG") {
     preferences.begin("kvm_config", true);
     String json = preferences.getString("layout", "{}");
     preferences.end();

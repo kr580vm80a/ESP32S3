@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 142;
+    const BUILD_VERSION = 143;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -513,10 +513,6 @@
             </button>
           </div>
 
-          <!-- Right: Sync Info Badge -->
-          <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-            <div id="driveSyncBadge" style="font-size: 11px; color: #94a3b8; cursor: pointer;" title="Click to sync with Google Drive / ESP32 Flash">Drive Sync</div>
-          </div>
         </div>
 
         <div class="canvas-wrapper">
@@ -2863,103 +2859,19 @@
       });
     }
 
-    function updateBadgeStatus(status) {
-      const badge = document.getElementById('driveSyncBadge');
-      if (!badge) return;
-      if (status === 'synced') {
-        badge.textContent = '🟢 Drive Synced';
-        badge.style.color = '#34d399';
-      } else if (status === 'prompt') {
-        badge.textContent = '🟡 Click canvas to sync Drive';
-        badge.style.color = '#fbbf24';
-      } else {
-        badge.textContent = '⚪ Click Save to link Drive';
-        badge.style.color = '#94a3b8';
-      }
-    }
-
-    async function tryLoadFromDriveHandle() {
-      if (!driveFileHandle) return false;
-      try {
-        const file = await driveFileHandle.getFile();
-        const text = await file.text();
-        const parsed = JSON.parse(text);
-        if (parsed && Array.isArray(parsed.layouts) && parsed.layouts.length > 0) {
-          layoutsData = {
-            activeLayoutId: parsed.active_layout_id || (parsed.layouts[0] ? parsed.layouts[0].id : 'layout_1'),
-            layouts: parsed.layouts.map(l => ({
-              id: l.id || ('layout_' + Math.random()),
-              name: l.name || 'Layout',
-              screens: parseLayoutToScreens(l.screens || l.layout || [])
-            }))
-          };
-          // Load clients from config
-          if (Array.isArray(parsed.clients)) {
-            kvmClients = parsed.clients.map(c => ({ mac: c.mac || '', name: c.name || 'Unnamed', connected: false }));
-            renderClientsList();
-          }
-          syncScreensReference();
-          updateLayoutSelectorUI();
-          draw();
-          updateJSON();
-          updateBadgeStatus('synced');
-          console.log(`Loaded multi-layout config from Google Drive (${layoutsData.layouts.length} layouts, Build v${BUILD_VERSION})`);
-          return true;
-        }
-      } catch (err) {
-        console.warn(`Direct read from Google Drive requires permission:`, err);
-      }
-      return false;
-    }
-
-    async function initDriveSyncOnStartup() {
+    function initAppOnStartup() {
       document.title = `ESP32 Bluetooth KVM Switcher v${BUILD_VERSION} - Configuration Center`;
       const verElem = document.getElementById('appBuildVersion');
       if (verElem) verElem.textContent = 'v' + BUILD_VERSION;
       console.log(`[ESP32 KVM Switch] Web App Build v${BUILD_VERSION} initialized.`);
       resizeCanvas();
+      loadSavedProjectState();
       updateLayoutSelectorUI();
-
-      driveFileHandle = await getStoredFileHandle();
-      if (driveFileHandle) {
-        const loaded = await tryLoadFromDriveHandle();
-        if (!loaded) {
-          updateBadgeStatus('prompt');
-          const requestPermissionOnFirstClick = async () => {
-            if (driveFileHandle) {
-              try {
-                if (await verifyFilePermission(driveFileHandle, false)) {
-                  const success = await tryLoadFromDriveHandle();
-                  if (success) {
-                    window.removeEventListener('click', requestPermissionOnFirstClick);
-                    window.removeEventListener('pointerdown', requestPermissionOnFirstClick);
-                  }
-                }
-              } catch (e) {}
-            }
-          };
-          window.addEventListener('click', requestPermissionOnFirstClick);
-          window.addEventListener('pointerdown', requestPermissionOnFirstClick);
-
-          const badge = document.getElementById('driveSyncBadge');
-          if (badge) {
-            badge.addEventListener('click', requestPermissionOnFirstClick);
-          }
-        } else {
-          return;
-        }
-      } else {
-        updateBadgeStatus('none');
-      }
-
-      if (screens.length > 0) {
-        console.log(`Loaded layout configuration (Build v${BUILD_VERSION})`);
-      }
-
+      renderClientsList();
       draw();
       updateJSON();
     }
-    initDriveSyncOnStartup();
+    initAppOnStartup();
   </script>
 </body>
 </html>

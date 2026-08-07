@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 149;
+    const BUILD_VERSION = 150;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2874,7 +2874,11 @@
           });
           window.esp32BleDevice = device;
           device.addEventListener('gattserverdisconnected', () => {
-            console.warn('[BLE] GATT server disconnected');
+            if (activeConnectionType === 'bluetooth') {
+              console.warn('[BLE] GATT server disconnected unexpectedly');
+            } else {
+              console.log('[BLE] GATT server disconnected cleanly');
+            }
             updateConnectionUI('none');
           });
 

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 139;
+    const BUILD_VERSION = 140;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -410,20 +410,38 @@
           <!-- Left: Connection Controls & Layout Selector -->
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="layoutControlsContainer">
             
-            <!-- Connection Buttons (USB & Bluetooth) -->
+            <!-- Connection & Storage Toolbar Group -->
             <div style="display: flex; align-items: center; gap: 4px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px 5px;">
-              <!-- Connection Status Dot (Placed First, No Text) -->
+              <!-- Connection Status Dot -->
               <div class="status-dot" id="statusDot" style="width: 8px; height: 8px; margin: 0 4px;" title="ESP32 Disconnected"></div>
 
-              <!-- USB Icon-Only Button -->
+              <!-- USB Icon Button -->
               <button class="icon-btn" id="btnConnectUSB" title="USB (Web Serial)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"></path><path d="M4.93 10.93l4.24 4.24"></path><path d="M19.07 10.93l-4.24 4.24"></path><rect x="9" y="14" width="6" height="8" rx="1"></rect><circle cx="12" cy="5" r="1"></circle></svg>
               </button>
               
-              <!-- Bluetooth Icon-Only Button -->
+              <!-- Bluetooth Icon Button -->
               <button class="icon-btn" id="btnConnectBT" title="Bluetooth BLE">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
               </button>
+
+              <!-- Save to ESP32 Flash Button (Moved directly after Bluetooth) -->
+              <button class="icon-btn icon-btn-primary" id="btnSyncESP32" title="Save to ESP32 Flash">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+              </button>
+
+              <!-- Backup Layout JSON to Device Button -->
+              <button class="icon-btn" id="btnBackupJSON" title="Backup JSON to Device (PC / Mac / Android / iOS)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              </button>
+
+              <!-- Restore Layout JSON from Device File Button -->
+              <button class="icon-btn" id="btnRestoreJSON" title="Restore JSON from Device File">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              </button>
+              
+              <!-- Hidden Native File Input for Cross-Platform Restore -->
+              <input type="file" id="jsonFileInput" accept=".json,application/json" style="display: none;">
             </div>
 
             <div style="width: 1px; height: 18px; background: var(--border-color); margin: 0 2px;"></div>
@@ -495,13 +513,9 @@
             </button>
           </div>
 
-          <!-- Right: Sync & Clear Actions -->
+          <!-- Right: Sync Info Badge -->
           <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
             <div id="driveSyncBadge" style="font-size: 11px; color: #94a3b8; cursor: pointer;" title="Click to sync with Google Drive / ESP32 Flash">Drive Sync</div>
-            
-            <button class="icon-btn icon-btn-primary" id="btnSyncESP32" title="Save to ESP32 Flash">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-            </button>
           </div>
         </div>
 
@@ -2502,6 +2516,38 @@
       } else {
         alert('Config saved to local browser storage.');
       }
+    });
+
+    // Backup Layout JSON to local device file (Cross-Platform: Windows, Mac, Android, iOS)
+    document.getElementById('btnBackupJSON').addEventListener('click', () => {
+      const jsonStr = currentConfigJSON || JSON.stringify(layoutsData, null, 2);
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `kvm_layout_backup_v${BUILD_VERSION}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    // Restore Layout JSON from local device file (Cross-Platform)
+    document.getElementById('btnRestoreJSON').addEventListener('click', () => {
+      document.getElementById('jsonFileInput').click();
+    });
+
+    document.getElementById('jsonFileInput').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const content = event.target.result;
+        parseESP32ConfigResponse(content);
+        alert(`✅ Configuration restored from ${file.name}!`);
+      };
+      reader.readAsText(file);
+      e.target.value = '';
     });
 
 

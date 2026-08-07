@@ -429,6 +429,7 @@ static std::vector<String> bleCmdQueue;
 class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string rxValue = pCharacteristic->getValue();
+        Serial.printf("[BLE RX DEBUG]: Received %d bytes: '%s'\n", (int)rxValue.length(), rxValue.c_str());
         if (rxValue.length() > 0) {
             bleRxBuffer += String(rxValue.c_str());
             while (bleRxBuffer.indexOf('\n') != -1) {

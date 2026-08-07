@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 158;
+    const BUILD_VERSION = 159;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2741,6 +2741,8 @@
     }
 
     async function sendESP32Command(cmd) {
+      console.log(`[SEND COMMAND LOG] (Channel: ${activeConnectionType}):`, cmd.trim());
+
       if (activeConnectionType === 'bluetooth' && window.esp32BleDevice && window.esp32BleRxChar) {
         await ensureBleConnected();
         const encoder = new TextEncoder();
@@ -2748,13 +2750,21 @@
         const chunkSize = 20; // Standard 20-byte BLE ATT MTU payload size
         for (let i = 0; i < data.length; i += chunkSize) {
           const chunk = data.slice(i, i + chunkSize);
-          // Use writeValueWithResponse / writeValue for ACKed transmission flow control to prevent NimBLE buffer overflow
-          if (window.esp32BleRxChar.writeValueWithResponse) {
-            await window.esp32BleRxChar.writeValueWithResponse(chunk);
-          } else if (window.esp32BleRxChar.writeValue) {
-            await window.esp32BleRxChar.writeValue(chunk);
-          } else if (window.esp32BleRxChar.writeValueWithoutResponse) {
-            await window.esp32BleRxChar.writeValueWithoutResponse(chunk);
+          try {
+            if (window.esp32BleRxChar.writeValueWithResponse) {
+              await window.esp32BleRxChar.writeValueWithResponse(chunk);
+            } else if (window.esp32BleRxChar.writeValue) {
+              await window.esp32BleRxChar.writeValue(chunk);
+            } else if (window.esp32BleRxChar.writeValueWithoutResponse) {
+              await window.esp32BleRxChar.writeValueWithoutResponse(chunk);
+            }
+          } catch(err) {
+            console.warn('[BLE TX CHUNK RETRY] Retrying with writeValue:', err);
+            try {
+              await window.esp32BleRxChar.writeValue(chunk);
+            } catch(e2) {
+              console.error('[BLE TX CHUNK FAILED]:', e2);
+            }
           }
           await new Promise(r => setTimeout(r, 15)); // Inter-packet delay for flow control
         }
@@ -2764,6 +2774,8 @@
         await writer.write(new TextEncoder().encode(cmd));
         writer.releaseLock();
         return true;
+      } else {
+        console.warn(`[SEND COMMAND FAILED] Cannot send '${cmd.trim()}': activeConnectionType='${activeConnectionType}', esp32BleDevice=${!!window.esp32BleDevice}, esp32BleRxChar=${!!window.esp32BleRxChar}`);
       }
       return false;
     }

@@ -338,12 +338,12 @@ void processCommand(String input) {
     Serial.print(fullResponse);
     if (configTxChar) {
       size_t len = fullResponse.length();
-      size_t chunkSize = 120;
+      size_t chunkSize = 60;
       for (size_t i = 0; i < len; i += chunkSize) {
         String chunk = fullResponse.substring(i, min(i + chunkSize, len));
         configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
         configTxChar->notify();
-        delay(20);
+        delay(15);
       }
     }
   } else if (input == "GET_CONFIG") {
@@ -354,14 +354,22 @@ void processCommand(String input) {
     Serial.print(fullResponse);
     if (configTxChar) {
       size_t len = fullResponse.length();
-      size_t chunkSize = 120;
+      size_t chunkSize = 60;
       for (size_t i = 0; i < len; i += chunkSize) {
         String chunk = fullResponse.substring(i, min(i + chunkSize, len));
         configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
         configTxChar->notify();
-        delay(20);
+        delay(15);
       }
     }
+  } else if (input == "DUMP_FLASH") {
+    preferences.begin("kvm_config", true);
+    String json = preferences.getString("layout", "[]");
+    preferences.end();
+    Serial.println("\n--- [NVS FLASH DUMP] ---");
+    Serial.printf("Flash layout string length: %d bytes\n", json.length());
+    Serial.println(json);
+    Serial.println("--- [END NVS FLASH DUMP] ---\n");
   }
 }
 

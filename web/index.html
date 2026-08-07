@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 163;
+    const BUILD_VERSION = 164;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2585,17 +2585,17 @@
         }
 
         layoutsData = {
-          activeLayoutId: doc.activeLayoutId || doc.active_layout_id || (layoutsArr[0] ? layoutsArr[0].id : 'layout_1'),
+          activeLayoutId: doc.activeLayoutId || (layoutsArr[0] ? layoutsArr[0].id : 'layout_1'),
           layouts: layoutsArr.map((l, lIdx) => ({
             id: l.id || ('layout_' + (lIdx + 1)),
             name: l.name || ('Layout ' + (lIdx + 1)),
             screens: (l.screens || []).map((s, sIdx) => {
               const grp = s.group || 'manual';
-              const grpName = s.groupName || s.group_name || 'Manual Group';
+              const grpName = s.groupName || 'Manual Group';
               const posX = (s.x !== undefined) ? s.x : (s.layoutX !== undefined ? s.layoutX : 0);
               const posY = (s.y !== undefined) ? s.y : (s.layoutY !== undefined ? s.layoutY : 0);
-              const isDet = (s.isDetected !== undefined) ? s.isDetected : ((s.is_detected !== undefined) ? s.is_detected : true);
-              const isPrim = (s.isPrimary !== undefined) ? s.isPrimary : ((s.is_primary !== undefined) ? s.is_primary : false);
+              const isDet = (s.isDetected !== undefined) ? s.isDetected : true;
+              const isPrim = (s.isPrimary !== undefined) ? s.isPrimary : false;
 
               return {
                 id: s.id || ('screen_' + Date.now() + '_' + sIdx),

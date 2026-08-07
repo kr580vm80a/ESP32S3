@@ -273,7 +273,7 @@ void loadConfiguration() {
     if (!err) {
       JsonArray arr;
       if (doc["layouts"].is<JsonArray>() && doc["layouts"].size() > 0) {
-        String activeId = doc["activeLayoutId"].is<String>() ? doc["activeLayoutId"].as<String>() : doc["active_layout_id"].as<String>();
+        String activeId = doc["activeLayoutId"].as<String>();
         JsonObject activeLayout = doc["layouts"][0].as<JsonObject>();
         for (JsonObject l : doc["layouts"].as<JsonArray>()) {
           if (l["id"].as<String>() == activeId) {

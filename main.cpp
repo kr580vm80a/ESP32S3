@@ -374,8 +374,7 @@ void processCommand(String input) {
 }
 
 static String bleRxBuffer = "";
-static String pendingBleCommand = "";
-static bool hasPendingBleCommand = false;
+static std::vector<String> bleCmdQueue;
 
 class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
@@ -388,8 +387,7 @@ class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
               bleRxBuffer = bleRxBuffer.substring(lineEnd + 1);
               cmd.trim();
               if (cmd.length() > 0) {
-                pendingBleCommand = cmd;
-                hasPendingBleCommand = true;
+                bleCmdQueue.push_back(cmd);
               }
             }
         }
@@ -456,10 +454,11 @@ void loop() {
     executePendingSave();
   }
 
-  if (hasPendingBleCommand) {
-    String cmd = pendingBleCommand;
-    pendingBleCommand = "";
-    hasPendingBleCommand = false;
+  if (!bleCmdQueue.empty()) {
+    String cmd = bleCmdQueue.front();
+    bleCmdQueue.erase(bleCmdQueue.begin());
+    Serial.print("[BLE RX CMD]: ");
+    Serial.println(cmd);
     processCommand(cmd);
   }
 

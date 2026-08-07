@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 155;
+    const BUILD_VERSION = 156;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2510,6 +2510,7 @@
       renderClientsList();
 
       await sendESP32Command('GET_CLIENTS\n');
+      await new Promise(r => setTimeout(r, 200));
       await sendESP32Command('GET_CONFIG\n');
     });
 

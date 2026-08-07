@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 162;
+    const BUILD_VERSION = 163;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1980,8 +1980,8 @@
 
       const config = {
         device: "ESP32-KVM-Switch",
-        active_layout_id: layoutsData.activeLayoutId,
-        total_layouts: layoutsData.layouts.length,
+        activeLayoutId: layoutsData.activeLayoutId,
+        totalLayouts: layoutsData.layouts.length,
         layouts: layoutsData.layouts.map(l => {
           const sorted = [...l.screens].sort((a, b) => (a.layoutX !== undefined ? a.layoutX : a.x) - (b.layoutX !== undefined ? b.layoutX : b.x) || (b.layoutY !== undefined ? b.layoutY : b.y) - (a.layoutY !== undefined ? a.layoutY : a.y));
 
@@ -1991,12 +1991,12 @@
           return {
             id: l.id,
             name: l.name,
-            total_screens: sorted.length,
+            totalScreens: sorted.length,
             screens: sorted.map((s, index) => {
               const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
               const groupVal = s.group || (isDetected ? currentDeviceId : 'manual');
-              const groupNameVal = s.groupName || (isDetected ? currentDeviceName : 'Manual Preset');
-              const isPrimaryVal = !!(s.isPrimary || (s.name && s.name.includes('Primary')));
+              const groupNameVal = s.groupName || s.group_name || (isDetected ? currentDeviceName : 'Manual Preset');
+              const isPrimaryVal = !!(s.isPrimary || s.is_primary || (s.name && s.name.includes('Primary')));
 
               const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale)) - minLX);
               const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLY);
@@ -2009,23 +2009,20 @@
                 name: s.name,
                 group: groupVal,
                 groupName: groupNameVal,
-                group_name: groupNameVal,
                 mac: macVal,
                 x: relX,
                 y: relY,
                 width: s.width,
                 height: s.height,
                 isDetected: isDetected,
-                is_detected: isDetected,
-                isPrimary: isPrimaryVal,
-                is_primary: isPrimaryVal
+                isPrimary: isPrimaryVal
               };
             })
           };
         })
       };
 
-      config.clients = kvmClients.map(c => ({ mac: c.mac, name: c.name }));
+      config.clients = kvmClients.map(c => ({ mac: c.mac, name: c.name, connected: c.connected || false }));
 
       currentConfigJSON = JSON.stringify(config, null, 2);
       const jsonElem = document.getElementById('jsonOutput');

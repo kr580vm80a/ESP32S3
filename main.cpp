@@ -273,7 +273,7 @@ void loadConfiguration() {
     if (!err) {
       JsonArray arr;
       if (doc["layouts"].is<JsonArray>() && doc["layouts"].size() > 0) {
-        String activeId = doc["active_layout_id"].as<String>();
+        String activeId = doc["activeLayoutId"].is<String>() ? doc["activeLayoutId"].as<String>() : doc["active_layout_id"].as<String>();
         JsonObject activeLayout = doc["layouts"][0].as<JsonObject>();
         for (JsonObject l : doc["layouts"].as<JsonArray>()) {
           if (l["id"].as<String>() == activeId) {
@@ -366,12 +366,13 @@ void processCommand(String input) {
     if (err || !doc.is<JsonObject>()) {
       doc.clear();
       doc["device"] = "ESP32-KVM-Switch";
-      doc["active_layout_id"] = "layout_1";
-      doc["total_layouts"] = 1;
+      doc["activeLayoutId"] = "layout_1";
+      doc["totalLayouts"] = 1;
       JsonArray layoutsArr = doc["layouts"].to<JsonArray>();
       JsonObject layout1 = layoutsArr.add<JsonObject>();
       layout1["id"] = "layout_1";
       layout1["name"] = "Default Layout";
+      layout1["totalScreens"] = 0;
       layout1["screens"].to<JsonArray>();
       doc["clients"].to<JsonArray>();
     }

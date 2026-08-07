@@ -491,13 +491,16 @@ void setup() {
   pAdvertising->start();
   Serial.println("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
 
-  // Setup BLE Client (Host)
-  NimBLEScan* pScan = NimBLEDevice::getScan();
-  pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks());
-  pScan->setActiveScan(true);
-  pScan->setInterval(97);
-  pScan->setWindow(37);
-  pScan->start(0, false);
+  // Setup BLE Client (Host) in background task to avoid blocking main loop()
+  xTaskCreate([](void* param) {
+    NimBLEScan* pScan = NimBLEDevice::getScan();
+    pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks());
+    pScan->setActiveScan(true);
+    pScan->setInterval(97);
+    pScan->setWindow(37);
+    pScan->start(0, false);
+    vTaskDelete(NULL);
+  }, "bleScanTask", 4096, NULL, 1, NULL);
 }
 
 void loop() {

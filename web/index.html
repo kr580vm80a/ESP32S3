@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 150;
+    const BUILD_VERSION = 151;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2726,20 +2726,24 @@
     }
 
     async function sendESP32Command(cmd) {
-      if (window.esp32BleDevice) {
+      if (activeConnectionType === 'bluetooth' && window.esp32BleDevice && window.esp32BleRxChar) {
         await ensureBleConnected();
         const encoder = new TextEncoder();
         const data = encoder.encode(cmd);
-        for (let i = 0; i < data.length; i += 200) {
-          const chunk = data.slice(i, i + 200);
-          if (window.esp32BleRxChar.writeValueWithResponse) {
+        const chunkSize = 20; // Standard 20-byte BLE ATT MTU payload size for 100% Windows/Mac/Mobile compatibility
+        for (let i = 0; i < data.length; i += chunkSize) {
+          const chunk = data.slice(i, i + chunkSize);
+          if (window.esp32BleRxChar.writeValueWithoutResponse) {
+            await window.esp32BleRxChar.writeValueWithoutResponse(chunk);
+          } else if (window.esp32BleRxChar.writeValueWithResponse) {
             await window.esp32BleRxChar.writeValueWithResponse(chunk);
           } else {
             await window.esp32BleRxChar.writeValue(chunk);
           }
+          await new Promise(r => setTimeout(r, 20)); // Inter-packet delay for GATT transmission reliability
         }
         return true;
-      } else if (window.esp32SerialPort && window.esp32SerialPort.writable) {
+      } else if (activeConnectionType === 'usb' && window.esp32SerialPort && window.esp32SerialPort.writable) {
         const writer = window.esp32SerialPort.writable.getWriter();
         await writer.write(new TextEncoder().encode(cmd));
         writer.releaseLock();

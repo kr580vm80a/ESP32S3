@@ -374,6 +374,8 @@ void processCommand(String input) {
 }
 
 static String bleRxBuffer = "";
+static String pendingBleCommand = "";
+static bool hasPendingBleCommand = false;
 
 class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
@@ -386,7 +388,8 @@ class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
               bleRxBuffer = bleRxBuffer.substring(lineEnd + 1);
               cmd.trim();
               if (cmd.length() > 0) {
-                processCommand(cmd);
+                pendingBleCommand = cmd;
+                hasPendingBleCommand = true;
               }
             }
         }
@@ -451,6 +454,13 @@ void setup() {
 void loop() {
   if (doSaveConfig) {
     executePendingSave();
+  }
+
+  if (hasPendingBleCommand) {
+    String cmd = pendingBleCommand;
+    pendingBleCommand = "";
+    hasPendingBleCommand = false;
+    processCommand(cmd);
   }
 
   if (doConnect) {

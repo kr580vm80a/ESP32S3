@@ -34,6 +34,7 @@ NimBLECharacteristic* inputChar = nullptr;
 struct KVMClient {
   uint16_t conn_id;
   String mac;
+  String name;
   bool active;
 };
 #define MAX_KVM_CLIENTS 2

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 156;
+    const BUILD_VERSION = 157;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2504,13 +2504,11 @@
         alert('⚠️ ESP32 не підключено! Спочатку підключіться через USB або Bluetooth.');
         return;
       }
-      console.log(`[LOAD CONFIG LOG] Requesting GET_CLIENTS and GET_CONFIG over ${activeConnectionType.toUpperCase()}...`);
+      console.log(`[LOAD CONFIG LOG] Requesting unified GET_CONFIG over ${activeConnectionType.toUpperCase()}...`);
       clearScreens();
       kvmClients = [];
       renderClientsList();
 
-      await sendESP32Command('GET_CLIENTS\n');
-      await new Promise(r => setTimeout(r, 200));
       await sendESP32Command('GET_CONFIG\n');
     });
 

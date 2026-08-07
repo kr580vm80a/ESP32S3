@@ -263,25 +263,57 @@ NimBLECharacteristic* configRxChar = nullptr;
 
 void loadConfiguration() {
   preferences.begin("kvm_config", true);
-  String json = preferences.getString("layout", "[]");
+  String json = preferences.getString("layout", "{}");
   preferences.end();
 
-  if (json != "[]") {
+  if (json.length() > 2 && json != "[]") {
     JsonDocument doc;
-    deserializeJson(doc, json);
-    JsonArray arr = doc.as<JsonArray>();
-    monitorCount = 0;
-    for (JsonObject repo : arr) {
-      if (monitorCount >= MAX_MONITORS) break;
-      monitors[monitorCount].id = repo["id"].as<String>();
-      monitors[monitorCount].x = repo["x"];
-      monitors[monitorCount].y = repo["y"];
-      monitors[monitorCount].width = repo["width"];
-      monitors[monitorCount].height = repo["height"];
-      monitors[monitorCount].mac = repo["mac"].as<String>();
-      monitorCount++;
+    DeserializationError err = deserializeJson(doc, json);
+    if (!err) {
+      JsonArray arr;
+      if (doc["layouts"].is<JsonArray>() && doc["layouts"].size() > 0) {
+        String activeId = doc["active_layout_id"].as<String>();
+        JsonObject activeLayout = doc["layouts"][0].as<JsonObject>();
+        for (JsonObject l : doc["layouts"].as<JsonArray>()) {
+          if (l["id"].as<String>() == activeId) {
+            activeLayout = l;
+            break;
+          }
+        }
+        arr = activeLayout["screens"].as<JsonArray>();
+      } else if (doc.is<JsonArray>()) {
+        arr = doc.as<JsonArray>();
+      }
+
+      monitorCount = 0;
+      if (arr) {
+        for (JsonObject repo : arr) {
+          if (monitorCount >= MAX_MONITORS) break;
+          monitors[monitorCount].id = repo["id"].as<String>();
+          monitors[monitorCount].x = repo["x"];
+          monitors[monitorCount].y = repo["y"];
+          monitors[monitorCount].width = repo["width"];
+          monitors[monitorCount].height = repo["height"];
+          monitors[monitorCount].mac = repo["mac"].as<String>();
+          monitorCount++;
+        }
+      }
+      Serial.printf("Loaded %d monitors from NVS.\n", monitorCount);
+
+      if (doc["clients"].is<JsonArray>()) {
+        int clientCount = 0;
+        for (JsonObject c : doc["clients"].as<JsonArray>()) {
+          if (clientCount >= MAX_KVM_CLIENTS) break;
+          String mac = c["mac"].as<String>();
+          if (mac.length() > 0) {
+            kvmClients[clientCount].mac = mac;
+            kvmClients[clientCount].name = c["name"].as<String>();
+            kvmClients[clientCount].active = c["connected"].as<bool>();
+            clientCount++;
+          }
+        }
+      }
     }
-    Serial.printf("Loaded %d monitors from NVS.\n", monitorCount);
   }
 }
 
@@ -322,35 +354,52 @@ void processCommand(String input) {
       pendingSaveJson = jsonStr;
       doSaveConfig = true;
     }
-  } else if (input == "GET_CLIENTS") {
+  } else if (input == "GET_CONFIG" || input == "GET_CLIENTS") {
+    preferences.begin("kvm_config", true);
+    String json = preferences.getString("layout", "{}");
+    preferences.end();
+
     JsonDocument doc;
-    JsonArray arr = doc.to<JsonArray>();
+    DeserializationError err = deserializeJson(doc, json);
+
+    if (err || !doc.is<JsonObject>()) {
+      doc.clear();
+      doc["device"] = "ESP32-KVM-Switch";
+      doc["active_layout_id"] = "layout_1";
+      doc["total_layouts"] = 1;
+      JsonArray layoutsArr = doc["layouts"].to<JsonArray>();
+      JsonObject layout1 = layoutsArr.add<JsonObject>();
+      layout1["id"] = "layout_1";
+      layout1["name"] = "Default Layout";
+      layout1["screens"].to<JsonArray>();
+      doc["clients"].to<JsonArray>();
+    }
+
+    // Dynamic merge of active connected BLE clients into unified JSON
+    JsonArray clientsArr = doc["clients"].to<JsonArray>();
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
       if (kvmClients[i].active) {
-        JsonObject client = arr.add<JsonObject>();
-        client["mac"] = kvmClients[i].mac;
-        client["connected"] = true;
+        bool exists = false;
+        for (JsonObject c : clientsArr) {
+          if (c["mac"].as<String>() == kvmClients[i].mac) {
+            c["connected"] = true;
+            exists = true;
+            break;
+          }
+        }
+        if (!exists) {
+          JsonObject clientObj = clientsArr.add<JsonObject>();
+          clientObj["mac"] = kvmClients[i].mac;
+          clientObj["name"] = kvmClients[i].name.length() > 0 ? kvmClients[i].name : "Detected Device";
+          clientObj["connected"] = true;
+        }
       }
     }
-    String response;
-    serializeJson(doc, response);
-    String fullResponse = "CLIENTS " + response + "\n";
-    Serial.print(fullResponse);
-    if (configTxChar) {
-      size_t len = fullResponse.length();
-      size_t chunkSize = 60;
-      for (size_t i = 0; i < len; i += chunkSize) {
-        String chunk = fullResponse.substring(i, min(i + chunkSize, len));
-        configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
-        configTxChar->notify();
-        delay(15);
-      }
-    }
-  } else if (input == "GET_CONFIG") {
-    preferences.begin("kvm_config", true);
-    String json = preferences.getString("layout", "[]");
-    preferences.end();
-    String fullResponse = "CONFIG " + json + "\n";
+
+    String unifiedJson;
+    serializeJson(doc, unifiedJson);
+
+    String fullResponse = "CONFIG " + unifiedJson + "\n";
     Serial.print(fullResponse);
     if (configTxChar) {
       size_t len = fullResponse.length();
@@ -364,7 +413,7 @@ void processCommand(String input) {
     }
   } else if (input == "DUMP_FLASH") {
     preferences.begin("kvm_config", true);
-    String json = preferences.getString("layout", "[]");
+    String json = preferences.getString("layout", "{}");
     preferences.end();
     Serial.println("\n--- [NVS FLASH DUMP] ---");
     Serial.printf("Flash layout string length: %d bytes\n", json.length());

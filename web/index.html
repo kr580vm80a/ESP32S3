@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 136;
+    const BUILD_VERSION = 137;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -459,12 +459,8 @@
               </button>
 
               <!-- Floating Presets Dropdown Menu -->
-              <div id="presetMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 260px; max-height: 280px; overflow-y: auto; z-index: 10000; padding: 6px;">
-                <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
-                  <span>🖥️ Resolution Presets</span>
-                  <span style="font-size: 9px; font-weight: 400; color: var(--text-muted);">Click to add</span>
-                </div>
-                <div class="preset-list" id="presetList" style="max-height: 230px;">
+              <div id="presetMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 250px; max-height: 260px; overflow: hidden; z-index: 10000; padding: 4px;">
+                <div class="preset-list" id="presetList" style="max-height: 252px; overflow-y: auto;">
                   <!-- Populated dynamically from PRESET_RESOLUTIONS -->
                 </div>
               </div>
@@ -943,12 +939,12 @@
     function renderPresetList() {
       const container = document.getElementById('presetList');
       if (!container) return;
-      container.innerHTML = PRESET_RESOLUTIONS.map(([w, h, name]) => {
+      container.innerHTML = PRESET_RESOLUTIONS.map(([w, h, name], idx) => {
         const safeName = name.replace(/'/g, "\\'");
         return `
-          <div class="preset-item" onclick="addScreen('${safeName}', ${w}, ${h})">
-            <span class="preset-res">${w} × ${h}</span>
-            <span class="preset-name">${name}</span>
+          <div class="preset-item" id="presetItem_${idx}" onclick="addScreen('${safeName}', ${w}, ${h})" style="padding: 3px 6px; border-radius: 4px; font-size: 10px;">
+            <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #38bdf8;">${w}×${h}</span>
+            <span style="color: #94a3b8; font-size: 10px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 140px;" title="${name}">${name}</span>
           </div>
         `;
       }).join('');
@@ -1641,7 +1637,16 @@
       if (e) e.stopPropagation();
       const menu = document.getElementById('presetMenu');
       if (!menu) return;
-      menu.style.display = (menu.style.display === 'none' || !menu.style.display) ? 'block' : 'none';
+      const isOpen = menu.style.display === 'block';
+      menu.style.display = isOpen ? 'none' : 'block';
+      if (!isOpen) {
+        setTimeout(() => {
+          const targetItem = document.getElementById('presetItem_28');
+          if (targetItem) {
+            targetItem.scrollIntoView({ block: 'center' });
+          }
+        }, 15);
+      }
     }
 
     document.addEventListener('click', (e) => {

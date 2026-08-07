@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 144;
+    const BUILD_VERSION = 145;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1046,34 +1046,17 @@
       return false;
     }
 
-    const TARGET_DRIVE_FOLDER_HINT = 'G:\\My Drive\\ESP32\\kvm_config.json';
-
-    // --- Modular ESP32 Storage Function (Reusable for ESP32 hardware Flash/Serial sync) ---
+    // --- Modular ESP32 Storage Function (Sends config to ESP32 Flash over USB or Bluetooth) ---
     async function saveESP32Config(configData) {
       const jsonText = typeof configData === 'string' ? configData : currentConfigJSON;
-
-      if (driveFileHandle) {
-        try {
-          if (await verifyFilePermission(driveFileHandle, true)) {
-            const writable = await driveFileHandle.createWritable();
-            await writable.write(jsonText);
-            await writable.close();
-            console.log('Saved config to Google Drive file: ' + driveFileHandle.name);
-          }
-        } catch (err) {
-          console.warn('Google Drive file save failed:', err);
-        }
-      }
-
-      // ESP32 Hardware Flash Sync
       let minifiedJson = jsonText;
       try { minifiedJson = JSON.stringify(JSON.parse(jsonText)); } catch(e) {}
 
-      if (window.esp32BleRxChar) {
+      if (window.esp32BleRxChar || window.esp32BleDevice) {
         try {
           await sendESP32Command(`SAVE_CONFIG ${minifiedJson}\n`);
           console.log('Config synced to ESP32 Flash memory over Bluetooth!');
-          alert('✅ Дані успішно відправлені на ESP32 через Bluetooth!');
+          alert('✅ Дані успішно збережено в Flash-пам\'ять ESP32 через Bluetooth!');
         } catch (e) {
           alert('❌ Помилка передачі по Bluetooth: ' + e.message);
         }
@@ -1081,13 +1064,13 @@
         try {
           await sendESP32Command(`SAVE_CONFIG ${minifiedJson}\n`);
           console.log('Config synced to ESP32 Flash memory over USB Serial!');
-          alert('✅ Дані успішно відправлені на ESP32 через USB!');
+          alert('✅ Дані успішно збережено в Flash-пам\'ять ESP32 через USB!');
         } catch (e) {
           console.warn('ESP32 Serial Flash sync failed:', e);
           alert('❌ Помилка передачі даних на ESP32: ' + e.message);
         }
       } else {
-        console.warn('Neither USB nor Bluetooth connected. Skipping ESP32 sync.');
+        alert('⚠️ ESP32 не підключено! Спочатку підключіться через USB або Bluetooth.');
       }
     }
 
@@ -2493,29 +2476,7 @@
     }
 
     document.getElementById('btnSyncESP32').addEventListener('click', async () => {
-      const jsonText = currentConfigJSON;
-      
-      if (!driveFileHandle && 'showSaveFilePicker' in window) {
-        try {
-          driveFileHandle = await window.showSaveFilePicker({
-            suggestedName: 'kvm_config.json',
-            types: [{ description: 'JSON Config File', accept: { 'application/json': ['.json'] } }]
-          });
-          if (driveFileHandle) {
-            await setStoredFileHandle(driveFileHandle);
-          }
-        } catch (err) {
-          console.warn('Save file picker canceled or error:', err);
-        }
-      }
-
-      await saveESP32Config(jsonText);
-
-      if (driveFileHandle) {
-        alert(`✅ Configuration saved to ${driveFileHandle.name} in ${TARGET_DRIVE_FOLDER_HINT}!\n\n(Click 🔄 Load Config on your other computer to sync)`);
-      } else {
-        alert('Config saved to local browser storage.');
-      }
+      await saveESP32Config(currentConfigJSON);
     });
 
     // Backup Layout JSON to local device file (Cross-Platform: Windows, Mac, Android, iOS)

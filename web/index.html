@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 146;
+    const BUILD_VERSION = 147;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -212,6 +212,19 @@
       color: var(--primary);
     }
 
+    .icon-btn-connected {
+      background: rgba(52, 211, 153, 0.18) !important;
+      border-color: #34d399 !important;
+      color: #34d399 !important;
+      box-shadow: 0 0 10px rgba(52, 211, 153, 0.4) !important;
+    }
+
+    .icon-btn-connected:hover {
+      background: rgba(52, 211, 153, 0.3) !important;
+      color: #6ee7b7 !important;
+      box-shadow: 0 0 14px rgba(52, 211, 153, 0.6) !important;
+    }
+
     .icon-btn-primary:hover {
       background: linear-gradient(135deg, var(--primary), var(--accent));
       color: #0f172a;
@@ -412,9 +425,6 @@
             
             <!-- Connection & Storage Toolbar Group -->
             <div style="display: flex; align-items: center; gap: 4px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px 5px;">
-              <!-- Connection Status Dot -->
-              <div class="status-dot" id="statusDot" style="width: 8px; height: 8px; margin: 0 4px;" title="ESP32 Disconnected"></div>
-
               <!-- USB Icon Button -->
               <button class="icon-btn" id="btnConnectUSB" title="USB (Web Serial)">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"></path><path d="M4.93 10.93l4.24 4.24"></path><path d="M19.07 10.93l-4.24 4.24"></path><rect x="9" y="14" width="6" height="8" rx="1"></rect><circle cx="12" cy="5" r="1"></circle></svg>
@@ -2680,15 +2690,93 @@
       return false;
     }
 
+    let activeConnectionType = 'none'; // 'none', 'usb', or 'bluetooth'
+
+    function updateConnectionUI(type) {
+      activeConnectionType = type;
+
+      const usbBtn = document.getElementById('btnConnectUSB');
+      const btBtn = document.getElementById('btnConnectBT');
+      const loadBtn = document.getElementById('btnLoadESP32');
+
+      if (usbBtn) {
+        if (type === 'usb') {
+          usbBtn.classList.add('icon-btn-connected');
+          usbBtn.title = 'USB Connected (Click to disconnect)';
+        } else {
+          usbBtn.classList.remove('icon-btn-connected');
+          usbBtn.title = 'USB (Web Serial)';
+        }
+      }
+
+      if (btBtn) {
+        if (type === 'bluetooth') {
+          btBtn.classList.add('icon-btn-connected');
+          btBtn.title = 'Bluetooth Connected: ESP32 KVM Server (Click to disconnect)';
+        } else {
+          btBtn.classList.remove('icon-btn-connected');
+          btBtn.title = 'Bluetooth BLE';
+        }
+      }
+
+      const isConnected = (type === 'usb' || type === 'bluetooth');
+      if (loadBtn) {
+        loadBtn.disabled = !isConnected;
+        loadBtn.style.opacity = isConnected ? '1.0' : '0.4';
+        loadBtn.style.cursor = isConnected ? 'pointer' : 'not-allowed';
+      }
+    }
+
+    async function disconnectAllChannels() {
+      if (window.esp32SerialPort) {
+        try {
+          await window.esp32SerialPort.close();
+        } catch (e) {
+          console.warn('Error closing USB port:', e);
+        }
+        window.esp32SerialPort = null;
+      }
+
+      if (window.esp32BleDevice && window.esp32BleDevice.gatt && window.esp32BleDevice.gatt.connected) {
+        try {
+          window.esp32BleDevice.gatt.disconnect();
+        } catch (e) {
+          console.warn('Error disconnecting BLE GATT:', e);
+        }
+      }
+      window.esp32BleDevice = null;
+      window.esp32BleServer = null;
+      window.esp32BleService = null;
+      window.esp32BleRxChar = null;
+      window.esp32BleTxChar = null;
+
+      updateConnectionUI('none');
+    }
+
     document.getElementById('btnConnectUSB').addEventListener('click', async () => {
+      if (activeConnectionType === 'usb') {
+        await disconnectAllChannels();
+        console.log('[USB] Connection closed by user.');
+        return;
+      }
+
+      await disconnectAllChannels();
+
       if ('serial' in navigator) {
         try {
           const port = await navigator.serial.requestPort();
           await port.open({ baudRate: 115200 });
           window.esp32SerialPort = port;
-          setConnectedStatus(true, 'USB Serial Connected');
+          
+          port.addEventListener('disconnect', () => {
+            console.warn('[USB] Serial port disconnected');
+            updateConnectionUI('none');
+          });
+
+          updateConnectionUI('usb');
         } catch (err) {
-          alert('Failed to connect via USB: ' + err.message);
+          console.warn('USB connection canceled/failed:', err);
+          updateConnectionUI('none');
         }
       } else {
         alert('Web Serial API is not supported in this browser.');
@@ -2696,6 +2784,14 @@
     });
 
     document.getElementById('btnConnectBT').addEventListener('click', async () => {
+      if (activeConnectionType === 'bluetooth') {
+        await disconnectAllChannels();
+        console.log('[BLE] Connection closed by user.');
+        return;
+      }
+
+      await disconnectAllChannels();
+
       if ('bluetooth' in navigator) {
         try {
           const device = await navigator.bluetooth.requestDevice({
@@ -2708,7 +2804,7 @@
           window.esp32BleDevice = device;
           device.addEventListener('gattserverdisconnected', () => {
             console.warn('[BLE] GATT server disconnected');
-            setConnectedStatus(false, 'ESP32 Disconnected');
+            updateConnectionUI('none');
           });
 
           console.log('[BLE] Connecting to GATT server for device:', device.name);
@@ -2720,6 +2816,7 @@
           } catch(serviceErr) {
             console.warn('[BLE] Config service not found:', serviceErr);
             alert('⚠️ Не знайдено Config Service на ESP32!\n\n1. Перевірте, що ви прошили плату через PlatformIO (Build 129+).\n2. Видаліть "ESP32 KVM Mouse" з налаштувань Bluetooth у Windows та підключіться знову, щоб оновити кеш.');
+            updateConnectionUI('none');
             return;
           }
 
@@ -2729,35 +2826,17 @@
           await window.esp32BleTxChar.startNotifications();
           window.esp32BleTxChar.addEventListener('characteristicvaluechanged', handleBleNotification);
 
-          setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
+          updateConnectionUI('bluetooth');
           alert('✅ Успішно підключено до ESP32 KVM Server по Bluetooth BLE!');
         } catch (err) {
           console.error('[BLE Error]:', err);
+          updateConnectionUI('none');
           alert('Failed to connect via Bluetooth: ' + err.message);
         }
       } else {
         alert('Web Bluetooth API is not supported in this browser.');
       }
     });
-
-    function setConnectedStatus(connected, text) {
-      const dot = document.getElementById('statusDot');
-      const loadBtn = document.getElementById('btnLoadESP32');
-      if (dot) {
-        if (connected) {
-          dot.classList.add('connected');
-        } else {
-          dot.classList.remove('connected');
-        }
-        dot.title = text || (connected ? 'ESP32 Connected' : 'ESP32 Disconnected');
-      }
-
-      if (loadBtn) {
-        loadBtn.disabled = !connected;
-        loadBtn.style.opacity = connected ? '1.0' : '0.4';
-        loadBtn.style.cursor = connected ? 'pointer' : 'not-allowed';
-      }
-    }
 
     function parseLayoutToScreens(layoutArray) {
       const scale = 0.12;

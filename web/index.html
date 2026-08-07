@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 157;
+    const BUILD_VERSION = 158;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -453,6 +453,11 @@
               <!-- Restore Layout JSON from Device File Button -->
               <button class="icon-btn" id="btnRestoreJSON" title="Restore JSON from Device File">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+              </button>
+
+              <!-- Dump Flash Diagnostic Button -->
+              <button class="icon-btn" id="btnDumpFlash" title="Dump Flash NVS Diagnostic (Print to Console)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
               </button>
               
               <!-- Hidden Native File Input for Cross-Platform Restore -->
@@ -2510,6 +2515,17 @@
       renderClientsList();
 
       await sendESP32Command('GET_CONFIG\n');
+    });
+
+    // Dump Flash Diagnostic Button handler
+    document.getElementById('btnDumpFlash').addEventListener('click', async () => {
+      if (activeConnectionType === 'none') {
+        alert('⚠️ ESP32 не підключено! Спочатку підключіться через USB або Bluetooth.');
+        return;
+      }
+      console.log(`[DUMP FLASH LOG] Requesting DUMP_FLASH over ${activeConnectionType.toUpperCase()}...`);
+      await sendESP32Command('DUMP_FLASH\n');
+      alert('🔍 Запит DUMP_FLASH відправлено! Відкрийте консоль браузера (F12) або термінал Serial Monitor, щоб переглянути вміст Flash NVS.');
     });
 
     // Backup Layout JSON to local device file (Cross-Platform: Windows, Mac, Android, iOS)

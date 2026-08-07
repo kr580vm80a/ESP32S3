@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 141;
+    const BUILD_VERSION = 142;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2005,13 +2005,16 @@
                 index: index + 1,
                 name: s.name,
                 group: groupVal,
+                groupName: groupNameVal,
                 group_name: groupNameVal,
                 mac: macVal,
                 x: relX,
                 y: relY,
                 width: s.width,
                 height: s.height,
+                isDetected: isDetected,
                 is_detected: isDetected,
+                isPrimary: isPrimaryVal,
                 is_primary: isPrimaryVal
               };
             })
@@ -2567,10 +2570,60 @@
     function parseESP32ConfigResponse(jsonStr) {
       try {
         const doc = JSON.parse(jsonStr);
-        if (doc) {
-          normalizeRestoredLayouts(doc);
-          console.log('[ESP32] Restored & normalized configuration from JSON!');
+        if (!doc) return;
+
+        let layoutsArr = [];
+        if (doc.layouts && Array.isArray(doc.layouts)) {
+          layoutsArr = doc.layouts;
+        } else if (Array.isArray(doc)) {
+          layoutsArr = [{ id: 'layout_1', name: 'Default Layout', screens: doc }];
+        } else {
+          return;
         }
+
+        layoutsData = {
+          activeLayoutId: doc.activeLayoutId || doc.active_layout_id || (layoutsArr[0] ? layoutsArr[0].id : 'layout_1'),
+          layouts: layoutsArr.map((l, lIdx) => ({
+            id: l.id || ('layout_' + (lIdx + 1)),
+            name: l.name || ('Layout ' + (lIdx + 1)),
+            screens: (l.screens || []).map((s, sIdx) => {
+              const grp = s.group || 'manual';
+              const grpName = s.groupName || s.group_name || 'Manual Group';
+              const posX = (s.x !== undefined) ? s.x : (s.layoutX !== undefined ? s.layoutX : 0);
+              const posY = (s.y !== undefined) ? s.y : (s.layoutY !== undefined ? s.layoutY : 0);
+              const isDet = (s.isDetected !== undefined) ? s.isDetected : ((s.is_detected !== undefined) ? s.is_detected : true);
+              const isPrim = (s.isPrimary !== undefined) ? s.isPrimary : ((s.is_primary !== undefined) ? s.is_primary : false);
+
+              return {
+                id: s.id || ('screen_' + Date.now() + '_' + sIdx),
+                name: s.name || 'Display',
+                group: grp,
+                groupName: grpName,
+                mac: s.mac || '',
+                x: posX,
+                y: posY,
+                layoutX: posX,
+                layoutY: posY,
+                width: s.width || 1920,
+                height: s.height || 1080,
+                color: s.color || getGroupColor(grp),
+                isDetected: isDet,
+                isLocked: isDet,
+                isPrimary: isPrim
+              };
+            })
+          }))
+        };
+
+        if (doc.clients && Array.isArray(doc.clients)) {
+          kvmClients = doc.clients;
+        }
+
+        syncScreensReference();
+        updateLayoutSelectorUI();
+        renderClientsList();
+        draw();
+        console.log('[ESP32] Restored explicit layout from JSON!');
       } catch(e) {
         console.warn('Failed to parse CONFIG response:', e);
       }

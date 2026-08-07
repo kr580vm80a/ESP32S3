@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 145;
+    const BUILD_VERSION = 146;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -425,7 +425,12 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
               </button>
 
-              <!-- Save to ESP32 Flash Button (Moved directly after Bluetooth) -->
+              <!-- Load Configuration from ESP32 Button (Disabled when disconnected) -->
+              <button class="icon-btn" id="btnLoadESP32" disabled title="Load configuration from ESP32" style="opacity: 0.4; cursor: not-allowed;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+              </button>
+
+              <!-- Save to ESP32 Flash Button -->
               <button class="icon-btn icon-btn-primary" id="btnSyncESP32" title="Save to ESP32 Flash">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
               </button>
@@ -2479,6 +2484,21 @@
       await saveESP32Config(currentConfigJSON);
     });
 
+    // Load configuration from ESP32 Button handler
+    document.getElementById('btnLoadESP32').addEventListener('click', async () => {
+      if (!window.esp32BleRxChar && !(window.esp32SerialPort && window.esp32SerialPort.writable)) {
+        alert('⚠️ ESP32 не підключено! Спочатку підключіться через USB або Bluetooth.');
+        return;
+      }
+      console.log('[ESP32] Clearing canvas & loading saved configuration from ESP32 Flash...');
+      clearScreens();
+      kvmClients = [];
+      renderClientsList();
+
+      await sendESP32Command('GET_CLIENTS\n');
+      await sendESP32Command('GET_CONFIG\n');
+    });
+
     // Backup Layout JSON to local device file (Cross-Platform: Windows, Mac, Android, iOS)
     document.getElementById('btnBackupJSON').addEventListener('click', () => {
       const jsonStr = currentConfigJSON || JSON.stringify(layoutsData, null, 2);
@@ -2667,7 +2687,6 @@
           await port.open({ baudRate: 115200 });
           window.esp32SerialPort = port;
           setConnectedStatus(true, 'USB Serial Connected');
-          fetchESP32DataOnConnect();
         } catch (err) {
           alert('Failed to connect via USB: ' + err.message);
         }
@@ -2712,7 +2731,6 @@
 
           setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
           alert('✅ Успішно підключено до ESP32 KVM Server по Bluetooth BLE!');
-          fetchESP32DataOnConnect();
         } catch (err) {
           console.error('[BLE Error]:', err);
           alert('Failed to connect via Bluetooth: ' + err.message);
@@ -2724,6 +2742,7 @@
 
     function setConnectedStatus(connected, text) {
       const dot = document.getElementById('statusDot');
+      const loadBtn = document.getElementById('btnLoadESP32');
       if (dot) {
         if (connected) {
           dot.classList.add('connected');
@@ -2731,6 +2750,12 @@
           dot.classList.remove('connected');
         }
         dot.title = text || (connected ? 'ESP32 Connected' : 'ESP32 Disconnected');
+      }
+
+      if (loadBtn) {
+        loadBtn.disabled = !connected;
+        loadBtn.style.opacity = connected ? '1.0' : '0.4';
+        loadBtn.style.cursor = connected ? 'pointer' : 'not-allowed';
       }
     }
 

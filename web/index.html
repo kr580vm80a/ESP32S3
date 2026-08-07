@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 143;
+    const BUILD_VERSION = 144;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2626,7 +2626,12 @@
     }
 
     async function fetchESP32DataOnConnect() {
-      console.log('[ESP32] Auto-fetching stored monitors & clients...');
+      console.log('[ESP32] Clearing current canvas layout & auto-fetching fresh config from ESP32...');
+      // Immediately clear active layout and clients on connection
+      clearScreens();
+      kvmClients = [];
+      renderClientsList();
+
       setTimeout(async () => {
         await sendESP32Command('GET_CLIENTS\n');
         await sendESP32Command('GET_CONFIG\n');

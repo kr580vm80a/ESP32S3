@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 140;
+    const BUILD_VERSION = 141;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1879,8 +1879,9 @@
         ctx.strokeStyle = color;
         ctx.lineWidth = (selectedScreen === s) ? 3 : 2;
 
+        const borderRadius = Math.min(8, Math.floor(sw / 6), Math.floor(sh / 6));
         ctx.beginPath();
-        ctx.roundRect(s.x, s.y, sw, sh, 12);
+        ctx.roundRect(s.x, s.y, sw, sh, borderRadius);
         ctx.fill();
         ctx.stroke();
 
@@ -2567,20 +2568,8 @@
       try {
         const doc = JSON.parse(jsonStr);
         if (doc) {
-          if (doc.layouts) {
-            layoutsData = doc;
-            if (doc.clients) kvmClients = doc.clients;
-          } else if (Array.isArray(doc) && doc.length > 0) {
-            layoutsData = {
-              activeLayoutId: 'layout_1',
-              layouts: [{ id: 'layout_1', name: 'ESP32 Restored Layout', screens: doc }]
-            };
-          }
-          syncScreensReference();
-          updateLayoutSelectorUI();
-          renderClientsList();
-          draw();
-          console.log('[ESP32] Restored configuration & clients from device!');
+          normalizeRestoredLayouts(doc);
+          console.log('[ESP32] Restored & normalized configuration from JSON!');
         }
       } catch(e) {
         console.warn('Failed to parse CONFIG response:', e);

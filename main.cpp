@@ -414,7 +414,7 @@ void processCommand(String input) {
         String chunk = fullResponse.substring(i, min(i + chunkSize, len));
         configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
         configTxChar->notify();
-        delay(15);
+        delay(30); // 30ms delay matches BLE Connection Event window for 100% reliable packet arrival
       }
     }
   } else if (input == "DUMP_FLASH") {

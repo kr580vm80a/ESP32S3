@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 161;
+    const BUILD_VERSION = 162;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2632,6 +2632,14 @@
         console.log(`[PARSED CONFIG LOG] Restored explicit layout (${screens.length} screens across ${layoutsData.layouts.length} layouts):`, layoutsData);
       } catch(e) {
         console.warn('Failed to parse CONFIG response:', e);
+        if (activeConnectionType === 'bluetooth' && !window.isRetryingConfig) {
+          window.isRetryingConfig = true;
+          console.log('[BLE READ RECOVERY] Packet dropped over the air. Auto-retrying GET_CONFIG in 350ms...');
+          setTimeout(async () => {
+            await sendESP32Command('GET_CONFIG\n');
+            window.isRetryingConfig = false;
+          }, 350);
+        }
       }
     }
 

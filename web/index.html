@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 148;
+    const BUILD_VERSION = 149;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2622,6 +2622,7 @@
 
     let usbReadLoopActive = false;
     let usbReadBuffer = '';
+    window.esp32SerialReader = null;
 
     async function startUsbReadLoop() {
       if (usbReadLoopActive || !window.esp32SerialPort || !window.esp32SerialPort.readable) return;
@@ -2630,10 +2631,10 @@
 
       try {
         while (window.esp32SerialPort && window.esp32SerialPort.readable && activeConnectionType === 'usb') {
-          const reader = window.esp32SerialPort.readable.getReader();
+          window.esp32SerialReader = window.esp32SerialPort.readable.getReader();
           try {
-            while (true) {
-              const { value, done } = await reader.read();
+            while (activeConnectionType === 'usb') {
+              const { value, done } = await window.esp32SerialReader.read();
               if (done) break;
               const chunkStr = new TextDecoder().decode(value);
               usbReadBuffer += chunkStr;
@@ -2650,9 +2651,12 @@
               }
             }
           } catch (readErr) {
-            console.warn('[USB READ LOG] Stream read error:', readErr);
+            console.warn('[USB READ LOG] Stream read error / canceled:', readErr);
           } finally {
-            try { reader.releaseLock(); } catch(e) {}
+            if (window.esp32SerialReader) {
+              try { window.esp32SerialReader.releaseLock(); } catch(e) {}
+              window.esp32SerialReader = null;
+            }
           }
         }
       } catch (err) {
@@ -2782,6 +2786,18 @@
     }
 
     async function disconnectAllChannels() {
+      activeConnectionType = 'none';
+
+      if (window.esp32SerialReader) {
+        try {
+          await window.esp32SerialReader.cancel();
+        } catch(e) {}
+        try {
+          window.esp32SerialReader.releaseLock();
+        } catch(e) {}
+        window.esp32SerialReader = null;
+      }
+
       if (window.esp32SerialPort) {
         try {
           await window.esp32SerialPort.close();

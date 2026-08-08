@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 181;
+    const BUILD_VERSION = 182;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -497,7 +497,7 @@
               <!-- Floating Clients Dropdown Menu -->
               <div id="clientsMenu" onclick="event.stopPropagation()" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 360px; max-height: 340px; overflow: hidden; z-index: 10000; padding: 6px;">
                 <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-                  <span>💻 KVM Clients</span>
+                  <span>KVM Clients</span>
                   <button class="icon-btn" id="btnAddClient" onclick="addInlineClient()" title="Add Client" style="width: 22px; height: 22px;">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                   </button>
@@ -559,6 +559,19 @@
     // --- KVM Clients Registry ---
     let kvmClients = [];
 
+    function formatMacInput(input) {
+      if (!input) return;
+      let val = input.value.replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+      if (val.length > 12) val = val.slice(0, 12);
+
+      let formatted = '';
+      for (let i = 0; i < val.length; i++) {
+        if (i > 0 && i % 2 === 0) formatted += ':';
+        formatted += val[i];
+      }
+      input.value = formatted;
+    }
+
     function renderClientsList() {
       const container = document.getElementById('clientsList');
       if (!container) return;
@@ -572,21 +585,22 @@
         
         if (c.isEditing) {
           return `
-            <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 4px 6px; background: rgba(15, 23, 42, 0.9); border: 1px solid #38bdf8; border-radius: 6px;">
+            <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 3px 6px; height: 34px; min-height: 34px; box-sizing: border-box; background: rgba(15, 23, 42, 0.9); border: 1px solid #38bdf8; border-radius: 6px;">
               <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
                 ${connDot}
-                <input type="text" id="editMac_${idx}" value="${c.mac || ''}" placeholder="MAC (aa:bb:cc:dd:ee:ff)" 
+                <input type="text" id="editMac_${idx}" value="${c.mac || ''}" placeholder="aa:bb:cc:dd:ee:ff" maxlength="17"
+                  oninput="formatMacInput(this)"
                   onkeydown="if(event.key==='Enter') saveInlineClient(${idx}); if(event.key==='Escape') cancelInlineClient(${idx});"
-                  style="width: 125px; font-family: 'JetBrains Mono', monospace; font-size: 10px; background: #020617; border: 1px solid #334155; color: #38bdf8; border-radius: 4px; padding: 2px 4px; outline: none;">
+                  style="width: 125px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 10px; background: #020617; border: 1px solid #334155; color: #38bdf8; border-radius: 4px; padding: 0 4px; outline: none; box-sizing: border-box;">
               </div>
               <input type="text" id="editName_${idx}" value="${c.name || ''}" placeholder="Client Name" 
                 onkeydown="if(event.key==='Enter') saveInlineClient(${idx}); if(event.key==='Escape') cancelInlineClient(${idx});"
-                style="flex: 1; font-size: 10px; background: #020617; border: 1px solid #334155; color: #f8fafc; border-radius: 4px; padding: 2px 4px; outline: none; margin: 0 2px;">
+                style="flex: 1; height: 24px; font-size: 10px; background: #020617; border: 1px solid #334155; color: #f8fafc; border-radius: 4px; padding: 0 4px; outline: none; margin: 0 2px; box-sizing: border-box;">
               <div style="display: flex; align-items: center; gap: 2px; flex-shrink: 0;">
-                <button class="icon-btn" onclick="saveInlineClient(${idx})" title="Save" style="width: 22px; height: 22px; color: #34d399;">
+                <button class="icon-btn" onclick="saveInlineClient(${idx})" title="Save" style="width: 24px; height: 24px; color: #34d399;">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 </button>
-                <button class="icon-btn" onclick="cancelInlineClient(${idx})" title="Cancel" style="width: 22px; height: 22px; color: #ef4444;">
+                <button class="icon-btn" onclick="cancelInlineClient(${idx})" title="Cancel" style="width: 24px; height: 24px; color: #ef4444;">
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
                 </button>
               </div>
@@ -595,7 +609,7 @@
         }
 
         return `
-          <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px;">
+          <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 6px; height: 34px; min-height: 34px; box-sizing: border-box;">
             <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
               ${connDot}
               <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; color: var(--primary);">${c.mac}</span>
@@ -603,11 +617,11 @@
             <div style="font-size: 11px; font-weight: 600; color: var(--text-main); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 4px;" title="${c.name || 'Unnamed'}">
               ${c.name || 'Unnamed'}
             </div>
-            <div style="display: flex; align-items: center; gap: 3px; flex-shrink: 0;">
-              <button class="icon-btn" onclick="editClient(${idx})" title="Edit Inline" style="width: 22px; height: 22px;">
+            <div style="display: flex; align-items: center; gap: 2px; flex-shrink: 0;">
+              <button class="icon-btn" onclick="editClient(${idx})" title="Edit" style="width: 24px; height: 24px;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
               </button>
-              <button class="icon-btn icon-btn-danger" onclick="deleteClient(${idx})" title="Delete" style="width: 22px; height: 22px;">
+              <button class="icon-btn icon-btn-danger" onclick="deleteClient(${idx})" title="Delete" style="width: 24px; height: 24px;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
               </button>
             </div>
@@ -617,20 +631,27 @@
     }
 
     function addInlineClient() {
+      cancelAllPendingClientEdits();
       kvmClients.push({ mac: '', name: '', connected: false, isEditing: true, isNew: true });
       renderClientsList();
       setTimeout(() => {
         const lastIdx = kvmClients.length - 1;
-        document.getElementById(`editMac_${lastIdx}`)?.focus();
+        const input = document.getElementById(`editMac_${lastIdx}`);
+        if (input) input.focus();
       }, 50);
     }
 
     function editClient(idx) {
       if (!kvmClients[idx]) return;
+      cancelAllPendingClientEdits();
       kvmClients[idx].isEditing = true;
       renderClientsList();
       setTimeout(() => {
-        document.getElementById(`editMac_${idx}`)?.focus();
+        const input = document.getElementById(`editMac_${idx}`);
+        if (input) {
+          input.focus();
+          formatMacInput(input);
+        }
       }, 50);
     }
 
@@ -1193,7 +1214,7 @@
       layoutsData.layouts.forEach(l => {
         const opt = document.createElement('option');
         opt.value = l.id;
-        opt.textContent = `${l.name} (${l.screens.length} 🖥️)`;
+        opt.textContent = `${l.name} (${l.screens.length})`;
         if (l.id === layoutsData.activeLayoutId) opt.selected = true;
         select.appendChild(opt);
       });

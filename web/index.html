@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 176;
+    const BUILD_VERSION = 177;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -728,15 +728,20 @@
       window.justOpenedBtMenu = true;
       const menuWidth = 290;
       const menuHeight = 260;
-      let left = clientX;
-      let top = clientY;
+
+      // Position slightly to the right of the Bluetooth icon (+20px offset)
+      let left = clientX + 20;
+      let top = clientY - 6;
 
       if (left + menuWidth > window.innerWidth - 10) {
-        left = window.innerWidth - menuWidth - 10;
+        // If constrained on the right, position to the left of the icon
+        left = Math.max(10, clientX - menuWidth - 28);
       }
+
       if (top + menuHeight > window.innerHeight - 10) {
-        top = Math.max(10, clientY - menuHeight - 30);
+        top = Math.max(10, window.innerHeight - menuHeight - 10);
       }
+
       left = Math.max(10, left);
       top = Math.max(10, top);
 
@@ -2234,8 +2239,8 @@
           const hb = s.btIconHitBox;
           if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
             e.stopPropagation();
-            const iconClientX = rect.left + (hb.x / scaleCanvasX);
-            const iconClientY = rect.top + ((hb.y + hb.h) / scaleCanvasY) + 4;
+            const iconClientX = rect.left + ((hb.x + hb.w) / scaleCanvasX);
+            const iconClientY = rect.top + (hb.y / scaleCanvasY);
             openBtBindingMenu(s, iconClientX, iconClientY);
             return;
           }

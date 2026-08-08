@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 167;
+    const BUILD_VERSION = 168;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -495,19 +495,15 @@
               </button>
 
               <!-- Floating Clients Dropdown Menu -->
-              <div id="clientsMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 280px; max-height: 320px; overflow: hidden; z-index: 10000; padding: 6px;">
+              <div id="clientsMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 340px; max-height: 320px; overflow: hidden; z-index: 10000; padding: 6px;">
                 <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-                  <span>💻 KVM Clients (MAC)</span>
-                  <div style="display: flex; gap: 4px;">
-                    <button class="icon-btn" id="btnDetectClients" title="Detect connected BLE devices" style="width: 22px; height: 22px;">
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                    </button>
-                    <button class="icon-btn" id="btnAddClient" title="Add Client Manually" style="width: 22px; height: 22px;">
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                    </button>
-                  </div>
+                  <span>💻 KVM Clients</span>
+                  <button class="btn btn-primary" id="btnAddClient" style="padding: 2px 8px; font-size: 10px; height: 22px; display: inline-flex; align-items: center; gap: 4px;">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    Add...
+                  </button>
                 </div>
-                <div id="clientsList" class="preset-list" style="max-height: 260px; overflow-y: auto;"></div>
+                <div id="clientsList" class="preset-list" style="max-height: 270px; overflow-y: auto;"></div>
               </div>
             </div>
 
@@ -551,49 +547,30 @@
       const container = document.getElementById('clientsList');
       if (!container) return;
       if (kvmClients.length === 0) {
-        container.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 4px 6px;">No clients registered. Use Detect or Add.</div>';
+        container.innerHTML = '<div style="font-size: 11px; color: var(--text-muted); padding: 6px;">No clients registered. Click Add...</div>';
         return;
       }
 
-      // Collect unique monitor groups from current screens
-      const availableGroups = [];
-      const seenGroups = new Set();
-      screens.forEach(s => {
-        if (s.group && !seenGroups.has(s.group)) {
-          seenGroups.add(s.group);
-          availableGroups.push({ id: s.group, name: s.groupName || s.group });
-        }
-      });
-
       container.innerHTML = kvmClients.map((c, idx) => {
-        const connDot = c.connected ? '<span style="color: #34d399;">●</span>' : '<span style="color: #64748b;">○</span>';
+        const connDot = c.connected ? '<span style="color: #34d399;" title="Connected">●</span>' : '<span style="color: #64748b;" title="Disconnected">○</span>';
         
-        const groupOptionsHtml = availableGroups.map(g => {
-          const isSelected = (c.assignedGroup === g.id) || screens.some(s => s.group === g.id && s.mac && s.mac.toLowerCase() === c.mac.toLowerCase());
-          return `<option value="${g.id}" ${isSelected ? 'selected' : ''}>🖥️ ${g.name}</option>`;
-        }).join('');
-
         return `
-          <div class="preset-item" style="flex-direction: column; align-items: stretch; gap: 4px; padding: 6px 8px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <div style="display: flex; align-items: center; gap: 5px;">
-                ${connDot}
-                <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--primary);">${c.mac}</span>
-              </div>
-              <div style="display: flex; gap: 3px;">
-                <button class="icon-btn" onclick="editClient(${idx})" title="Edit" style="width: 22px; height: 22px;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                </button>
-                <button class="icon-btn icon-btn-danger" onclick="deleteClient(${idx})" title="Delete" style="width: 22px; height: 22px;">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
-                </button>
-              </div>
+          <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px;">
+            <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
+              ${connDot}
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; color: var(--primary);">${c.mac}</span>
             </div>
-            <div style="font-size: 11px; font-weight: 600; color: var(--text-main);">${c.name || 'Unnamed'}</div>
-            <select onchange="assignClientToGroup(${idx}, this.value)" style="background: #0f172a; border: 1px solid #334155; color: #38bdf8; border-radius: 4px; padding: 2px 4px; font-size: 10px; cursor: pointer; outline: none; margin-top: 2px;">
-              <option value="">🔗 Link to Monitor Group...</option>
-              ${groupOptionsHtml}
-            </select>
+            <div style="font-size: 11px; font-weight: 600; color: var(--text-main); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0 4px;" title="${c.name || 'Unnamed'}">
+              ${c.name || 'Unnamed'}
+            </div>
+            <div style="display: flex; align-items: center; gap: 3px; flex-shrink: 0;">
+              <button class="icon-btn" onclick="editClient(${idx})" title="Edit" style="width: 22px; height: 22px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              </button>
+              <button class="icon-btn icon-btn-danger" onclick="deleteClient(${idx})" title="Delete" style="width: 22px; height: 22px;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+            </div>
           </div>
         `;
       }).join('');

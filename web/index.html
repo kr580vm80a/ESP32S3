@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 175;
+    const BUILD_VERSION = 176;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -507,12 +507,12 @@
             </div>
 
             <!-- Floating Bluetooth Binding Dropdown Menu -->
-            <div id="btBindingMenu" onclick="event.stopPropagation()" style="display: none; position: fixed; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.6); border-radius: 8px; width: 280px; max-height: 280px; overflow: hidden; z-index: 10001; padding: 6px;">
+            <div id="btBindingMenu" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 290px; max-height: 320px; overflow: hidden; z-index: 100000; padding: 8px;">
               <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-                <span>📶 Bind Bluetooth Client</span>
-                <button class="icon-btn" onclick="closeBtBindingMenu()" style="width: 18px; height: 18px; font-size: 10px;">✕</button>
+                <span style="display: inline-flex; align-items: center; gap: 4px;">📶 Bind Bluetooth Client</span>
+                <button class="icon-btn" onclick="closeBtBindingMenu()" style="width: 20px; height: 20px; font-size: 10px; color: #94a3b8;">✕</button>
               </div>
-              <div id="btBindingList" class="preset-list" style="max-height: 230px; overflow-y: auto;"></div>
+              <div id="btBindingList" class="preset-list" style="max-height: 250px; overflow-y: auto;"></div>
             </div>
 
             <!-- Material Icon Buttons (Clean Muted Monochrome) -->
@@ -726,8 +726,22 @@
       container.innerHTML = html;
 
       window.justOpenedBtMenu = true;
-      menu.style.left = Math.max(10, Math.min(clientX, window.innerWidth - 290)) + 'px';
-      menu.style.top = Math.max(10, Math.min(clientY, window.innerHeight - 290)) + 'px';
+      const menuWidth = 290;
+      const menuHeight = 260;
+      let left = clientX;
+      let top = clientY;
+
+      if (left + menuWidth > window.innerWidth - 10) {
+        left = window.innerWidth - menuWidth - 10;
+      }
+      if (top + menuHeight > window.innerHeight - 10) {
+        top = Math.max(10, clientY - menuHeight - 30);
+      }
+      left = Math.max(10, left);
+      top = Math.max(10, top);
+
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
       menu.style.display = 'block';
     }
 

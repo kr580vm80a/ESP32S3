@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 188;
+    const BUILD_VERSION = 189;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-dark: #0f172a;
@@ -2091,7 +2091,7 @@
 
         // Screen Title & Details
         ctx.fillStyle = '#f8fafc';
-        ctx.font = '600 13px Outfit, system-ui, -apple-system, sans-serif';
+        ctx.font = '600 13px "Outfit", system-ui, -apple-system, sans-serif';
         ctx.fillText(s.name, s.x + 14, s.y + 26);
 
         ctx.fillStyle = '#94a3b8';
@@ -2178,7 +2178,7 @@
 
           // Draw Label Text right next to Bluetooth Icon
           ctx.fillStyle = color;
-          ctx.font = '600 11px Outfit, sans-serif';
+          ctx.font = '600 11px "Outfit", system-ui, -apple-system, sans-serif';
           ctx.fillText(fullLabel, s.x + 26, s.y + 60);
 
           const textWidth = ctx.measureText(fullLabel).width;
@@ -2197,7 +2197,7 @@
 
         // Bottom-Left Relative Coordinate Label (x, y)
         ctx.fillStyle = '#38bdf8';
-        ctx.font = '600 11px JetBrains Mono, monospace';
+        ctx.font = '600 11px "JetBrains Mono", monospace';
         ctx.fillText(`(${relX}, ${relY})`, s.x + 14, s.y + sh - 12);
 
         // --- Red Delete Button (Top Right Corner) ---
@@ -3372,6 +3372,7 @@
 
       if (document.fonts) {
         document.fonts.ready.then(() => draw());
+        document.fonts.addEventListener('loadingdone', () => draw());
       }
     }
     initAppOnStartup();

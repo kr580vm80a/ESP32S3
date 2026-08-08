@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 182;
+    const BUILD_VERSION = 183;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -502,7 +502,7 @@
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                   </button>
                 </div>
-                <div id="clientsList" class="preset-list" style="max-height: 280px; overflow-y: auto;"></div>
+                <div id="clientsList" class="preset-list" style="max-height: 280px; overflow-y: auto; overflow-x: hidden;"></div>
               </div>
             </div>
 
@@ -561,15 +561,50 @@
 
     function formatMacInput(input) {
       if (!input) return;
-      let val = input.value.replace(/[^0-9a-fA-F]/g, '').toLowerCase();
-      if (val.length > 12) val = val.slice(0, 12);
 
+      const rawVal = input.value;
+      const cursorStart = input.selectionStart || 0;
+
+      // Count how many valid hex digits were before cursor
+      const hexBeforeCursor = rawVal.slice(0, cursorStart).replace(/[^0-9a-fA-F]/g, '').length;
+
+      // Extract clean hex digits (max 12)
+      let hexDigits = rawVal.replace(/[^0-9a-fA-F]/g, '').toLowerCase();
+      if (hexDigits.length > 12) hexDigits = hexDigits.slice(0, 12);
+
+      // Build XX:XX:XX:XX:XX:XX
       let formatted = '';
-      for (let i = 0; i < val.length; i++) {
+      for (let i = 0; i < hexDigits.length; i++) {
         if (i > 0 && i % 2 === 0) formatted += ':';
-        formatted += val[i];
+        formatted += hexDigits[i];
       }
+
       input.value = formatted;
+
+      // Calculate new caret position based on hex digit count
+      let newCursorPos = 0;
+      let currentHexCount = 0;
+
+      for (let i = 0; i < formatted.length; i++) {
+        if (formatted[i] !== ':') {
+          currentHexCount++;
+        }
+        if (currentHexCount >= hexBeforeCursor) {
+          newCursorPos = i + 1;
+          break;
+        }
+      }
+
+      if (hexBeforeCursor === 0) newCursorPos = 0;
+      if (newCursorPos > formatted.length) newCursorPos = formatted.length;
+
+      if (formatted[newCursorPos] === ':') {
+        newCursorPos++;
+      }
+
+      try {
+        input.setSelectionRange(newCursorPos, newCursorPos);
+      } catch(err) {}
     }
 
     function renderClientsList() {
@@ -585,13 +620,13 @@
         
         if (c.isEditing) {
           return `
-            <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 3px 6px; height: 34px; min-height: 34px; box-sizing: border-box; background: rgba(15, 23, 42, 0.9); border: 1px solid #38bdf8; border-radius: 6px;">
+            <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 3px 4px; height: 34px; min-height: 34px; width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.9); border: 1px solid #38bdf8; border-radius: 6px; overflow: hidden;">
               <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
                 ${connDot}
                 <input type="text" id="editMac_${idx}" value="${c.mac || ''}" placeholder="aa:bb:cc:dd:ee:ff" maxlength="17"
                   oninput="formatMacInput(this)"
                   onkeydown="if(event.key==='Enter') saveInlineClient(${idx}); if(event.key==='Escape') cancelInlineClient(${idx});"
-                  style="width: 125px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 10px; background: #020617; border: 1px solid #334155; color: #38bdf8; border-radius: 4px; padding: 0 4px; outline: none; box-sizing: border-box;">
+                  style="width: 120px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 10px; background: #020617; border: 1px solid #334155; color: #38bdf8; border-radius: 4px; padding: 0 4px; outline: none; box-sizing: border-box;">
               </div>
               <input type="text" id="editName_${idx}" value="${c.name || ''}" placeholder="Client Name" 
                 onkeydown="if(event.key==='Enter') saveInlineClient(${idx}); if(event.key==='Escape') cancelInlineClient(${idx});"

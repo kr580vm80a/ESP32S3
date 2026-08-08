@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 171;
+    const BUILD_VERSION = 172;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -652,6 +652,24 @@
         delete c.isEditing;
       }
       renderClientsList();
+    }
+
+    function cancelAllPendingClientEdits() {
+      let changed = false;
+      for (let i = kvmClients.length - 1; i >= 0; i--) {
+        const c = kvmClients[i];
+        if (c.isEditing) {
+          if (c.isNew) {
+            kvmClients.splice(i, 1);
+          } else {
+            delete c.isEditing;
+          }
+          changed = true;
+        }
+      }
+      if (changed) {
+        renderClientsList();
+      }
     }
 
     function deleteClient(idx) {
@@ -1588,7 +1606,12 @@
       const menu = document.getElementById('clientsMenu');
       if (!menu) return;
       const isOpen = menu.style.display === 'block';
-      menu.style.display = isOpen ? 'none' : 'block';
+      if (isOpen) {
+        cancelAllPendingClientEdits();
+        menu.style.display = 'none';
+      } else {
+        menu.style.display = 'block';
+      }
     }
 
     document.addEventListener('click', (e) => {
@@ -1604,6 +1627,7 @@
       const clientsBtn = document.getElementById('btnClientsDropdown');
       if (clientsMenu && clientsMenu.style.display === 'block') {
         if (e.target.isConnected && !clientsMenu.contains(e.target) && !clientsBtn.contains(e.target)) {
+          cancelAllPendingClientEdits();
           clientsMenu.style.display = 'none';
         }
       }

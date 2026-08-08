@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 169;
+    const BUILD_VERSION = 170;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -541,7 +541,9 @@
 
   <script>
     // --- KVM Clients Registry ---
-    let kvmClients = [];    function renderClientsList() {
+    let kvmClients = [];
+
+    function renderClientsList() {
       const container = document.getElementById('clientsList');
       if (!container) return;
       if (kvmClients.length === 0) {
@@ -661,160 +663,7 @@
       updateJSON();
     }
 
-    function assignClientToGroup(clientIdx, groupKey) {
-      const client = kvmClients[clientIdx];
-      if (!client) return;
-
-      screens.forEach(s => {
-        if (groupKey && s.group === groupKey) {
-          s.mac = client.mac;
-          s.groupName = client.name;
-        } else if (s.mac && s.mac.toLowerCase() === client.mac.toLowerCase()) {
-          if (!groupKey) delete s.mac;
-        }
-      });
-
-      client.assignedGroup = groupKey;
-      saveProjectState();
-      updateJSON();
-      draw();
-    }
-
-    function addClientEntry(mac, name, connected = false) {
-      const normalized = mac.toLowerCase().trim();
-      const existing = kvmClients.find(c => c.mac.toLowerCase() === normalized);
-
-      // Auto-lookup matching group name from Canvas screens if available
-      let matchedName = name;
-      if (!matchedName || matchedName === 'Unnamed' || matchedName === 'Detected Device') {
-        const matchingScreen = screens.find(s => (s.group && s.group.toLowerCase() === normalized) || (s.mac && s.mac.toLowerCase() === normalized));
-        if (matchingScreen && matchingScreen.groupName) {
-          matchedName = matchingScreen.groupName;
-        } else {
-          matchedName = 'PC (' + normalized.slice(-5).toUpperCase() + ')';
-        }
-      }
-
-      if (existing) {
-        existing.connected = connected || existing.connected;
-        if (matchedName && (existing.name === 'Unnamed' || existing.name.startsWith('PC ('))) existing.name = matchedName;
-        renderClientsList();
-        updateJSON();
-        return;
-      }
-      kvmClients.push({ mac: normalized, name: matchedName, connected });
-      renderClientsList();
-      updateJSON();
-    }
-
-    function editClient(idx) {
-      const c = kvmClients[idx];
-      if (!c) return;
-      const newMac = prompt('MAC Address:', c.mac);
-      if (newMac === null) return;
-      const newName = prompt('Client Name:', c.name);
-      if (newName === null) return;
-      c.mac = newMac.toLowerCase().trim() || c.mac;
-      c.name = newName.trim() || c.name;
-      renderClientsList();
-      updateJSON();
-    }
-
-    function deleteClient(idx) {
-      const c = kvmClients[idx];
-      if (!c) return;
-      if (!confirm(`Delete client "${c.name}" (${c.mac})?`)) return;
-      kvmClients.splice(idx, 1);
-      renderClientsList();
-      updateJSON();
-    }
-
-    async function detectClientsFromKVM() {
-      if (window.esp32BleRxChar) {
-        try {
-          window.onBleResponseCallback = (responseStr) => {
-            const trimmed = responseStr.trim();
-            if (trimmed.startsWith('CLIENTS ')) {
-              const jsonStr = trimmed.substring(8);
-              try {
-                const clients = JSON.parse(jsonStr);
-                let added = 0;
-                clients.forEach(c => {
-                  addClientEntry(c.mac, c.name || 'Detected Device', c.connected);
-                  added++;
-                });
-                alert(`✅ Detected ${added} connected device(s) via Bluetooth!`);
-              } catch(e) {
-                console.warn('Failed to parse CLIENTS response:', e);
-              }
-            }
-          };
-          await sendESP32Command('GET_CONFIG\n');
-        } catch(e) {
-          alert('❌ Помилка передачі по Bluetooth: ' + e.message);
-        }
-        return;
-      }
-
-      if (!window.esp32SerialPort || !window.esp32SerialPort.writable) {
-        alert('❌ ESP32 not connected. Please connect via USB or Bluetooth first.');
-        return;
-      }
-      try {
-        await sendESP32Command('GET_CONFIG\n');
-        writer.releaseLock();
-
-        // Read response from ESP32
-        const reader = window.esp32SerialPort.readable.getReader();
-        let buffer = '';
-        const deadline = Date.now() + 3000; // 3s timeout
-        while (Date.now() < deadline) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += new TextDecoder().decode(value);
-          const lineEnd = buffer.indexOf('\n');
-          if (lineEnd !== -1) {
-            const lines = buffer.split('\n');
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (trimmed.startsWith('CLIENTS ')) {
-                const jsonStr = trimmed.substring(8);
-                try {
-                  const clients = JSON.parse(jsonStr);
-                  let added = 0;
-                  clients.forEach(c => {
-                    addClientEntry(c.mac, c.name || 'Detected Device', c.connected);
-                    added++;
-                  });
-                  reader.releaseLock();
-                  alert(`✅ Detected ${added} connected device(s) from KVM!`);
-                  return;
-                } catch(e) {
-                  console.warn('Failed to parse CLIENTS response:', e);
-                }
-              }
-            }
-            buffer = lines[lines.length - 1];
-          }
-        }
-        reader.releaseLock();
-        alert('⚠️ No response from ESP32. Make sure devices are connected to ESP32 KVM Mouse via Bluetooth.');
-      } catch(e) {
-        alert('❌ Error communicating with ESP32: ' + e.message);
-      }
-    }
-
-    function addClientManually() {
-      const mac = prompt('Enter BLE MAC Address (e.g. aa:bb:cc:dd:ee:ff):');
-      if (!mac) return;
-      const name = prompt('Enter client name (e.g. Lenovo Laptop):');
-      if (name === null) return;
-      addClientEntry(mac, name || 'Unnamed', false);
-    }
-
     document.addEventListener('DOMContentLoaded', () => {
-      document.getElementById('btnDetectClients')?.addEventListener('click', detectClientsFromKVM);
-      document.getElementById('btnAddClient')?.addEventListener('click', addClientManually);
       renderClientsList();
     });
     const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens

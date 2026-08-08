@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 183;
+    const BUILD_VERSION = 184;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -607,6 +607,80 @@
       } catch(err) {}
     }
 
+    function handleMacKeyDown(e, idx) {
+      if (e.key === 'Enter') {
+        saveInlineClient(idx);
+        return;
+      }
+      if (e.key === 'Escape') {
+        cancelInlineClient(idx);
+        return;
+      }
+
+      const input = e.target;
+      if (!input) return;
+
+      const key = e.key;
+
+      // Overtype / Overwrite mode for hex digits (0-9, a-f, A-F)
+      if (key.length === 1 && /[0-9a-fA-F]/.test(key)) {
+        e.preventDefault();
+        const char = key.toLowerCase();
+        let val = input.value || "00:00:00:00:00:00";
+
+        if (val.length < 17) {
+          val = val.padEnd(17, '0');
+        }
+
+        let pos = input.selectionStart;
+        if (pos >= 17) pos = 16;
+
+        // Skip colon
+        if (val[pos] === ':') {
+          pos++;
+        }
+        if (pos >= 17) return;
+
+        const arr = val.split('');
+        arr[pos] = char;
+
+        // Maintain colons at positions 2, 5, 8, 11, 14
+        [2, 5, 8, 11, 14].forEach(i => { arr[i] = ':'; });
+
+        input.value = arr.join('');
+
+        let nextPos = pos + 1;
+        if (nextPos < 17 && arr[nextPos] === ':') {
+          nextPos++;
+        }
+        input.setSelectionRange(nextPos, nextPos);
+        return;
+      }
+
+      // Overtype backspace mode
+      if (key === 'Backspace') {
+        let pos = input.selectionStart;
+        if (pos === 0) return;
+
+        e.preventDefault();
+        let prevPos = pos - 1;
+        let val = input.value;
+
+        if (val[prevPos] === ':') {
+          prevPos--;
+        }
+        if (prevPos < 0) return;
+
+        const arr = val.split('');
+        arr[prevPos] = '0';
+        [2, 5, 8, 11, 14].forEach(i => { arr[i] = ':'; });
+
+        input.value = arr.join('');
+        input.setSelectionRange(prevPos, prevPos);
+        return;
+      }
+    }
+
     function renderClientsList() {
       const container = document.getElementById('clientsList');
       if (!container) return;
@@ -624,8 +698,8 @@
               <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
                 ${connDot}
                 <input type="text" id="editMac_${idx}" value="${c.mac || ''}" placeholder="aa:bb:cc:dd:ee:ff" maxlength="17"
+                  onkeydown="handleMacKeyDown(event, ${idx})"
                   oninput="formatMacInput(this)"
-                  onkeydown="if(event.key==='Enter') saveInlineClient(${idx}); if(event.key==='Escape') cancelInlineClient(${idx});"
                   style="width: 120px; height: 24px; font-family: 'JetBrains Mono', monospace; font-size: 10px; background: #020617; border: 1px solid #334155; color: #38bdf8; border-radius: 4px; padding: 0 4px; outline: none; box-sizing: border-box;">
               </div>
               <input type="text" id="editName_${idx}" value="${c.name || ''}" placeholder="Client Name" 

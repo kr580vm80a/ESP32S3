@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 173;
+    const BUILD_VERSION = 174;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -506,6 +506,15 @@
               </div>
             </div>
 
+            <!-- Floating Bluetooth Binding Dropdown Menu -->
+            <div id="btBindingMenu" onclick="event.stopPropagation()" style="display: none; position: fixed; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.6); border-radius: 8px; width: 280px; max-height: 280px; overflow: hidden; z-index: 10001; padding: 6px;">
+              <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+                <span>📶 Bind Bluetooth Client</span>
+                <button class="icon-btn" onclick="closeBtBindingMenu()" style="width: 18px; height: 18px; font-size: 10px;">✕</button>
+              </div>
+              <div id="btBindingList" class="preset-list" style="max-height: 230px; overflow-y: auto;"></div>
+            </div>
+
             <!-- Material Icon Buttons (Clean Muted Monochrome) -->
             <button class="icon-btn" onclick="addBlankLayout()" title="Add New Layout">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -669,6 +678,94 @@
       if (changed) {
         renderClientsList();
       }
+    }
+
+    let activeBindingScreen = null;
+
+    function openBtBindingMenu(screen, clientX, clientY) {
+      const menu = document.getElementById('btBindingMenu');
+      const container = document.getElementById('btBindingList');
+      if (!menu || !container) return;
+
+      activeBindingScreen = screen;
+      const currentMac = screen.mac ? screen.mac.toLowerCase() : '';
+
+      let html = '';
+
+      if (currentMac) {
+        html += `
+          <div class="preset-item" onclick="unbindScreenMac()" style="color: #ef4444; font-weight: 600; cursor: pointer; padding: 6px 8px; font-size: 11px;">
+            ❌ Unbind / Disconnect MAC
+          </div>
+          <div style="height: 1px; background: var(--border-color); margin: 4px 0;"></div>
+        `;
+      }
+
+      if (kvmClients.length === 0) {
+        html += `<div style="font-size: 11px; color: var(--text-muted); padding: 6px;">No KVM Clients registered yet. Add clients in KVM Clients menu.</div>`;
+      } else {
+        html += kvmClients.map(c => {
+          const isSelected = currentMac && c.mac.toLowerCase() === currentMac;
+          const connDot = c.connected ? '<span style="color: #34d399;">●</span>' : '<span style="color: #64748b;">○</span>';
+          const macParts = c.mac.split(':');
+          const macSuffix = macParts.length >= 3 ? macParts.slice(-3).join(':').toUpperCase() : c.mac;
+
+          return `
+            <div class="preset-item" onclick="bindScreenToMac('${c.mac}')" style="display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; cursor: pointer; ${isSelected ? 'background: rgba(56, 189, 248, 0.15); border-left: 3px solid #38bdf8;' : ''}">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                ${connDot}
+                <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--primary);">${macSuffix}</span>
+                <span style="font-size: 11px; font-weight: 600; color: var(--text-main);">${c.name || 'Unnamed'}</span>
+              </div>
+              ${isSelected ? '<span style="color: #38bdf8; font-weight: 700; font-size: 11px;">✓</span>' : ''}
+            </div>
+          `;
+        }).join('');
+      }
+
+      container.innerHTML = html;
+
+      menu.style.left = Math.min(clientX, window.innerWidth - 290) + 'px';
+      menu.style.top = Math.min(clientY, window.innerHeight - 290) + 'px';
+      menu.style.display = 'block';
+    }
+
+    function closeBtBindingMenu() {
+      const menu = document.getElementById('btBindingMenu');
+      if (menu) menu.style.display = 'none';
+      activeBindingScreen = null;
+    }
+
+    function bindScreenToMac(mac) {
+      if (!activeBindingScreen) return;
+      const targetGroup = activeBindingScreen.group;
+
+      screens.forEach(s => {
+        if (targetGroup ? (s.group === targetGroup) : (s.id === activeBindingScreen.id)) {
+          s.mac = mac;
+        }
+      });
+
+      closeBtBindingMenu();
+      updateJSON();
+      renderClientsList();
+      draw();
+    }
+
+    function unbindScreenMac() {
+      if (!activeBindingScreen) return;
+      const targetGroup = activeBindingScreen.group;
+
+      screens.forEach(s => {
+        if (targetGroup ? (s.group === targetGroup) : (s.id === activeBindingScreen.id)) {
+          delete s.mac;
+        }
+      });
+
+      closeBtBindingMenu();
+      updateJSON();
+      renderClientsList();
+      draw();
     }
 
     function deleteClient(idx) {
@@ -1630,6 +1727,13 @@
           clientsMenu.style.display = 'none';
         }
       }
+
+      const btMenu = document.getElementById('btBindingMenu');
+      if (btMenu && btMenu.style.display === 'block') {
+        if (e.target.isConnected && !btMenu.contains(e.target)) {
+          btMenu.style.display = 'none';
+        }
+      }
     });
 
     function addScreen(name, width, height) {
@@ -1832,25 +1936,65 @@
         ctx.font = '400 11px JetBrains Mono';
         ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
 
-        // Line 3: Render Computer Name ONLY on Primary Monitor of group
+        // Line 3: Render Computer Name & Bluetooth Icon ONLY on Primary Monitor of group
         const isPrimaryScreen = s.isPrimary || (s.group && primaryPerGroup[s.group] === s);
         if (isPrimaryScreen && (s.groupName || s.group)) {
           const gName = s.groupName || s.group;
+
+          // Extract last 3 pairs of MAC if available (e.g. 57:02:23)
+          let macSuffix = '';
+          if (s.mac && s.mac.includes(':')) {
+            const parts = s.mac.split(':');
+            if (parts.length >= 3) {
+              macSuffix = ' (' + parts.slice(-3).join(':').toUpperCase() + ')';
+            }
+          }
+
+          const fullLabel = gName + macSuffix;
+
+          // Draw Bluetooth Icon
+          const btIconX = s.x + 14;
+          const btIconY = s.y + 51;
+          const hasMac = !!s.mac;
+          const btColor = hasMac ? '#38bdf8' : '#64748b';
+
+          ctx.strokeStyle = btColor;
+          ctx.lineWidth = 1.6;
+          ctx.beginPath();
+          ctx.moveTo(btIconX + 3, btIconY + 1);
+          ctx.lineTo(btIconX + 7, btIconY + 5);
+          ctx.lineTo(btIconX + 5, btIconY + 7);
+          ctx.lineTo(btIconX + 5, btIconY + 0);
+          ctx.lineTo(btIconX + 7, btIconY + 2);
+          ctx.lineTo(btIconX + 3, btIconY + 6);
+          ctx.stroke();
+
+          // Store hit box for Bluetooth Icon click
+          s.btIconHitBox = {
+            x: s.x + 8,
+            y: s.y + 46,
+            w: 20,
+            h: 20,
+            screen: s
+          };
+
+          // Draw Label Text right next to Bluetooth Icon
           ctx.fillStyle = color;
           ctx.font = '600 11px Outfit, sans-serif';
-          ctx.fillText(gName, s.x + 14, s.y + 62);
+          ctx.fillText(fullLabel, s.x + 26, s.y + 60);
 
-          const textWidth = ctx.measureText(gName).width;
+          const textWidth = ctx.measureText(fullLabel).width;
           s.groupNameHitBox = {
-            x: s.x + 14,
+            x: s.x + 26,
             y: s.y + 48,
-            w: Math.max(70, textWidth + 10),
+            w: Math.max(60, textWidth),
             h: 18,
             group: s.group,
             currentName: gName
           };
         } else {
           s.groupNameHitBox = null;
+          s.btIconHitBox = null;
         }
 
         // Bottom-Left Relative Coordinate Label (x, y)
@@ -2066,6 +2210,16 @@
           }
         }
 
+        // Check Click on Bluetooth Icon (Primary Screens)
+        if (s.btIconHitBox) {
+          const hb = s.btIconHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            e.stopPropagation();
+            openBtBindingMenu(s, e.clientX, e.clientY);
+            return;
+          }
+        }
+
         // Check Click on Computer Group Name (Inline Canvas Rename Overlay)
         if (s.groupNameHitBox) {
           const hb = s.groupNameHitBox;
@@ -2143,6 +2297,7 @@
       let hoveringDelete = false;
       let hoveringResize = false;
       let hoveringName = false;
+      let hoveringBtIcon = false;
       let hoveringScreen = false;
 
       screens.forEach(s => {
@@ -2154,6 +2309,12 @@
         if (!isDetected && s.resizeHandle && mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
             my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
           hoveringResize = true;
+        }
+        if (s.btIconHitBox) {
+          const hb = s.btIconHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            hoveringBtIcon = true;
+          }
         }
         if (s.groupNameHitBox) {
           const hb = s.groupNameHitBox;
@@ -2169,7 +2330,7 @@
         }
       });
 
-      if (hoveringDelete || hoveringName) {
+      if (hoveringDelete || hoveringName || hoveringBtIcon) {
         canvas.style.cursor = 'pointer';
       } else if (hoveringResize || isResizing) {
         canvas.style.cursor = 'nwse-resize';

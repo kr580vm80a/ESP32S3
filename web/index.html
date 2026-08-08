@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 178;
+    const BUILD_VERSION = 179;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -506,15 +506,6 @@
               </div>
             </div>
 
-            <!-- Floating Bluetooth Binding Dropdown Menu -->
-            <div id="btBindingMenu" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 290px; max-height: 320px; overflow: hidden; z-index: 100000; padding: 8px;">
-              <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-                <span style="display: inline-flex; align-items: center; gap: 4px;">📶 Bind Bluetooth Client</span>
-                <button class="icon-btn" onclick="closeBtBindingMenu()" style="width: 20px; height: 20px; font-size: 10px; color: #94a3b8;">✕</button>
-              </div>
-              <div id="btBindingList" class="preset-list" style="max-height: 250px; overflow-y: auto;"></div>
-            </div>
-
             <!-- Material Icon Buttons (Clean Muted Monochrome) -->
             <button class="icon-btn" onclick="addBlankLayout()" title="Add New Layout">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -545,6 +536,15 @@
         <div class="canvas-instructions">Drag screens to position. Auto-detected screens move together as a fixed group and cannot be resized.</div>
       </div>
     </div>
+  </div>
+
+  <!-- Floating Bluetooth Binding Dropdown Menu (Direct Child of Body) -->
+  <div id="btBindingMenu" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 290px; max-height: 320px; overflow: hidden; z-index: 100000; padding: 8px;">
+    <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+      <span style="display: inline-flex; align-items: center; gap: 4px;">📶 Bind Bluetooth Client</span>
+      <button class="icon-btn" onclick="closeBtBindingMenu()" style="width: 20px; height: 20px; font-size: 10px; color: #94a3b8;">✕</button>
+    </div>
+    <div id="btBindingList" class="preset-list" style="max-height: 250px; overflow-y: auto;"></div>
   </div>
 
   <script>
@@ -1953,11 +1953,11 @@
 
         // Screen Title & Details
         ctx.fillStyle = '#f8fafc';
-        ctx.font = '600 13px Outfit';
+        ctx.font = '600 13px Outfit, system-ui, -apple-system, sans-serif';
         ctx.fillText(s.name, s.x + 14, s.y + 26);
 
         ctx.fillStyle = '#94a3b8';
-        ctx.font = '400 11px JetBrains Mono';
+        ctx.font = '400 11px "JetBrains Mono", monospace';
         ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
 
         // Line 3: Render Computer Name & Bluetooth Icon ONLY on Primary Monitor of group
@@ -3195,6 +3195,11 @@
       renderClientsList();
       draw();
       updateJSON();
+
+      if (document.fonts) {
+        document.fonts.ready.then(() => draw());
+      }
+    }
     }
     initAppOnStartup();
   </script>

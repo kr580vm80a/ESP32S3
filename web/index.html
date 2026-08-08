@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 170;
+    const BUILD_VERSION = 171;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -495,7 +495,7 @@
               </button>
 
               <!-- Floating Clients Dropdown Menu -->
-              <div id="clientsMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 360px; max-height: 340px; overflow: hidden; z-index: 10000; padding: 6px;">
+              <div id="clientsMenu" onclick="event.stopPropagation()" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 360px; max-height: 340px; overflow: hidden; z-index: 10000; padding: 6px;">
                 <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
                   <span>💻 KVM Clients</span>
                   <button class="btn btn-primary" id="btnAddClient" onclick="addInlineClient()" style="padding: 2px 8px; font-size: 10px; height: 22px; display: inline-flex; align-items: center; gap: 4px;">
@@ -1603,7 +1603,7 @@
       const clientsMenu = document.getElementById('clientsMenu');
       const clientsBtn = document.getElementById('btnClientsDropdown');
       if (clientsMenu && clientsMenu.style.display === 'block') {
-        if (!clientsMenu.contains(e.target) && !clientsBtn.contains(e.target)) {
+        if (e.target.isConnected && !clientsMenu.contains(e.target) && !clientsBtn.contains(e.target)) {
           clientsMenu.style.display = 'none';
         }
       }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 168;
+    const BUILD_VERSION = 169;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -495,15 +495,15 @@
               </button>
 
               <!-- Floating Clients Dropdown Menu -->
-              <div id="clientsMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 340px; max-height: 320px; overflow: hidden; z-index: 10000; padding: 6px;">
+              <div id="clientsMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 360px; max-height: 340px; overflow: hidden; z-index: 10000; padding: 6px;">
                 <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
                   <span>💻 KVM Clients</span>
-                  <button class="btn btn-primary" id="btnAddClient" style="padding: 2px 8px; font-size: 10px; height: 22px; display: inline-flex; align-items: center; gap: 4px;">
+                  <button class="btn btn-primary" id="btnAddClient" onclick="addInlineClient()" style="padding: 2px 8px; font-size: 10px; height: 22px; display: inline-flex; align-items: center; gap: 4px;">
                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                     Add...
                   </button>
                 </div>
-                <div id="clientsList" class="preset-list" style="max-height: 270px; overflow-y: auto;"></div>
+                <div id="clientsList" class="preset-list" style="max-height: 280px; overflow-y: auto;"></div>
               </div>
             </div>
 
@@ -541,9 +541,7 @@
 
   <script>
     // --- KVM Clients Registry ---
-    let kvmClients = [];
-
-    function renderClientsList() {
+    let kvmClients = [];    function renderClientsList() {
       const container = document.getElementById('clientsList');
       if (!container) return;
       if (kvmClients.length === 0) {
@@ -554,6 +552,30 @@
       container.innerHTML = kvmClients.map((c, idx) => {
         const connDot = c.connected ? '<span style="color: #34d399;" title="Connected">●</span>' : '<span style="color: #64748b;" title="Disconnected">○</span>';
         
+        if (c.isEditing) {
+          return `
+            <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 4px 6px; background: rgba(15, 23, 42, 0.9); border: 1px solid #38bdf8; border-radius: 6px;">
+              <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                ${connDot}
+                <input type="text" id="editMac_${idx}" value="${c.mac || ''}" placeholder="MAC (aa:bb:cc:dd:ee:ff)" 
+                  onkeydown="if(event.key==='Enter') saveInlineClient(${idx}); if(event.key==='Escape') cancelInlineClient(${idx});"
+                  style="width: 125px; font-family: 'JetBrains Mono', monospace; font-size: 10px; background: #020617; border: 1px solid #334155; color: #38bdf8; border-radius: 4px; padding: 2px 4px; outline: none;">
+              </div>
+              <input type="text" id="editName_${idx}" value="${c.name || ''}" placeholder="Client Name" 
+                onkeydown="if(event.key==='Enter') saveInlineClient(${idx}); if(event.key==='Escape') cancelInlineClient(${idx});"
+                style="flex: 1; font-size: 10px; background: #020617; border: 1px solid #334155; color: #f8fafc; border-radius: 4px; padding: 2px 4px; outline: none; margin: 0 2px;">
+              <div style="display: flex; align-items: center; gap: 2px; flex-shrink: 0;">
+                <button class="icon-btn" onclick="saveInlineClient(${idx})" title="Save" style="width: 22px; height: 22px; color: #34d399;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </button>
+                <button class="icon-btn" onclick="cancelInlineClient(${idx})" title="Cancel" style="width: 22px; height: 22px; color: #ef4444;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                </button>
+              </div>
+            </div>
+          `;
+        }
+
         return `
           <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px;">
             <div style="display: flex; align-items: center; gap: 6px; flex-shrink: 0;">
@@ -564,7 +586,7 @@
               ${c.name || 'Unnamed'}
             </div>
             <div style="display: flex; align-items: center; gap: 3px; flex-shrink: 0;">
-              <button class="icon-btn" onclick="editClient(${idx})" title="Edit" style="width: 22px; height: 22px;">
+              <button class="icon-btn" onclick="editClient(${idx})" title="Edit Inline" style="width: 22px; height: 22px;">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
               </button>
               <button class="icon-btn icon-btn-danger" onclick="deleteClient(${idx})" title="Delete" style="width: 22px; height: 22px;">
@@ -574,6 +596,69 @@
           </div>
         `;
       }).join('');
+    }
+
+    function addInlineClient() {
+      kvmClients.push({ mac: '', name: '', connected: false, isEditing: true, isNew: true });
+      renderClientsList();
+      setTimeout(() => {
+        const lastIdx = kvmClients.length - 1;
+        document.getElementById(`editMac_${lastIdx}`)?.focus();
+      }, 50);
+    }
+
+    function editClient(idx) {
+      if (!kvmClients[idx]) return;
+      kvmClients[idx].isEditing = true;
+      renderClientsList();
+      setTimeout(() => {
+        document.getElementById(`editMac_${idx}`)?.focus();
+      }, 50);
+    }
+
+    function saveInlineClient(idx) {
+      const c = kvmClients[idx];
+      if (!c) return;
+      const macInput = document.getElementById(`editMac_${idx}`);
+      const nameInput = document.getElementById(`editName_${idx}`);
+      if (!macInput || !nameInput) return;
+
+      const newMac = macInput.value.toLowerCase().trim();
+      const newName = nameInput.value.trim();
+
+      if (!newMac) {
+        alert('⚠️ Please enter a MAC address!');
+        macInput.focus();
+        return;
+      }
+
+      c.mac = newMac;
+      c.name = newName || 'Unnamed';
+      delete c.isEditing;
+      delete c.isNew;
+
+      renderClientsList();
+      updateJSON();
+    }
+
+    function cancelInlineClient(idx) {
+      const c = kvmClients[idx];
+      if (!c) return;
+      if (c.isNew) {
+        kvmClients.splice(idx, 1);
+      } else {
+        delete c.isEditing;
+      }
+      renderClientsList();
+    }
+
+    function deleteClient(idx) {
+      const c = kvmClients[idx];
+      if (!c) return;
+      if (!confirm(`Delete client "${c.name}" (${c.mac})?`)) return;
+      kvmClients.splice(idx, 1);
+      renderClientsList();
+      updateJSON();
     }
 
     function assignClientToGroup(clientIdx, groupKey) {

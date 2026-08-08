@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 180;
+    const BUILD_VERSION = 181;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -541,8 +541,16 @@
   <!-- Floating Bluetooth Binding Dropdown Menu (Direct Child of Body) -->
   <div id="btBindingMenu" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 290px; max-height: 320px; overflow: hidden; z-index: 100000; padding: 8px;">
     <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-      <span style="display: inline-flex; align-items: center; gap: 4px;">📶 Bind Bluetooth Client</span>
-      <button class="icon-btn" onclick="closeBtBindingMenu()" style="width: 20px; height: 20px; font-size: 10px; color: #94a3b8;">✕</button>
+      <span style="display: inline-flex; align-items: center; gap: 6px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+        Bind Client
+      </span>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <button class="icon-btn icon-btn-danger" id="btnUnlinkMacHeader" onclick="unbindScreenMac()" title="Unbind / Disconnect MAC" style="width: 22px; height: 22px; color: #ef4444; display: none;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"></line><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+        </button>
+        <button class="icon-btn" onclick="closeBtBindingMenu()" title="Close" style="width: 22px; height: 22px; color: #94a3b8;">✕</button>
+      </div>
     </div>
     <div id="btBindingList" class="preset-list" style="max-height: 250px; overflow-y: auto;"></div>
   </div>
@@ -690,16 +698,12 @@
       activeBindingScreen = screen;
       const currentMac = screen.mac ? screen.mac.toLowerCase() : '';
 
-      let html = '';
-
-      if (currentMac) {
-        html += `
-          <div class="preset-item" onclick="unbindScreenMac()" style="color: #ef4444; font-weight: 600; cursor: pointer; padding: 6px 8px; font-size: 11px;">
-            ❌ Unbind / Disconnect MAC
-          </div>
-          <div style="height: 1px; background: var(--border-color); margin: 4px 0;"></div>
-        `;
+      const btnUnlinkHeader = document.getElementById('btnUnlinkMacHeader');
+      if (btnUnlinkHeader) {
+        btnUnlinkHeader.style.display = currentMac ? 'inline-flex' : 'none';
       }
+
+      let html = '';
 
       if (kvmClients.length === 0) {
         html += `<div style="font-size: 11px; color: var(--text-muted); padding: 6px;">No KVM Clients registered yet. Add clients in KVM Clients menu.</div>`;
@@ -1976,22 +1980,58 @@
 
           const fullLabel = gName + macSuffix;
 
-          // Draw Bluetooth Icon
-          const btIconX = s.x + 14;
-          const btIconY = s.y + 51;
+          // Draw Link / Unlink Icon (Matching Screenshot 2)
+          const iconX = s.x + 13;
+          const iconY = s.y + 51;
           const hasMac = !!s.mac;
-          const btColor = hasMac ? '#38bdf8' : '#64748b';
+          const iconColor = hasMac ? '#38bdf8' : '#64748b';
 
-          ctx.strokeStyle = btColor;
+          ctx.strokeStyle = iconColor;
           ctx.lineWidth = 1.6;
-          ctx.beginPath();
-          ctx.moveTo(btIconX + 3, btIconY + 1);
-          ctx.lineTo(btIconX + 7, btIconY + 5);
-          ctx.lineTo(btIconX + 5, btIconY + 7);
-          ctx.lineTo(btIconX + 5, btIconY + 0);
-          ctx.lineTo(btIconX + 7, btIconY + 2);
-          ctx.lineTo(btIconX + 3, btIconY + 6);
-          ctx.stroke();
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+
+          if (hasMac) {
+            // Connected Link Icon (Left icon in screenshot 2)
+            ctx.beginPath();
+            ctx.moveTo(iconX + 5, iconY + 2);
+            ctx.lineTo(iconX + 7, iconY + 0);
+            ctx.arcTo(iconX + 10, iconY + 3, iconX + 7, iconY + 6, 2.5);
+            ctx.lineTo(iconX + 5, iconY + 4);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(iconX + 5, iconY + 5);
+            ctx.lineTo(iconX + 3, iconY + 7);
+            ctx.arcTo(iconX + 0, iconY + 4, iconX + 3, iconY + 1, 2.5);
+            ctx.lineTo(iconX + 5, iconY + 3);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(iconX + 3, iconY + 6);
+            ctx.lineTo(iconX + 7, iconY + 2);
+            ctx.stroke();
+          } else {
+            // Unlinked / Broken Link Icon (Right icon in screenshot 2)
+            ctx.beginPath();
+            ctx.moveTo(iconX + 5, iconY + 2);
+            ctx.lineTo(iconX + 7, iconY + 0);
+            ctx.arcTo(iconX + 10, iconY + 3, iconX + 7, iconY + 6, 2.5);
+            ctx.lineTo(iconX + 6, iconY + 5);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(iconX + 4, iconY + 4);
+            ctx.lineTo(iconX + 3, iconY + 7);
+            ctx.arcTo(iconX + 0, iconY + 4, iconX + 3, iconY + 1, 2.5);
+            ctx.lineTo(iconX + 4, iconY + 2);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(iconX + 1, iconY + 1);
+            ctx.lineTo(iconX + 9, iconY + 8);
+            ctx.stroke();
+          }
 
           // Store hit box for Bluetooth Icon click
           s.btIconHitBox = {

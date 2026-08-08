@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 174;
+    const BUILD_VERSION = 175;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -725,8 +725,9 @@
 
       container.innerHTML = html;
 
-      menu.style.left = Math.min(clientX, window.innerWidth - 290) + 'px';
-      menu.style.top = Math.min(clientY, window.innerHeight - 290) + 'px';
+      window.justOpenedBtMenu = true;
+      menu.style.left = Math.max(10, Math.min(clientX, window.innerWidth - 290)) + 'px';
+      menu.style.top = Math.max(10, Math.min(clientY, window.innerHeight - 290)) + 'px';
       menu.style.display = 'block';
     }
 
@@ -1730,6 +1731,10 @@
 
       const btMenu = document.getElementById('btBindingMenu');
       if (btMenu && btMenu.style.display === 'block') {
+        if (window.justOpenedBtMenu) {
+          window.justOpenedBtMenu = false;
+          return;
+        }
         if (e.target.isConnected && !btMenu.contains(e.target)) {
           btMenu.style.display = 'none';
         }
@@ -2215,7 +2220,9 @@
           const hb = s.btIconHitBox;
           if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
             e.stopPropagation();
-            openBtBindingMenu(s, e.clientX, e.clientY);
+            const iconClientX = rect.left + (hb.x / scaleCanvasX);
+            const iconClientY = rect.top + ((hb.y + hb.h) / scaleCanvasY) + 4;
+            openBtBindingMenu(s, iconClientX, iconClientY);
             return;
           }
         }

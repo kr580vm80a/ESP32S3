@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 191;
+    const BUILD_VERSION = 192;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -439,6 +439,11 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
               </button>
 
+              <!-- Material Icon Button: Scan BLE Mouse (Disabled when disconnected) -->
+              <button class="icon-btn" id="btnScanBleMouse" disabled onclick="toggleBleMouseModal(event)" title="Scan & Bind BLE Mouse" style="opacity: 0.4; cursor: not-allowed;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v10a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z"></path><line x1="12" y1="6" x2="12" y2="10"></line></svg>
+              </button>
+
               <!-- Load Configuration from ESP32 Button (Disabled when disconnected) -->
               <button class="icon-btn" id="btnLoadESP32" disabled title="Load configuration from ESP32" style="opacity: 0.4; cursor: not-allowed;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
@@ -514,11 +519,6 @@
                 <div id="clientsList" class="preset-list" style="max-height: 280px; overflow-y: auto; overflow-x: hidden;"></div>
               </div>
             </div>
-
-            <!-- Material Icon Button: Scan BLE Mouse -->
-            <button class="icon-btn" id="btnScanBleMouse" onclick="toggleBleMouseModal(event)" title="Scan & Bind BLE Mouse">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v10a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z"></path><line x1="12" y1="6" x2="12" y2="10"></line></svg>
-            </button>
 
             <!-- Material Icon Buttons (Clean Muted Monochrome) -->
             <button class="icon-btn" onclick="addBlankLayout()" title="Add New Layout">
@@ -924,6 +924,10 @@
 
     function toggleBleMouseModal(e) {
       if (e) e.stopPropagation();
+      if (activeConnectionType === 'none') {
+        alert('⚠️ Будь ласка, спочатку підключіться до ESP32 через USB або Bluetooth!');
+        return;
+      }
       const modal = document.getElementById('bleMouseModal');
       if (!modal) return;
 
@@ -3284,6 +3288,13 @@
         loadBtn.disabled = !isConnected;
         loadBtn.style.opacity = isConnected ? '1.0' : '0.4';
         loadBtn.style.cursor = isConnected ? 'pointer' : 'not-allowed';
+      }
+
+      const mouseScanBtn = document.getElementById('btnScanBleMouse');
+      if (mouseScanBtn) {
+        mouseScanBtn.disabled = !isConnected;
+        mouseScanBtn.style.opacity = isConnected ? '1.0' : '0.4';
+        mouseScanBtn.style.cursor = isConnected ? 'pointer' : 'not-allowed';
       }
     }
 

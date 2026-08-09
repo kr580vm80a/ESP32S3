@@ -78,6 +78,8 @@ const uint8_t hidReportMap[] = {
     0xC0               // End Collection
 };
 
+static bool configClientConnected = false;
+
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
@@ -93,6 +95,20 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 break;
             }
         }
+
+        configClientConnected = true;
+
+        // Disconnect mouse to free NimBLE radio for config GATT operations
+        if (pClient && pClient->isConnected()) {
+            Serial.println("[BLE Server] Config client connected - disconnecting mouse to prioritize config...");
+            pClient->disconnect();
+        }
+        // Stop background scan to avoid auto-reconnecting to mouse
+        NimBLEScan* pScan = NimBLEDevice::getScan();
+        if (pScan && pScan->isScanning()) {
+            pScan->stop();
+        }
+
         // Keep advertising so the second PC can connect
         Serial.println("[BLE Server] Restarting advertising for the second PC...");
         pServer->getAdvertising()->start();
@@ -106,8 +122,29 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 break;
             }
         }
+
+        // Check if any config clients remain
+        bool anyActive = false;
+        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+            if (kvmClients[i].active) { anyActive = true; break; }
+        }
+        configClientConnected = anyActive;
+
         Serial.println("[BLE Server] Restarting advertising...");
         pServer->getAdvertising()->start();
+
+        // Resume background scan to reconnect to target mouse
+        if (!configClientConnected && targetMouseMac.length() > 0) {
+            Serial.println("[BLE Server] No config clients - resuming background scan for target mouse...");
+            xTaskCreate([](void* param) {
+                delay(500);
+                NimBLEScan* pScan = NimBLEDevice::getScan();
+                if (pScan && !pScan->isScanning()) {
+                    pScan->start(0, false);
+                }
+                vTaskDelete(NULL);
+            }, "bgScanResume", 4096, NULL, 1, NULL);
+        }
     }
 };
 
@@ -296,7 +333,7 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             return;
         }
 
-        if (targetMouseMac.length() > 0 && devMac == targetMouseMac) {
+        if (targetMouseMac.length() > 0 && devMac == targetMouseMac && !configClientConnected) {
             Serial.printf("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)\n", devName.c_str(), devMac.c_str());
             NimBLEDevice::getScan()->stop();
             advDevice = advertisedDevice;

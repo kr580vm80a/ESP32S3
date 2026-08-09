@@ -296,20 +296,11 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             return;
         }
 
-        if (targetMouseMac.length() > 0) {
-            if (devMac == targetMouseMac) {
-                Serial.printf("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)\n", devName.c_str(), devMac.c_str());
-                NimBLEDevice::getScan()->stop();
-                advDevice = advertisedDevice;
-                doConnect = true;
-            }
-        } else {
-            if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(hidServiceUUID)) {
-                Serial.printf("[BLE Scan] AUTO MATCH! Found HID Device: %s (%s)\n", devName.c_str(), devMac.c_str());
-                NimBLEDevice::getScan()->stop();
-                advDevice = advertisedDevice;
-                doConnect = true;
-            }
+        if (targetMouseMac.length() > 0 && devMac == targetMouseMac) {
+            Serial.printf("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)\n", devName.c_str(), devMac.c_str());
+            NimBLEDevice::getScan()->stop();
+            advDevice = advertisedDevice;
+            doConnect = true;
         }
     }
 };

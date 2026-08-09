@@ -473,7 +473,7 @@ void processCommand(String input) {
     String unifiedJson;
     serializeJson(doc, unifiedJson);
 
-    sendConfigResponse("CONFIG " + unifiedJson);
+    sendConfigResponse("CONFIG " + String(unifiedJson.length()) + " " + unifiedJson);
   } else if (input == "SCAN_MICE") {
     scannedMiceDoc.clear();
     scannedMiceDoc.to<JsonArray>();

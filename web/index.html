@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 201;
+    const BUILD_VERSION = 202;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3023,8 +3023,16 @@
     window.esp32BleTxChar = null;
     window.onBleResponseCallback = null;
 
-    function parseESP32ConfigResponse(jsonStr) {
+    function parseESP32ConfigResponse(jsonStr, expectedLen = -1) {
       try {
+        if (!jsonStr || jsonStr.length < 2) {
+          throw new Error('Empty or invalid CONFIG string received');
+        }
+
+        if (expectedLen > 0 && jsonStr.length !== expectedLen) {
+          throw new Error(`Content-Length mismatch: received ${jsonStr.length} chars, expected ${expectedLen} chars`);
+        }
+
         const doc = JSON.parse(jsonStr);
         if (!doc) return;
 
@@ -3143,9 +3151,23 @@
       console.log(`[${source} INCOMING LOG] Line:`, line);
 
       if (line.startsWith('CONFIG ')) {
-        const jsonStr = line.substring(7);
-        console.log(`[${source} CONFIG LOG] Received layout JSON from ESP32 (${jsonStr.length} chars):`, jsonStr);
-        parseESP32ConfigResponse(jsonStr);
+        const payload = line.substring(7).trim();
+        let expectedLen = -1;
+        let jsonStr = payload;
+
+        // Check if payload starts with Content-Length header (e.g. "CONFIG 1822 {...}")
+        const spaceIdx = payload.indexOf(' ');
+        if (spaceIdx > 0 && !payload.startsWith('{') && !payload.startsWith('[')) {
+          const lenHeader = payload.substring(0, spaceIdx);
+          const parsedLen = parseInt(lenHeader, 10);
+          if (!isNaN(parsedLen)) {
+            expectedLen = parsedLen;
+            jsonStr = payload.substring(spaceIdx + 1).trim();
+          }
+        }
+
+        console.log(`[${source} CONFIG LOG] Received layout JSON from ESP32 (${jsonStr.length} chars, expected: ${expectedLen > 0 ? expectedLen : 'unspecified'}):`, jsonStr);
+        parseESP32ConfigResponse(jsonStr, expectedLen);
       } else if (line.startsWith('CLIENTS ')) {
         const jsonStr = line.substring(8);
         console.log(`[${source} CLIENTS LOG] Received clients list from ESP32:`, jsonStr);

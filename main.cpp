@@ -479,13 +479,19 @@ void processCommand(String input) {
     isScanningForMice = false;
     Serial.printf("[BLE Scan] Discovery scan complete! Discovered %d BLE devices.\n", (int)scannedMiceDoc.as<JsonArray>().size());
 
-    if (!connected && pScan) {
-      pScan->start(0, false);
-    }
-
     String jsonStr;
     serializeJson(scannedMiceDoc, jsonStr);
     sendConfigResponse("MICE " + jsonStr);
+
+    if (!connected) {
+      xTaskCreate([](void* param) {
+        NimBLEScan* pScan = NimBLEDevice::getScan();
+        if (pScan && !pScan->isScanning()) {
+          pScan->start(0, false);
+        }
+        vTaskDelete(NULL);
+      }, "bgScanTask", 4096, NULL, 1, NULL);
+    }
   } else if (input.startsWith("BIND_MOUSE ")) {
     String mac = input.substring(11);
     mac.toLowerCase();
@@ -499,11 +505,14 @@ void processCommand(String input) {
     if (pClient && pClient->isConnected()) {
       pClient->disconnect();
     } else {
-      NimBLEScan* pScan = NimBLEDevice::getScan();
-      if (pScan) {
-        if (pScan->isScanning()) pScan->stop();
-        pScan->start(0, false);
-      }
+      xTaskCreate([](void* param) {
+        NimBLEScan* pScan = NimBLEDevice::getScan();
+        if (pScan) {
+          if (pScan->isScanning()) pScan->stop();
+          pScan->start(0, false);
+        }
+        vTaskDelete(NULL);
+      }, "bgScanTask", 4096, NULL, 1, NULL);
     }
   } else if (input == "UNBIND_MOUSE") {
     preferences.begin("kvm_config", false);

@@ -241,13 +241,69 @@ bool connectToServer() {
     return true;
 }
 
+static String targetMouseMac = "";
+static bool isScanningForMice = false;
+static JsonDocument scannedMiceDoc;
+
+void sendConfigResponse(const String& response) {
+  String fullResp = response;
+  if (!fullResp.endsWith("\n")) fullResp += "\n";
+  Serial.print(fullResp);
+  if (configTxChar) {
+    size_t len = fullResp.length();
+    size_t chunkSize = 60;
+    for (size_t i = 0; i < len; i += chunkSize) {
+      String chunk = fullResp.substring(i, min(i + chunkSize, len));
+      configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
+      configTxChar->notify();
+      delay(30);
+    }
+  }
+}
+
 class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
-        if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(hidServiceUUID) || 
-            String(advertisedDevice->getName().c_str()).indexOf("MX Master") != -1 ||
-            String(advertisedDevice->getName().c_str()).indexOf("Logi") != -1) {
-            
-            Serial.println("[BLE Scan] MATCH! Found a target HID Mouse.");
+        String devMac = advertisedDevice->getAddress().toString().c_str();
+        devMac.toLowerCase();
+        devMac.trim();
+
+        String devName = advertisedDevice->getName().c_str();
+        int rssi = advertisedDevice->getRSSI();
+
+        bool isMouse = (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(hidServiceUUID)) ||
+                       devName.indexOf("MX Master") != -1 ||
+                       devName.indexOf("Logi") != -1 ||
+                       devName.indexOf("Mouse") != -1 ||
+                       devName.indexOf("Razer") != -1;
+
+        if (isScanningForMice && isMouse) {
+            JsonArray arr = scannedMiceDoc.as<JsonArray>();
+            bool exists = false;
+            for (JsonObject m : arr) {
+                if (m["mac"].as<String>() == devMac) {
+                    m["rssi"] = rssi;
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                JsonObject obj = arr.add<JsonObject>();
+                obj["mac"] = devMac;
+                obj["name"] = devName.length() > 0 ? devName : "Bluetooth Mouse";
+                obj["rssi"] = rssi;
+            }
+            return;
+        }
+
+        if (targetMouseMac.length() > 0) {
+            if (devMac == targetMouseMac) {
+                Serial.printf("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)\n", devName.c_str(), devMac.c_str());
+                NimBLEDevice::getScan()->stop();
+                advDevice = advertisedDevice;
+                doConnect = true;
+            }
+        } else if (isMouse) {
+            Serial.printf("[BLE Scan] AUTO MATCH! Found HID Mouse: %s (%s)\n", devName.c_str(), devMac.c_str());
             NimBLEDevice::getScan()->stop();
             advDevice = advertisedDevice;
             doConnect = true;
@@ -265,7 +321,11 @@ NimBLECharacteristic* configRxChar = nullptr;
 void loadConfiguration() {
   preferences.begin("kvm_config", true);
   String json = preferences.getString("layout", "{}");
+  targetMouseMac = preferences.getString("mouse_mac", "");
   preferences.end();
+
+  targetMouseMac.toLowerCase();
+  targetMouseMac.trim();
 
   if (json.length() > 2 && json != "[]") {
     JsonDocument doc;
@@ -406,18 +466,40 @@ void processCommand(String input) {
     String unifiedJson;
     serializeJson(doc, unifiedJson);
 
-    String fullResponse = "CONFIG " + unifiedJson + "\n";
-    Serial.print(fullResponse);
-    if (configTxChar) {
-      size_t len = fullResponse.length();
-      size_t chunkSize = 60;
-      for (size_t i = 0; i < len; i += chunkSize) {
-        String chunk = fullResponse.substring(i, min(i + chunkSize, len));
-        configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
-        configTxChar->notify();
-        delay(30); // 30ms delay matches BLE Connection Event window for 100% reliable packet arrival
-      }
+    sendConfigResponse("CONFIG " + unifiedJson);
+  } else if (input == "SCAN_MICE") {
+    scannedMiceDoc.clear();
+    scannedMiceDoc.to<JsonArray>();
+    isScanningForMice = true;
+    NimBLEDevice::getScan()->start(5, false);
+    isScanningForMice = false;
+
+    String jsonStr;
+    serializeJson(scannedMiceDoc, jsonStr);
+    sendConfigResponse("MICE " + jsonStr);
+  } else if (input.startsWith("BIND_MOUSE ")) {
+    String mac = input.substring(11);
+    mac.toLowerCase();
+    mac.trim();
+    preferences.begin("kvm_config", false);
+    preferences.putString("mouse_mac", mac);
+    preferences.end();
+    targetMouseMac = mac;
+    sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
+
+    if (pClient && pClient->isConnected()) {
+      pClient->disconnect();
+    } else {
+      NimBLEDevice::getScan()->start(0, false);
     }
+  } else if (input == "UNBIND_MOUSE") {
+    preferences.begin("kvm_config", false);
+    preferences.remove("mouse_mac");
+    preferences.end();
+    targetMouseMac = "";
+    sendConfigResponse("OK_UNBIND_MOUSE");
+  } else if (input == "GET_TARGET_MOUSE") {
+    sendConfigResponse("TARGET_MOUSE " + targetMouseMac);
   } else if (input == "DUMP_FLASH") {
     preferences.begin("kvm_config", true);
     String json = preferences.getString("layout", "{}");

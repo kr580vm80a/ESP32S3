@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 189;
+    const BUILD_VERSION = 190;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -515,6 +515,11 @@
               </div>
             </div>
 
+            <!-- Material Icon Button: Scan BLE Mouse -->
+            <button class="icon-btn" id="btnScanBleMouse" onclick="toggleBleMouseModal(event)" title="Scan & Bind BLE Mouse">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v10a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z"></path><line x1="12" y1="6" x2="12" y2="10"></line></svg>
+            </button>
+
             <!-- Material Icon Buttons (Clean Muted Monochrome) -->
             <button class="icon-btn" onclick="addBlankLayout()" title="Add New Layout">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -559,6 +564,26 @@
       </div>
     </div>
     <div id="btBindingList" class="preset-list" style="max-height: 250px; overflow-y: auto;"></div>
+  </div>
+
+  <!-- Floating BLE Mouse Scanner Modal (Direct Child of Body) -->
+  <div id="bleMouseModal" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 340px; max-height: 360px; overflow: hidden; z-index: 100000; padding: 8px;">
+    <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+      <span>Scan BLE Mice</span>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <button class="icon-btn" onclick="startBleMouseScan()" title="Rescan" style="width: 22px; height: 22px; color: #38bdf8;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+        </button>
+        <button class="icon-btn" onclick="closeBleMouseModal()" title="Close" style="width: 22px; height: 22px; color: #94a3b8;">✕</button>
+      </div>
+    </div>
+    
+    <div id="boundMouseStatus" style="display: none; font-size: 10px; padding: 6px 8px; margin-bottom: 6px; background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 6px; color: #34d399; justify-content: space-between; align-items: center;">
+      <span id="boundMouseLabel" style="font-family: 'JetBrains Mono', monospace;">Bound: 00:00:00:00:00:00</span>
+      <button class="icon-btn icon-btn-danger" onclick="unbindTargetMouse()" title="Unlock / Unbind" style="width: 20px; height: 20px; color: #ef4444;">✕</button>
+    </div>
+
+    <div id="bleMouseList" class="preset-list" style="max-height: 260px; overflow-y: auto;"></div>
   </div>
 
   <script>
@@ -892,6 +917,112 @@
       const menu = document.getElementById('btBindingMenu');
       if (menu) menu.style.display = 'none';
       activeBindingScreen = null;
+    }
+
+    // --- BLE Mouse Scanner & Target Lock ---
+    let boundTargetMouseMac = '';
+
+    function toggleBleMouseModal(e) {
+      if (e) e.stopPropagation();
+      const modal = document.getElementById('bleMouseModal');
+      if (!modal) return;
+
+      if (modal.style.display === 'block') {
+        modal.style.display = 'none';
+      } else {
+        const btn = document.getElementById('btnScanBleMouse');
+        if (btn) {
+          const rect = btn.getBoundingClientRect();
+          modal.style.left = Math.max(10, rect.left) + 'px';
+          modal.style.top = (rect.bottom + 6) + 'px';
+        }
+        modal.style.display = 'block';
+        sendESP32Command('GET_TARGET_MOUSE\n');
+        startBleMouseScan();
+      }
+    }
+
+    function closeBleMouseModal() {
+      const modal = document.getElementById('bleMouseModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function startBleMouseScan() {
+      const container = document.getElementById('bleMouseList');
+      if (container) {
+        container.innerHTML = `
+          <div style="font-size: 11px; color: var(--primary); padding: 12px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.21-8.58"></path></svg>
+            Scanning nearby Bluetooth mice (5s)...
+          </div>
+        `;
+      }
+      sendESP32Command('SCAN_MICE\n');
+    }
+
+    function renderScannedMiceList(jsonStr) {
+      const container = document.getElementById('bleMouseList');
+      if (!container) return;
+
+      try {
+        const mice = JSON.parse(jsonStr);
+        if (!Array.isArray(mice) || mice.length === 0) {
+          container.innerHTML = `<div style="font-size: 11px; color: var(--text-muted); padding: 10px; text-align: center;">No Bluetooth mice found nearby.<br><span style="font-size: 10px; color: #64748b;">Make sure your mouse is turned on & advertising.</span></div>`;
+          return;
+        }
+
+        container.innerHTML = mice.map(m => {
+          const isBound = boundTargetMouseMac && m.mac.toLowerCase() === boundTargetMouseMac.toLowerCase();
+          const rssiText = m.rssi ? `${m.rssi} dBm` : '';
+
+          return `
+            <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; ${isBound ? 'background: rgba(52, 211, 153, 0.15); border: 1px solid #34d399;' : ''}">
+              <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden; flex: 1;">
+                <div style="font-size: 11px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                  ${m.name || 'Bluetooth Mouse'}
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--primary);">${m.mac}</span>
+                  <span style="font-size: 9px; color: #64748b;">${rssiText}</span>
+                </div>
+              </div>
+              <div>
+                ${isBound ? 
+                  '<span style="font-size: 10px; font-weight: 700; color: #34d399; padding: 2px 6px; background: rgba(52, 211, 153, 0.2); border-radius: 4px;">✓ Bound</span>' : 
+                  `<button class="btn btn-primary" onclick="bindTargetMouse('${m.mac}')" style="font-size: 10px; padding: 3px 8px; height: 24px;">Bind & Lock</button>`
+                }
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch(e) {
+        console.warn('Failed to parse MICE json:', e);
+        container.innerHTML = `<div style="font-size: 11px; color: #ef4444; padding: 8px;">Failed to parse scan response.</div>`;
+      }
+    }
+
+    function bindTargetMouse(mac) {
+      if (!mac) return;
+      sendESP32Command(`BIND_MOUSE ${mac}\n`);
+    }
+
+    function unbindTargetMouse() {
+      sendESP32Command(`UNBIND_MOUSE\n`);
+    }
+
+    function setBoundMouseStatus(mac) {
+      boundTargetMouseMac = mac ? mac.toLowerCase().trim() : '';
+      const statusDiv = document.getElementById('boundMouseStatus');
+      const label = document.getElementById('boundMouseLabel');
+
+      if (statusDiv && label) {
+        if (boundTargetMouseMac) {
+          label.textContent = `Target Locked: ${boundTargetMouseMac.toUpperCase()}`;
+          statusDiv.style.display = 'flex';
+        } else {
+          statusDiv.style.display = 'none';
+        }
+      }
     }
 
     function bindScreenToMac(mac) {
@@ -3023,6 +3154,22 @@
         } catch(e) {
           console.warn(`[${source} CLIENTS ERROR] Failed to parse CLIENTS:`, e);
         }
+      } else if (line.startsWith('MICE ')) {
+        const jsonStr = line.substring(5);
+        console.log(`[${source} MICE LOG] Received scanned mice from ESP32:`, jsonStr);
+        renderScannedMiceList(jsonStr);
+      } else if (line.startsWith('OK_BIND_MOUSE ')) {
+        const mac = line.substring(14).trim();
+        console.log(`[${source} BIND MOUSE] Target locked to ${mac}`);
+        setBoundMouseStatus(mac);
+        startBleMouseScan();
+      } else if (line.startsWith('OK_UNBIND_MOUSE')) {
+        console.log(`[${source} UNBIND MOUSE] Target mouse lock cleared`);
+        setBoundMouseStatus('');
+        startBleMouseScan();
+      } else if (line.startsWith('TARGET_MOUSE ')) {
+        const mac = line.substring(13).trim();
+        setBoundMouseStatus(mac);
       } else if (line.startsWith('OK_SAVE')) {
         console.log(`[${source} SAVE LOG] ESP32 confirmed SAVE_CONFIG successful!`);
       }

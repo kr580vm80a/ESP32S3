@@ -278,12 +278,17 @@ void sendConfigResponse(const String& response) {
 #endif
   if (configTxChar) {
     size_t len = fullResp.length();
-    size_t chunkSize = 40; // 40-byte chunks for reliable BLE ATT notification transmission
+    uint16_t mtu = NimBLEDevice::getMTU();
+    size_t chunkSize = (mtu > 28) ? (mtu - 5) : 240;
+    if (chunkSize > 480) chunkSize = 480;
+
+    Serial.printf("[BLE TX] Sending %d bytes in %d-byte MTU chunks...\n", (int)len, (int)chunkSize);
+
     for (size_t i = 0; i < len; i += chunkSize) {
       String chunk = fullResp.substring(i, min(i + chunkSize, len));
       configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
       configTxChar->notify();
-      delay(45); // 45ms inter-chunk delay for Windows BLE driver flow control
+      delay(30);
     }
   }
 }
@@ -607,6 +612,7 @@ void setup() {
   
   Serial.println("[BLE] Initializing NimBLE...");
   NimBLEDevice::init("ESP32 KVM Mouse");
+  NimBLEDevice::setMTU(512);
   NimBLEDevice::setSecurityAuth(true, true, true);
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
   

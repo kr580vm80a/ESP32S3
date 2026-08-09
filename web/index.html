@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 206;
+    const BUILD_VERSION = 207;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3250,7 +3250,7 @@
             bleNotifyBuffer = ''; // Reset notification buffer right before writing to GATT Rx
             const encoder = new TextEncoder();
             const data = encoder.encode(cmd);
-            const chunkSize = 20; // Standard 20-byte BLE ATT MTU payload size
+            const chunkSize = 240; // High throughput payload chunk size supported by MTU-negotiated BLE
             for (let i = 0; i < data.length; i += chunkSize) {
               const chunk = data.slice(i, i + chunkSize);
               try {

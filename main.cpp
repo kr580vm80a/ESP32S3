@@ -120,23 +120,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 }
             }
         }
-
-        // Asynchronously resume advertising for second PC after connection negotiation settles
-        int activeCount = 0;
-        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-            if (kvmClients[i].active) activeCount++;
-        }
-
-        if (activeCount < MAX_KVM_CLIENTS) {
-            xTaskCreate([](void* param) {
-                vTaskDelay(pdMS_TO_TICKS(1000));
-                if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-                    Serial.println("[BLE Server] Resuming advertising for additional PC...");
-                    NimBLEDevice::getAdvertising()->start();
-                }
-                vTaskDelete(NULL);
-            }, "bgAdvTask", 2048, NULL, 1, NULL);
-        }
     }
 
     void onDisconnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
@@ -152,15 +135,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 break;
             }
         }
-
-        xTaskCreate([](void* param) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-                Serial.println("[BLE Server] Resuming advertising after disconnect...");
-                NimBLEDevice::getAdvertising()->start();
-            }
-            vTaskDelete(NULL);
-        }, "bgAdvTask", 2048, NULL, 1, NULL);
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
@@ -771,7 +745,8 @@ void setup() {
   pAdvertising->start();
   Serial.println("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
 
-  // If targetMouseMac is bound, attempt direct connection without radio background scanning
+  // Automatic mouse connection at startup is disabled to isolate BLE Server stability
+  /*
   if (targetMouseMac.length() > 0 && !connected) {
     xTaskCreate([](void* param) {
       vTaskDelay(pdMS_TO_TICKS(2000));
@@ -782,6 +757,7 @@ void setup() {
       vTaskDelete(NULL);
     }, "mouseConnectTask", 4096, NULL, 1, NULL);
   }
+  */
 }
 
 void loop() {

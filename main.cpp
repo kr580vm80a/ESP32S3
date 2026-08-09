@@ -253,24 +253,15 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
         Serial.println("[BLE Host] Connected to mouse!");
         connected = true;
-        NimBLEScan* pScan = NimBLEDevice::getScan();
-        if (pScan && pScan->isScanning()) {
-            pScan->stop();
-        }
     }
     void onDisconnect(NimBLEClient* pClient) {
         Serial.println("[BLE Host] Disconnected from mouse!");
         connected = false;
         if (targetMouseMac.length() > 0 && !isScanningForMice) {
             xTaskCreate([](void* param) {
-                delay(1000);
-                NimBLEScan* pScan = NimBLEDevice::getScan();
-                if (pScan && !pScan->isScanning()) {
-                    pScan->setActiveScan(false);
-                    pScan->setInterval(160);
-                    pScan->setWindow(40);
-                    Serial.printf("[BLE Scan] Resuming passive scan for mouse (%s)...\n", targetMouseMac.c_str());
-                    pScan->start(0, false);
+                delay(4000);
+                if (targetMouseMac.length() > 0 && !connected) {
+                    doConnect = true;
                 }
                 vTaskDelete(NULL);
             }, "mouseReconnectTask", 4096, NULL, 1, NULL);
@@ -279,14 +270,30 @@ class ClientCallbacks : public NimBLEClientCallbacks {
 };
 
 bool connectToServer() {
-    Serial.print("[BLE Host] Forming a connection to ");
-    Serial.println(advDevice->getAddress().toString().c_str());
+    if (targetMouseMac.length() == 0 && !advDevice) return false;
 
-    pClient = NimBLEDevice::createClient();
-    pClient->setClientCallbacks(new ClientCallbacks());
+    if (!pClient) {
+        pClient = NimBLEDevice::createClient();
+        pClient->setClientCallbacks(new ClientCallbacks());
+    }
 
-    if (!pClient->connect(advDevice)) {
-        Serial.println("[BLE Host] Failed to connect.");
+    if (pClient->isConnected()) {
+        connected = true;
+        return true;
+    }
+
+    bool connRes = false;
+    if (advDevice) {
+        Serial.printf("[BLE Host] Connecting to advertised device: %s...\n", advDevice->getAddress().toString().c_str());
+        connRes = pClient->connect(advDevice);
+    } else {
+        Serial.printf("[BLE Host] Connecting directly to target MAC: %s...\n", targetMouseMac.c_str());
+        NimBLEAddress addr(targetMouseMac.c_str());
+        connRes = pClient->connect(addr);
+    }
+
+    if (!connRes) {
+        Serial.println("[BLE Host] Connection attempt failed (mouse not advertising or out of range).");
         return false;
     }
 
@@ -748,19 +755,17 @@ void setup() {
   pAdvertising->start();
   Serial.println("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
 
-  // Setup BLE Client (Host) in background task to avoid blocking main loop()
-  xTaskCreate([](void* param) {
-    NimBLEScan* pScan = NimBLEDevice::getScan();
-    pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks());
-    pScan->setActiveScan(false); // Passive scanning mode (zero transmit contention with PC connections)
-    pScan->setInterval(160);
-    pScan->setWindow(40);
-    if (targetMouseMac.length() > 0 && !connected) {
-      Serial.printf("[BLE Scan] Starting background passive scan for target mouse (%s)...\n", targetMouseMac.c_str());
-      pScan->start(0, false);
-    }
-    vTaskDelete(NULL);
-  }, "bleScanTask", 4096, NULL, 1, NULL);
+  // If targetMouseMac is bound, attempt direct connection without radio background scanning
+  if (targetMouseMac.length() > 0 && !connected) {
+    xTaskCreate([](void* param) {
+      vTaskDelay(pdMS_TO_TICKS(2000));
+      if (targetMouseMac.length() > 0 && !connected) {
+        Serial.printf("[BLE Host] Initiating direct MAC connection for mouse (%s)...\n", targetMouseMac.c_str());
+        doConnect = true;
+      }
+      vTaskDelete(NULL);
+    }, "mouseConnectTask", 4096, NULL, 1, NULL);
+  }
 }
 
 void loop() {

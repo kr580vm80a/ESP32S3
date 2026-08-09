@@ -432,7 +432,15 @@ void executePendingSave() {
     if (!deserializeJson(doc, pendingSaveJson)) {
       saveConfiguration(pendingSaveJson);
       loadConfiguration();
-      sendConfigResponse("OK_SAVE");
+      Serial.println("OK_SAVE");
+#if CONFIG_IDF_TARGET_ESP32S3
+      USBSerial.println("OK_SAVE");
+#endif
+      if (configTxChar) {
+        String resp = "OK_SAVE\n";
+        configTxChar->setValue((const uint8_t*)resp.c_str(), resp.length());
+        configTxChar->notify();
+      }
     }
     pendingSaveJson = "";
   }

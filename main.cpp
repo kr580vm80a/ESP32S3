@@ -709,7 +709,8 @@ void setup() {
   Serial.println("[BLE] Initializing NimBLE...");
   NimBLEDevice::init("ESP32 KVM Mouse");
   NimBLEDevice::setMTU(512);
-  NimBLEDevice::setSecurityAuth(true, false, true); // Just Works pairing (bonding=true, mitm=false, secure_connections=true)
+  NimBLEDevice::deleteAllBonds(); // Clear old bond keys to force fresh clean pairing
+  NimBLEDevice::setSecurityAuth(true, false, false); // Compatible Just Works pairing (bonding=true, mitm=false, sc=false for legacy compatibility)
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
   
   // Setup BLE Server (Peripheral)

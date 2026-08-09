@@ -277,9 +277,14 @@ bool connectToServer() {
         Serial.printf("[BLE Host] Connecting to advertised device: %s...\n", advDevice->getAddress().toString().c_str());
         connRes = pClient->connect(advDevice);
     } else {
-        Serial.printf("[BLE Host] Connecting directly to target MAC: %s...\n", targetMouseMac.c_str());
-        NimBLEAddress addr(targetMouseMac.c_str());
-        connRes = pClient->connect(addr);
+        Serial.printf("[BLE Host] Connecting directly to target MAC (Public): %s...\n", targetMouseMac.c_str());
+        NimBLEAddress addrPublic(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
+        connRes = pClient->connect(addrPublic);
+        if (!connRes) {
+            Serial.printf("[BLE Host] Public connection failed. Trying target MAC (Random): %s...\n", targetMouseMac.c_str());
+            NimBLEAddress addrRandom(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
+            connRes = pClient->connect(addrRandom);
+        }
     }
 
     if (!connRes) {

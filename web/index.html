@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 210;
+    const BUILD_VERSION = 211;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1385,7 +1385,8 @@
 
     // --- Modular ESP32 Storage Function (Sends config to ESP32 Flash over USB or Bluetooth) ---
     async function saveESP32Config(configData) {
-      const jsonText = typeof configData === 'string' ? configData : currentConfigJSON;
+      updateJSON(); // Guarantee currentConfigJSON reflects active Canvas screens
+      const jsonText = (configData && typeof configData === 'string' && configData !== '{}' && configData !== '') ? configData : currentConfigJSON;
       let minifiedJson = jsonText;
       try {
         const parsed = JSON.parse(jsonText);

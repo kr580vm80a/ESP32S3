@@ -278,12 +278,12 @@ void sendConfigResponse(const String& response) {
 #endif
   if (configTxChar) {
     size_t len = fullResp.length();
-    size_t chunkSize = 60;
+    size_t chunkSize = 40; // 40-byte chunks for reliable BLE ATT notification transmission
     for (size_t i = 0; i < len; i += chunkSize) {
       String chunk = fullResp.substring(i, min(i + chunkSize, len));
       configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
       configTxChar->notify();
-      delay(30);
+      delay(45); // 45ms inter-chunk delay for Windows BLE driver flow control
     }
   }
 }

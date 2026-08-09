@@ -90,6 +90,7 @@ const uint8_t hidReportMap[] = {
 static NimBLEClient* pClient = nullptr;
 static String targetMouseMac = "";
 static bool isScanningForMice = false;
+static bool connected = false;
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
@@ -181,7 +182,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 // --- BLE Host (Central) Variables ---
 static NimBLEAdvertisedDevice* advDevice;
 static bool doConnect = false;
-static bool connected = false;
 
 static NimBLEUUID hidServiceUUID("1812");
 static NimBLEUUID reportCharUUID("2a4d");

@@ -94,16 +94,28 @@ static bool isScanningForMice = false;
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
-        Serial.print("[BLE Server] PC Connected! MAC: ");
-        Serial.println(peerMac);
+        peerMac.toLowerCase();
+        peerMac.trim();
+        Serial.printf("[BLE Server] PC Connected! MAC: %s (conn_handle: %d)\n", peerMac.c_str(), desc->conn_handle);
         
         // Save connection
+        bool updated = false;
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-            if (!kvmClients[i].active) {
+            if (kvmClients[i].mac.equalsIgnoreCase(peerMac)) {
                 kvmClients[i].conn_id = desc->conn_handle;
-                kvmClients[i].mac = peerMac;
                 kvmClients[i].active = true;
+                updated = true;
                 break;
+            }
+        }
+        if (!updated) {
+            for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+                if (!kvmClients[i].active) {
+                    kvmClients[i].conn_id = desc->conn_handle;
+                    kvmClients[i].mac = peerMac;
+                    kvmClients[i].active = true;
+                    break;
+                }
             }
         }
 
@@ -113,9 +125,13 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 
     void onDisconnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
-        Serial.println("[BLE Server] PC Disconnected.");
+        String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
+        peerMac.toLowerCase();
+        peerMac.trim();
+        Serial.printf("[BLE Server] PC Disconnected! MAC: %s (conn_handle: %d)\n", peerMac.c_str(), desc->conn_handle);
+        
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-            if (kvmClients[i].conn_id == desc->conn_handle) {
+            if (kvmClients[i].conn_id == desc->conn_handle || (kvmClients[i].mac.length() > 0 && kvmClients[i].mac.equalsIgnoreCase(peerMac))) {
                 kvmClients[i].active = false;
                 break;
             }
@@ -498,18 +514,27 @@ void processCommand(String input) {
     // Include bound mouse MAC in the unified JSON payload for backup & restore
     doc["mouseMac"] = targetMouseMac;
 
-    // Dynamic merge of active connected BLE clients into unified JSON
-    JsonArray clientsArr;
+    // Reset connected status for stored clients prior to active connection sync
     if (doc["clients"].is<JsonArray>()) {
-      clientsArr = doc["clients"].as<JsonArray>();
-    } else {
-      clientsArr = doc["clients"].to<JsonArray>();
+      for (JsonObject c : doc["clients"].as<JsonArray>()) {
+        c["connected"] = false;
+      }
     }
+
+    // Dynamic merge of active connected BLE clients into unified JSON
+    JsonArray clientsArr = doc["clients"].is<JsonArray>() ? doc["clients"].as<JsonArray>() : doc["clients"].to<JsonArray>();
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-      if (kvmClients[i].active) {
+      if (kvmClients[i].active && kvmClients[i].mac.length() > 0) {
+        String activeMac = kvmClients[i].mac;
+        activeMac.toLowerCase();
+        activeMac.trim();
+
         bool exists = false;
         for (JsonObject c : clientsArr) {
-          if (c["mac"].as<String>() == kvmClients[i].mac) {
+          String cMac = c["mac"].as<String>();
+          cMac.toLowerCase();
+          cMac.trim();
+          if (cMac == activeMac) {
             c["connected"] = true;
             exists = true;
             break;
@@ -517,7 +542,7 @@ void processCommand(String input) {
         }
         if (!exists) {
           JsonObject clientObj = clientsArr.add<JsonObject>();
-          clientObj["mac"] = kvmClients[i].mac;
+          clientObj["mac"] = activeMac;
           clientObj["name"] = kvmClients[i].name.length() > 0 ? kvmClients[i].name : "Detected Device";
           clientObj["connected"] = true;
         }

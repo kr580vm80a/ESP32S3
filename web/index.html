@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 214;
+    const BUILD_VERSION = 215;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1447,6 +1447,11 @@
 
     function syncScreensReference() {
       const active = getActiveLayout();
+      screens = active ? active.screens : [];
+    }
+
+    function syncActiveLayoutScreens() {
+      const active = getActiveLayout();
       if (active) {
         active.screens = screens;
       }
@@ -1809,6 +1814,7 @@
 
           // Remove old screens for currentDeviceId
           screens = screens.filter(s => s.group !== currentDeviceId);
+          syncActiveLayoutScreens();
 
           parsed.forEach((d, idx) => {
             const item = items[idx];
@@ -1837,6 +1843,7 @@
               isPrimary: !!d.isPrimary
             });
           });
+          syncActiveLayoutScreens();
 
           // Synchronize canvas s.x and s.y for ALL screens in layout using global maxLayoutY baseline
           const scale = 0.12;
@@ -2093,6 +2100,7 @@
         // Delete only this specific manual screen
         screens = screens.filter(s => s.id !== id);
       }
+      syncActiveLayoutScreens();
 
       if (selectedScreen && !screens.includes(selectedScreen)) {
         selectedScreen = null;

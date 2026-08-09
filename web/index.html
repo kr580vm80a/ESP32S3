@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 236;
+    const BUILD_VERSION = 237;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3452,11 +3452,8 @@
       if ('bluetooth' in navigator) {
         try {
           const device = await navigator.bluetooth.requestDevice({
-            filters: [
-              { namePrefix: 'ESP32' },
-              { services: [0x1812] }
-            ],
-            optionalServices: [CONFIG_SERVICE_UUID, '12345678-1234-1234-1234-1234567890ab']
+            acceptAllDevices: true,
+            optionalServices: [CONFIG_SERVICE_UUID, '12345678-1234-1234-1234-1234567890ab', 0x1812]
           });
           window.esp32BleDevice = device;
           device.addEventListener('gattserverdisconnected', () => {

@@ -128,7 +128,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         if (activeCount < MAX_KVM_CLIENTS) {
             xTaskCreate([](void* param) {
                 vTaskDelay(pdMS_TO_TICKS(1500));
-                if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+                if (NimBLEDevice::getAdvertising()) {
                     Serial.println("[BLE Server] Resuming advertising for additional PC...");
                     NimBLEDevice::getAdvertising()->start();
                 }

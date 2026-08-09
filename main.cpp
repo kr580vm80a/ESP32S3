@@ -6,7 +6,6 @@
 
 #if CONFIG_IDF_TARGET_ESP32S3
 #include <HWCDC.h>
-HWCDC USBSerial;
 #endif
 
 Preferences preferences;

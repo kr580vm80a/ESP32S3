@@ -473,7 +473,7 @@ void processCommand(String input) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json);
 
-    if (err || !doc.is<JsonObject>() || !doc["layouts"].is<JsonArray>() || doc["layouts"].size() == 0) {
+    if (err || !doc.is<JsonObject>()) {
       doc.clear();
       doc["device"] = "ESP32-KVM-Switch";
       doc["activeLayoutId"] = "layout_1";
@@ -485,16 +485,6 @@ void processCommand(String input) {
       layout1["totalScreens"] = 0;
       layout1["screens"].to<JsonArray>();
       doc["clients"].to<JsonArray>();
-    } else {
-      // Recalculate totalScreens for each layout dynamically from screens array
-      for (JsonObject l : doc["layouts"].as<JsonArray>()) {
-        if (l["screens"].is<JsonArray>()) {
-          l["totalScreens"] = l["screens"].as<JsonArray>().size();
-        } else {
-          l["screens"].to<JsonArray>();
-          l["totalScreens"] = 0;
-        }
-      }
     }
 
     // Include bound mouse MAC in the unified JSON payload for backup & restore

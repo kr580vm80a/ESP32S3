@@ -295,6 +295,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
 };
 
 bool connectToServer() {
+    if (isScanningForMice) return false;
     if (targetMouseMac.length() == 0 && !advDevice) return false;
 
     if (!pClient) {

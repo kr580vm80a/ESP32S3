@@ -4,6 +4,11 @@
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
 
+#if CONFIG_IDF_TARGET_ESP32S3
+#include <HWCDC.h>
+HWCDC USBSerial;
+#endif
+
 Preferences preferences;
 
 // Structure to store monitor configuration
@@ -269,6 +274,9 @@ void sendConfigResponse(const String& response) {
   String fullResp = response;
   if (!fullResp.endsWith("\n")) fullResp += "\n";
   Serial.print(fullResp);
+#if CONFIG_IDF_TARGET_ESP32S3
+  USBSerial.print(fullResp);
+#endif
   if (configTxChar) {
     size_t len = fullResp.length();
     size_t chunkSize = 60;
@@ -572,6 +580,9 @@ class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
 void setup() {
   Serial.setRxBufferSize(2048);
   Serial.begin(115200);
+#if CONFIG_IDF_TARGET_ESP32S3
+  USBSerial.begin(115200);
+#endif
   delay(2000);
   
   Serial.println("\n--- ESP32 KVM Switcher Started ---");
@@ -647,6 +658,21 @@ void loop() {
 
   if (Serial.available()) {
     String input = Serial.readStringUntil('\n');
-    processCommand(input);
+    input.trim();
+    if (input.length() > 0) {
+      Serial.printf("[UART RX CMD]: %s\n", input.c_str());
+      processCommand(input);
+    }
   }
+
+#if CONFIG_IDF_TARGET_ESP32S3
+  if (USBSerial.available()) {
+    String input = USBSerial.readStringUntil('\n');
+    input.trim();
+    if (input.length() > 0) {
+      Serial.printf("[USB CDC RX CMD]: %s\n", input.c_str());
+      processCommand(input);
+    }
+  }
+#endif
 }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 203;
+    const BUILD_VERSION = 204;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3203,6 +3203,13 @@
 
     function handleBleNotification(e) {
       const chunkStr = new TextDecoder('utf-8').decode(e.target.value);
+      
+      // If a new response header arrives over BLE while buffer holds un-terminated old data, flush the stale buffer!
+      if (bleNotifyBuffer.length > 0 && (chunkStr.startsWith('CONFIG ') || chunkStr.startsWith('MICE ') || chunkStr.startsWith('CLIENTS ') || chunkStr.startsWith('OK_') || chunkStr.startsWith('TARGET_'))) {
+        console.warn('[BLE NOTIFY FLUSH] Flushed un-terminated stale buffer:', bleNotifyBuffer.length, 'chars');
+        bleNotifyBuffer = '';
+      }
+
       bleNotifyBuffer += chunkStr;
       if (bleNotifyBuffer.includes('\n')) {
         const lines = bleNotifyBuffer.split('\n');
@@ -3238,6 +3245,9 @@
 
     async function sendESP32Command(cmd) {
       console.log(`[SEND COMMAND LOG] (Channel: ${activeConnectionType}):`, cmd.trim());
+
+      // Reset notification read buffer before sending a new command over BLE
+      bleNotifyBuffer = '';
 
       return new Promise((resolve) => {
         cmdWriteQueue = cmdWriteQueue.then(async () => {

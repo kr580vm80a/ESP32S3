@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 204;
+    const BUILD_VERSION = 205;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3168,18 +3168,6 @@
 
         console.log(`[${source} CONFIG LOG] Received layout JSON from ESP32 (${jsonStr.length} chars, expected: ${expectedLen > 0 ? expectedLen : 'unspecified'}):`, jsonStr);
         parseESP32ConfigResponse(jsonStr, expectedLen);
-      } else if (line.startsWith('CLIENTS ')) {
-        const jsonStr = line.substring(8);
-        console.log(`[${source} CLIENTS LOG] Received clients list from ESP32:`, jsonStr);
-        try {
-          const clients = JSON.parse(jsonStr);
-          if (Array.isArray(clients)) {
-            kvmClients = clients.map(c => ({ mac: c.mac || '', name: c.name || 'Detected Device', connected: c.connected || false }));
-            renderClientsList();
-          }
-        } catch(e) {
-          console.warn(`[${source} CLIENTS ERROR] Failed to parse CLIENTS:`, e);
-        }
       } else if (line.startsWith('MICE ')) {
         const jsonStr = line.substring(5);
         console.log(`[${source} MICE LOG] Received scanned mice from ESP32:`, jsonStr);
@@ -3205,7 +3193,7 @@
       const chunkStr = new TextDecoder('utf-8').decode(e.target.value);
       
       // If a new response header arrives over BLE while buffer holds un-terminated old data, flush the stale buffer!
-      if (bleNotifyBuffer.length > 0 && (chunkStr.startsWith('CONFIG ') || chunkStr.startsWith('MICE ') || chunkStr.startsWith('CLIENTS ') || chunkStr.startsWith('OK_') || chunkStr.startsWith('TARGET_'))) {
+      if (bleNotifyBuffer.length > 0 && (chunkStr.startsWith('CONFIG ') || chunkStr.startsWith('MICE ') || chunkStr.startsWith('OK_') || chunkStr.startsWith('TARGET_'))) {
         console.warn('[BLE NOTIFY FLUSH] Flushed un-terminated stale buffer:', bleNotifyBuffer.length, 'chars');
         bleNotifyBuffer = '';
       }

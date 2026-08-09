@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 193;
+    const BUILD_VERSION = 194;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3214,40 +3214,40 @@
       return true;
     }
 
-    let serialWriteQueue = Promise.resolve();
+    let cmdWriteQueue = Promise.resolve();
 
     async function sendESP32Command(cmd) {
       console.log(`[SEND COMMAND LOG] (Channel: ${activeConnectionType}):`, cmd.trim());
 
-      if (activeConnectionType === 'bluetooth' && window.esp32BleDevice && window.esp32BleRxChar) {
-        await ensureBleConnected();
-        const encoder = new TextEncoder();
-        const data = encoder.encode(cmd);
-        const chunkSize = 20; // Standard 20-byte BLE ATT MTU payload size
-        for (let i = 0; i < data.length; i += chunkSize) {
-          const chunk = data.slice(i, i + chunkSize);
-          try {
-            if (window.esp32BleRxChar.writeValueWithResponse) {
-              await window.esp32BleRxChar.writeValueWithResponse(chunk);
-            } else if (window.esp32BleRxChar.writeValue) {
-              await window.esp32BleRxChar.writeValue(chunk);
-            } else if (window.esp32BleRxChar.writeValueWithoutResponse) {
-              await window.esp32BleRxChar.writeValueWithoutResponse(chunk);
+      return new Promise((resolve) => {
+        cmdWriteQueue = cmdWriteQueue.then(async () => {
+          if (activeConnectionType === 'bluetooth' && window.esp32BleDevice && window.esp32BleRxChar) {
+            await ensureBleConnected();
+            const encoder = new TextEncoder();
+            const data = encoder.encode(cmd);
+            const chunkSize = 20; // Standard 20-byte BLE ATT MTU payload size
+            for (let i = 0; i < data.length; i += chunkSize) {
+              const chunk = data.slice(i, i + chunkSize);
+              try {
+                if (window.esp32BleRxChar.writeValueWithResponse) {
+                  await window.esp32BleRxChar.writeValueWithResponse(chunk);
+                } else if (window.esp32BleRxChar.writeValue) {
+                  await window.esp32BleRxChar.writeValue(chunk);
+                } else if (window.esp32BleRxChar.writeValueWithoutResponse) {
+                  await window.esp32BleRxChar.writeValueWithoutResponse(chunk);
+                }
+              } catch(err) {
+                console.warn('[BLE TX CHUNK RETRY] Retrying with writeValue:', err);
+                try {
+                  await window.esp32BleRxChar.writeValue(chunk);
+                } catch(e2) {
+                  console.error('[BLE TX CHUNK FAILED]:', e2);
+                }
+              }
+              await new Promise(r => setTimeout(r, 15)); // Inter-packet delay for flow control
             }
-          } catch(err) {
-            console.warn('[BLE TX CHUNK RETRY] Retrying with writeValue:', err);
-            try {
-              await window.esp32BleRxChar.writeValue(chunk);
-            } catch(e2) {
-              console.error('[BLE TX CHUNK FAILED]:', e2);
-            }
-          }
-          await new Promise(r => setTimeout(r, 15)); // Inter-packet delay for flow control
-        }
-        return true;
-      } else if (activeConnectionType === 'usb' && window.esp32SerialPort && window.esp32SerialPort.writable) {
-        return new Promise((resolve) => {
-          serialWriteQueue = serialWriteQueue.then(async () => {
+            resolve(true);
+          } else if (activeConnectionType === 'usb' && window.esp32SerialPort && window.esp32SerialPort.writable) {
             if (!window.esp32SerialPort || !window.esp32SerialPort.writable) {
               resolve(false);
               return;
@@ -3261,12 +3261,12 @@
               console.error('[USB WRITE ERROR]:', err);
               resolve(false);
             }
-          }).catch(() => resolve(false));
-        });
-      } else {
-        console.warn(`[SEND COMMAND FAILED] Cannot send '${cmd.trim()}': activeConnectionType='${activeConnectionType}'`);
-      }
-      return false;
+          } else {
+            console.warn(`[SEND COMMAND FAILED] Cannot send '${cmd.trim()}': activeConnectionType='${activeConnectionType}'`);
+            resolve(false);
+          }
+        }).catch(() => resolve(false));
+      });
     }
 
     let activeConnectionType = 'none'; // 'none', 'usb', or 'bluetooth'

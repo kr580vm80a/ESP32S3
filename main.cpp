@@ -120,6 +120,21 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 }
             }
         }
+        // Resume advertising so 2nd PC (Mortar) can discover and connect
+        int activeCount = 0;
+        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+            if (kvmClients[i].active) activeCount++;
+        }
+        if (activeCount < MAX_KVM_CLIENTS) {
+            xTaskCreate([](void* param) {
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+                    Serial.println("[BLE Server] Resuming advertising for additional PC...");
+                    NimBLEDevice::getAdvertising()->start();
+                }
+                vTaskDelete(NULL);
+            }, "bgAdvTask", 2048, NULL, 1, NULL);
+        }
     }
 
     void onDisconnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
@@ -135,6 +150,15 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 break;
             }
         }
+
+        xTaskCreate([](void* param) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+                Serial.println("[BLE Server] Resuming advertising after PC disconnect...");
+                NimBLEDevice::getAdvertising()->start();
+            }
+            vTaskDelete(NULL);
+        }, "bgAdvTask", 2048, NULL, 1, NULL);
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
@@ -162,6 +186,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
 // --- BLE Host (Central) Variables ---
 static NimBLEAdvertisedDevice* advDevice;
+
+
 static bool doConnect = false;
 
 static NimBLEUUID hidServiceUUID("1812");
@@ -238,6 +264,8 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
     }
 }
 
+bool connectToServer();
+
 // Callback for BLE Connection Status
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
@@ -249,9 +277,16 @@ class ClientCallbacks : public NimBLEClientCallbacks {
         connected = false;
         if (targetMouseMac.length() > 0 && !isScanningForMice) {
             xTaskCreate([](void* param) {
-                delay(4000);
-                if (targetMouseMac.length() > 0 && !connected) {
-                    doConnect = true;
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                int retries = 0;
+                while (!connected && targetMouseMac.length() > 0 && !isScanningForMice && retries < 60) {
+                    Serial.printf("[BLE Host] Auto-reconnecting to bound mouse (%s) [attempt %d]...\n", targetMouseMac.c_str(), retries + 1);
+                    if (connectToServer()) {
+                        Serial.println("[BLE Host] Reconnected to mouse successfully!");
+                        break;
+                    }
+                    retries++;
+                    vTaskDelay(pdMS_TO_TICKS(3000));
                 }
                 vTaskDelete(NULL);
             }, "mouseReconnectTask", 4096, NULL, 1, NULL);

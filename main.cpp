@@ -10,6 +10,11 @@
 
 Preferences preferences;
 
+// NVS Flash Storage Constants
+const char* NVS_NAMESPACE = "kvm_config";
+const char* NVS_KEY_LAYOUT = "layout";
+const char* NVS_KEY_MOUSE_MAC = "mouse_mac";
+
 // Structure to store monitor configuration
 struct MonitorConfig {
   String id;
@@ -331,9 +336,9 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
 };
 
 void loadConfiguration() {
-  preferences.begin("kvm_config", true);
-  String json = preferences.getString("layout", "{}");
-  targetMouseMac = preferences.getString("mouse_mac", "");
+  preferences.begin(NVS_NAMESPACE, true);
+  String json = preferences.getString(NVS_KEY_LAYOUT, "{}");
+  targetMouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
   preferences.end();
 
   targetMouseMac.toLowerCase();
@@ -343,6 +348,13 @@ void loadConfiguration() {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json);
     if (!err) {
+      // Restore mouseMac if present in saved JSON
+      if (doc["mouseMac"].is<String>() && doc["mouseMac"].as<String>().length() > 0) {
+        targetMouseMac = doc["mouseMac"].as<String>();
+        targetMouseMac.toLowerCase();
+        targetMouseMac.trim();
+      }
+
       JsonArray arr;
       if (doc["layouts"].is<JsonArray>() && doc["layouts"].size() > 0) {
         String activeId = doc["activeLayoutId"].as<String>();
@@ -391,8 +403,21 @@ void loadConfiguration() {
 }
 
 void saveConfiguration(const String& jsonString) {
-  preferences.begin("kvm_config", false);
-  preferences.putString("layout", jsonString);
+  preferences.begin(NVS_NAMESPACE, false);
+  preferences.putString(NVS_KEY_LAYOUT, jsonString);
+
+  // Extract and persist mouseMac from save payload if present
+  JsonDocument doc;
+  if (!deserializeJson(doc, jsonString)) {
+    if (doc["mouseMac"].is<String>()) {
+      String mac = doc["mouseMac"].as<String>();
+      mac.toLowerCase();
+      mac.trim();
+      preferences.putString(NVS_KEY_MOUSE_MAC, mac);
+      targetMouseMac = mac;
+      Serial.printf("[NVS] Updated targetMouseMac from save payload: %s\n", targetMouseMac.c_str());
+    }
+  }
   preferences.end();
   Serial.println("Configuration saved to NVS!");
 }
@@ -446,8 +471,8 @@ void processCommand(String input) {
       doSaveConfig = true;
     }
   } else if (input == "GET_CONFIG") {
-    preferences.begin("kvm_config", true);
-    String json = preferences.getString("layout", "{}");
+    preferences.begin(NVS_NAMESPACE, true);
+    String json = preferences.getString(NVS_KEY_LAYOUT, "{}");
     preferences.end();
 
     JsonDocument doc;
@@ -466,6 +491,9 @@ void processCommand(String input) {
       layout1["screens"].to<JsonArray>();
       doc["clients"].to<JsonArray>();
     }
+
+    // Include bound mouse MAC in the unified JSON payload for backup & restore
+    doc["mouseMac"] = targetMouseMac;
 
     // Dynamic merge of active connected BLE clients into unified JSON
     JsonArray clientsArr;
@@ -540,8 +568,8 @@ void processCommand(String input) {
     String mac = input.substring(11);
     mac.toLowerCase();
     mac.trim();
-    preferences.begin("kvm_config", false);
-    preferences.putString("mouse_mac", mac);
+    preferences.begin(NVS_NAMESPACE, false);
+    preferences.putString(NVS_KEY_MOUSE_MAC, mac);
     preferences.end();
     targetMouseMac = mac;
     sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
@@ -559,19 +587,21 @@ void processCommand(String input) {
       }, "bgScanTask", 4096, NULL, 1, NULL);
     }
   } else if (input == "UNBIND_MOUSE") {
-    preferences.begin("kvm_config", false);
-    preferences.remove("mouse_mac");
+    preferences.begin(NVS_NAMESPACE, false);
+    preferences.remove(NVS_KEY_MOUSE_MAC);
     preferences.end();
     targetMouseMac = "";
     sendConfigResponse("OK_UNBIND_MOUSE");
   } else if (input == "GET_TARGET_MOUSE") {
     sendConfigResponse("TARGET_MOUSE " + targetMouseMac);
   } else if (input == "DUMP_FLASH") {
-    preferences.begin("kvm_config", true);
-    String json = preferences.getString("layout", "{}");
+    preferences.begin(NVS_NAMESPACE, true);
+    String json = preferences.getString(NVS_KEY_LAYOUT, "{}");
+    String mouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
     preferences.end();
     Serial.println("\n--- [NVS FLASH DUMP] ---");
     Serial.printf("Flash layout string length: %d bytes\n", json.length());
+    Serial.printf("Flash target mouse MAC: %s\n", mouseMac.c_str());
     Serial.println(json);
     Serial.println("--- [END NVS FLASH DUMP] ---\n");
   }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 207;
+    const BUILD_VERSION = 208;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1387,7 +1387,13 @@
     async function saveESP32Config(configData) {
       const jsonText = typeof configData === 'string' ? configData : currentConfigJSON;
       let minifiedJson = jsonText;
-      try { minifiedJson = JSON.stringify(JSON.parse(jsonText)); } catch(e) {}
+      try {
+        const parsed = JSON.parse(jsonText);
+        if (boundTargetMouseMac) {
+          parsed.mouseMac = boundTargetMouseMac;
+        }
+        minifiedJson = JSON.stringify(parsed);
+      } catch(e) {}
 
       console.log(`[SAVE CONFIG LOG] Sending layout to ESP32 Flash (${minifiedJson.length} chars) over ${activeConnectionType.toUpperCase()}...`);
       console.log('[SAVE CONFIG PAYLOAD]:', minifiedJson);
@@ -2963,7 +2969,8 @@
 
     // Backup Layout JSON to local device file (Using native Save File Picker with kvm_config.json)
     document.getElementById('btnBackupJSON').addEventListener('click', async () => {
-      const jsonStr = currentConfigJSON || JSON.stringify(layoutsData, null, 2);
+      layoutsData.mouseMac = boundTargetMouseMac;
+      const jsonStr = JSON.stringify(layoutsData, null, 2);
       const fileName = 'kvm_config.json';
 
       if ('showSaveFilePicker' in window) {
@@ -3090,6 +3097,10 @@
 
         if (doc.clients && Array.isArray(doc.clients)) {
           kvmClients = doc.clients;
+        }
+
+        if (doc.mouseMac || doc.boundMouseMac) {
+          setBoundMouseStatus(doc.mouseMac || doc.boundMouseMac);
         }
 
         syncScreensReference();

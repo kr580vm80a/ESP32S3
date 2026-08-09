@@ -163,9 +163,10 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
         if (!desc->sec_state.encrypted) {
-            Serial.println("[BLE Server] Pairing/Encryption failed! PC disconnected or key mismatch.");
+            Serial.printf("[BLE Server] Pairing/Encryption failed for %s! Deleting stale bond keys...\n", NimBLEAddress(desc->peer_ota_addr).toString().c_str());
+            NimBLEDevice::deleteBond(desc->peer_ota_addr);
         } else {
-            Serial.println("[BLE Server] Connection paired & encrypted successfully!");
+            Serial.printf("[BLE Server] Connection paired & encrypted successfully with %s!\n", NimBLEAddress(desc->peer_ota_addr).toString().c_str());
         }
     }
 };
@@ -782,8 +783,11 @@ void loop() {
   }
 
   if (doConnect) {
-    connectToServer();
     doConnect = false;
+    xTaskCreate([](void* param) {
+      connectToServer();
+      vTaskDelete(NULL);
+    }, "mouseConnTask", 4096, NULL, 1, NULL);
   }
 
   if (Serial.available()) {

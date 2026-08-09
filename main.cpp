@@ -98,13 +98,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         peerMac.toLowerCase();
         peerMac.trim();
         Serial.printf("[BLE Server] PC Connected! MAC: %s (conn_handle: %d)\n", peerMac.c_str(), desc->conn_handle);
-
-        // Stop active background mouse scan immediately to dedicate 100% radio bandwidth to PC connection
-        NimBLEScan* pScan = NimBLEDevice::getScan();
-        if (pScan && pScan->isScanning()) {
-            Serial.println("[BLE Server] Stopping active mouse scan to preserve PC connection...");
-            pScan->stop();
-        }
         
         // Save connection
         bool updated = false;
@@ -160,17 +153,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
         xTaskCreate([](void* param) {
             vTaskDelay(pdMS_TO_TICKS(1000));
-            int activeCount = 0;
-            for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-                if (kvmClients[i].active) activeCount++;
-            }
-            if (activeCount == 0 && targetMouseMac.length() > 0 && !connected) {
-                NimBLEScan* pScan = NimBLEDevice::getScan();
-                if (pScan && !pScan->isScanning()) {
-                    Serial.println("[BLE Server] Resuming mouse scan (no PCs connected)...");
-                    pScan->start(0, false);
-                }
-            } else if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+            if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
                 Serial.println("[BLE Server] Resuming advertising after disconnect...");
                 NimBLEDevice::getAdvertising()->start();
             }
@@ -754,10 +737,7 @@ void setup() {
     pScan->setActiveScan(true);
     pScan->setInterval(160); // 100ms scan interval
     pScan->setWindow(40);    // 25ms window (25% duty cycle to avoid choking BLE server connections)
-    if (targetMouseMac.length() > 0 && !connected) {
-      Serial.println("[BLE Scan] Starting background scan for bound target mouse...");
-      pScan->start(0, false);
-    }
+    // Scanner initialized; scanning is triggered on-demand via Web UI (SCAN_MICE) or BIND_MOUSE
     vTaskDelete(NULL);
   }, "bleScanTask", 4096, NULL, 1, NULL);
 }

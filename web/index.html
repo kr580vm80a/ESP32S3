@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 192;
+    const BUILD_VERSION = 193;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -922,7 +922,7 @@
     // --- BLE Mouse Scanner & Target Lock ---
     let boundTargetMouseMac = '';
 
-    function toggleBleMouseModal(e) {
+    async function toggleBleMouseModal(e) {
       if (e) e.stopPropagation();
       if (activeConnectionType === 'none') {
         alert('⚠️ Будь ласка, спочатку підключіться до ESP32 через USB або Bluetooth!');
@@ -941,7 +941,7 @@
           modal.style.top = (rect.bottom + 6) + 'px';
         }
         modal.style.display = 'block';
-        sendESP32Command('GET_TARGET_MOUSE\n');
+        await sendESP32Command('GET_TARGET_MOUSE\n');
         startBleMouseScan();
       }
     }
@@ -3214,6 +3214,8 @@
       return true;
     }
 
+    let serialWriteQueue = Promise.resolve();
+
     async function sendESP32Command(cmd) {
       console.log(`[SEND COMMAND LOG] (Channel: ${activeConnectionType}):`, cmd.trim());
 
@@ -3244,12 +3246,25 @@
         }
         return true;
       } else if (activeConnectionType === 'usb' && window.esp32SerialPort && window.esp32SerialPort.writable) {
-        const writer = window.esp32SerialPort.writable.getWriter();
-        await writer.write(new TextEncoder().encode(cmd));
-        writer.releaseLock();
-        return true;
+        return new Promise((resolve) => {
+          serialWriteQueue = serialWriteQueue.then(async () => {
+            if (!window.esp32SerialPort || !window.esp32SerialPort.writable) {
+              resolve(false);
+              return;
+            }
+            try {
+              const writer = window.esp32SerialPort.writable.getWriter();
+              await writer.write(new TextEncoder().encode(cmd));
+              writer.releaseLock();
+              resolve(true);
+            } catch (err) {
+              console.error('[USB WRITE ERROR]:', err);
+              resolve(false);
+            }
+          }).catch(() => resolve(false));
+        });
       } else {
-        console.warn(`[SEND COMMAND FAILED] Cannot send '${cmd.trim()}': activeConnectionType='${activeConnectionType}', esp32BleDevice=${!!window.esp32BleDevice}, esp32BleRxChar=${!!window.esp32BleRxChar}`);
+        console.warn(`[SEND COMMAND FAILED] Cannot send '${cmd.trim()}': activeConnectionType='${activeConnectionType}'`);
       }
       return false;
     }

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 208;
+    const BUILD_VERSION = 209;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2969,8 +2969,15 @@
 
     // Backup Layout JSON to local device file (Using native Save File Picker with kvm_config.json)
     document.getElementById('btnBackupJSON').addEventListener('click', async () => {
-      layoutsData.mouseMac = boundTargetMouseMac;
-      const jsonStr = JSON.stringify(layoutsData, null, 2);
+      updateJSON();
+      let backupObj = {};
+      try {
+        backupObj = JSON.parse(currentConfigJSON);
+      } catch(e) {
+        backupObj = { device: "ESP32-KVM-Switch", activeLayoutId: layoutsData.activeLayoutId, layouts: [] };
+      }
+      backupObj.mouseMac = boundTargetMouseMac;
+      const jsonStr = JSON.stringify(backupObj, null, 2);
       const fileName = 'kvm_config.json';
 
       if ('showSaveFilePicker' in window) {

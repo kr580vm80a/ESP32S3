@@ -466,9 +466,22 @@ void processCommand(String input) {
   } else if (input == "SCAN_MICE") {
     scannedMiceDoc.clear();
     scannedMiceDoc.to<JsonArray>();
+
+    NimBLEScan* pScan = NimBLEDevice::getScan();
+    if (pScan && pScan->isScanning()) {
+      pScan->stop();
+      delay(100);
+    }
+
     isScanningForMice = true;
-    NimBLEDevice::getScan()->start(5, false);
+    Serial.println("[BLE Scan] Starting 5-second active discovery scan for mice...");
+    pScan->start(5, false);
     isScanningForMice = false;
+    Serial.printf("[BLE Scan] Discovery scan complete! Discovered %d BLE devices.\n", (int)scannedMiceDoc.as<JsonArray>().size());
+
+    if (!connected && pScan) {
+      pScan->start(0, false);
+    }
 
     String jsonStr;
     serializeJson(scannedMiceDoc, jsonStr);
@@ -486,7 +499,11 @@ void processCommand(String input) {
     if (pClient && pClient->isConnected()) {
       pClient->disconnect();
     } else {
-      NimBLEDevice::getScan()->start(0, false);
+      NimBLEScan* pScan = NimBLEDevice::getScan();
+      if (pScan) {
+        if (pScan->isScanning()) pScan->stop();
+        pScan->start(0, false);
+      }
     }
   } else if (input == "UNBIND_MOUSE") {
     preferences.begin("kvm_config", false);

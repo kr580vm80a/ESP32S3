@@ -97,6 +97,13 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         peerMac.toLowerCase();
         peerMac.trim();
         Serial.printf("[BLE Server] PC Connected! MAC: %s (conn_handle: %d)\n", peerMac.c_str(), desc->conn_handle);
+
+        // Stop active background mouse scan immediately to dedicate 100% radio bandwidth to PC connection
+        NimBLEScan* pScan = NimBLEDevice::getScan();
+        if (pScan && pScan->isScanning()) {
+            Serial.println("[BLE Server] Stopping active mouse scan to preserve PC connection...");
+            pScan->stop();
+        }
         
         // Save connection
         bool updated = false;
@@ -127,7 +134,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
         if (activeCount < MAX_KVM_CLIENTS) {
             xTaskCreate([](void* param) {
-                vTaskDelay(pdMS_TO_TICKS(500));
+                vTaskDelay(pdMS_TO_TICKS(1000));
                 if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
                     Serial.println("[BLE Server] Resuming advertising for additional PC...");
                     NimBLEDevice::getAdvertising()->start();
@@ -151,8 +158,18 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         }
 
         xTaskCreate([](void* param) {
-            vTaskDelay(pdMS_TO_TICKS(500));
-            if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            int activeCount = 0;
+            for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+                if (kvmClients[i].active) activeCount++;
+            }
+            if (activeCount == 0 && targetMouseMac.length() > 0 && !connected) {
+                NimBLEScan* pScan = NimBLEDevice::getScan();
+                if (pScan && !pScan->isScanning()) {
+                    Serial.println("[BLE Server] Resuming mouse scan (no PCs connected)...");
+                    pScan->start(0, false);
+                }
+            } else if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
                 Serial.println("[BLE Server] Resuming advertising after disconnect...");
                 NimBLEDevice::getAdvertising()->start();
             }

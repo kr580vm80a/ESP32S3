@@ -263,9 +263,13 @@ class ClientCallbacks : public NimBLEClientCallbacks {
         connected = false;
         if (targetMouseMac.length() > 0 && !isScanningForMice) {
             xTaskCreate([](void* param) {
-                delay(500);
+                delay(1000);
                 NimBLEScan* pScan = NimBLEDevice::getScan();
                 if (pScan && !pScan->isScanning()) {
+                    pScan->setActiveScan(false);
+                    pScan->setInterval(160);
+                    pScan->setWindow(40);
+                    Serial.printf("[BLE Scan] Resuming passive scan for mouse (%s)...\n", targetMouseMac.c_str());
                     pScan->start(0, false);
                 }
                 vTaskDelete(NULL);
@@ -617,7 +621,10 @@ void processCommand(String input) {
         delay(300);
         NimBLEScan* pScan = NimBLEDevice::getScan();
         if (pScan && !pScan->isScanning()) {
-          Serial.println("[BLE Scan] Resuming background scan for target mouse...");
+          pScan->setActiveScan(false);
+          pScan->setInterval(160);
+          pScan->setWindow(40);
+          Serial.println("[BLE Scan] Resuming passive scan for target mouse...");
           pScan->start(0, false);
         }
         vTaskDelete(NULL);
@@ -635,16 +642,19 @@ void processCommand(String input) {
 
     if (pClient && pClient->isConnected()) {
       pClient->disconnect();
-    } else {
-      xTaskCreate([](void* param) {
-        NimBLEScan* pScan = NimBLEDevice::getScan();
-        if (pScan) {
-          if (pScan->isScanning()) pScan->stop();
-          pScan->start(0, false);
-        }
-        vTaskDelete(NULL);
-      }, "bgScanTask", 4096, NULL, 1, NULL);
     }
+    xTaskCreate([](void* param) {
+      NimBLEScan* pScan = NimBLEDevice::getScan();
+      if (pScan) {
+        if (pScan->isScanning()) pScan->stop();
+        pScan->setActiveScan(false);
+        pScan->setInterval(160);
+        pScan->setWindow(40);
+        Serial.printf("[BLE Scan] Starting passive scan for locked mouse MAC (%s)...\n", targetMouseMac.c_str());
+        pScan->start(0, false);
+      }
+      vTaskDelete(NULL);
+    }, "bgScanTask", 4096, NULL, 1, NULL);
   } else if (input == "UNBIND_MOUSE") {
     preferences.begin(NVS_NAMESPACE, false);
     preferences.remove(NVS_KEY_MOUSE_MAC);
@@ -742,10 +752,13 @@ void setup() {
   xTaskCreate([](void* param) {
     NimBLEScan* pScan = NimBLEDevice::getScan();
     pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks());
-    pScan->setActiveScan(true);
-    pScan->setInterval(160); // 100ms scan interval
-    pScan->setWindow(40);    // 25ms window (25% duty cycle to avoid choking BLE server connections)
-    // Scanner initialized; scanning is triggered on-demand via Web UI (SCAN_MICE) or BIND_MOUSE
+    pScan->setActiveScan(false); // Passive scanning mode (zero transmit contention with PC connections)
+    pScan->setInterval(160);
+    pScan->setWindow(40);
+    if (targetMouseMac.length() > 0 && !connected) {
+      Serial.printf("[BLE Scan] Starting background passive scan for target mouse (%s)...\n", targetMouseMac.c_str());
+      pScan->start(0, false);
+    }
     vTaskDelete(NULL);
   }, "bleScanTask", 4096, NULL, 1, NULL);
 }

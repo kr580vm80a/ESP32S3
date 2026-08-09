@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 209;
+    const BUILD_VERSION = 210;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1606,7 +1606,8 @@
     let snapGuides = [];
     let dragLockedScale = null; // Lock scale during drag to prevent size changes
     let lastComputedScale = 0.12; // Track actual fitScale from last draw()
-    let currentConfigJSON = '{}';
+    let currentConfigJSON = '';
+    let configReceivedSuccessfully = false;
 
     const canvas = document.getElementById('screenCanvas');
     const ctx = canvas.getContext('2d');
@@ -2944,11 +2945,12 @@
       kvmClients = [];
       renderClientsList();
 
+      configReceivedSuccessfully = false;
       await sendESP32Command('GET_CONFIG\n');
 
       if (activeConnectionType === 'bluetooth') {
         setTimeout(async () => {
-          if (screens.length === 0 && activeConnectionType === 'bluetooth') {
+          if (!configReceivedSuccessfully && activeConnectionType === 'bluetooth') {
             console.warn('[LOAD CONFIG TIMEOUT] No response received within 2.5s over BLE. Auto-retrying GET_CONFIG...');
             await sendESP32Command('GET_CONFIG\n');
           }
@@ -3114,6 +3116,7 @@
         updateLayoutSelectorUI();
         renderClientsList();
         draw();
+        configReceivedSuccessfully = true;
         console.log(`[PARSED CONFIG LOG] Restored explicit layout (${screens.length} screens across ${layoutsData.layouts.length} layouts):`, layoutsData);
       } catch(e) {
         console.warn('Failed to parse CONFIG response:', e);

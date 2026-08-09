@@ -97,7 +97,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         peerMac.toLowerCase();
         peerMac.trim();
-        Serial.printf("[BLE Server] PC Connected! MAC: %s (conn_handle: %d)\n", peerMac.c_str(), desc->conn_handle);
+        Serial.printf("[BLE Server] PC Connected! MAC: %s (conn_handle: %d | itvl: %d | latency: %d | timeout: %d)\n",
+                      peerMac.c_str(), desc->conn_handle, desc->conn_itvl, desc->conn_latency, desc->supervision_timeout);
         
         // Save connection
         bool updated = false;
@@ -142,7 +143,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         peerMac.toLowerCase();
         peerMac.trim();
-        Serial.printf("[BLE Server] PC Disconnected! MAC: %s (conn_handle: %d)\n", peerMac.c_str(), desc->conn_handle);
+        Serial.printf("[BLE Server] PC Disconnected! MAC: %s (conn_handle: %d)\n",
+                      peerMac.c_str(), desc->conn_handle);
         
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
             if (kvmClients[i].conn_id == desc->conn_handle || (kvmClients[i].mac.length() > 0 && kvmClients[i].mac.equalsIgnoreCase(peerMac))) {
@@ -162,12 +164,25 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
+        String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
+        peerMac.toLowerCase();
+        peerMac.trim();
+        Serial.printf("[BLE Server] Auth Complete for %s | Encrypted: %d | Bonded: %d | KeySize: %d\n",
+                      peerMac.c_str(), desc->sec_state.encrypted, desc->sec_state.bonded, desc->sec_state.key_size);
         if (!desc->sec_state.encrypted) {
-            Serial.printf("[BLE Server] Pairing/Encryption failed for %s! Deleting stale bond keys...\n", NimBLEAddress(desc->peer_ota_addr).toString().c_str());
+            Serial.printf("[BLE Server] Pairing/Encryption failed for %s! Deleting stale bond keys...\n", peerMac.c_str());
             NimBLEDevice::deleteBond(desc->peer_ota_addr);
-        } else {
-            Serial.printf("[BLE Server] Connection paired & encrypted successfully with %s!\n", NimBLEAddress(desc->peer_ota_addr).toString().c_str());
         }
+    }
+
+    uint32_t onPassKeyRequest() {
+        Serial.println("[BLE Server] PassKey requested by client");
+        return 0;
+    }
+
+    bool onConfirmPIN(uint32_t pin) {
+        Serial.printf("[BLE Server] PIN confirmation requested: %06d\n", pin);
+        return true;
     }
 };
 

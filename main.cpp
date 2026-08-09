@@ -80,6 +80,7 @@ const uint8_t hidReportMap[] = {
 
 static NimBLEClient* pClient = nullptr;
 static String targetMouseMac = "";
+static bool isScanningForMice = false;
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
@@ -262,7 +263,6 @@ bool connectToServer() {
 NimBLECharacteristic* configTxChar = nullptr;
 NimBLECharacteristic* configRxChar = nullptr;
 
-static bool isScanningForMice = false;
 static JsonDocument scannedMiceDoc;
 
 void sendConfigResponse(const String& response) {

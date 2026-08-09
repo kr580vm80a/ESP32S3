@@ -119,9 +119,22 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
         }
 
-        // Keep advertising so the second PC can connect
-        Serial.println("[BLE Server] Restarting advertising for the second PC...");
-        pServer->getAdvertising()->start();
+        // Asynchronously resume advertising for second PC after connection negotiation settles
+        int activeCount = 0;
+        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+            if (kvmClients[i].active) activeCount++;
+        }
+
+        if (activeCount < MAX_KVM_CLIENTS) {
+            xTaskCreate([](void* param) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+                    Serial.println("[BLE Server] Resuming advertising for additional PC...");
+                    NimBLEDevice::getAdvertising()->start();
+                }
+                vTaskDelete(NULL);
+            }, "bgAdvTask", 2048, NULL, 1, NULL);
+        }
     }
 
     void onDisconnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
@@ -137,8 +150,14 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
         }
 
-        Serial.println("[BLE Server] Restarting advertising...");
-        pServer->getAdvertising()->start();
+        xTaskCreate([](void* param) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+                Serial.println("[BLE Server] Resuming advertising after disconnect...");
+                NimBLEDevice::getAdvertising()->start();
+            }
+            vTaskDelete(NULL);
+        }, "bgAdvTask", 2048, NULL, 1, NULL);
     }
 };
 

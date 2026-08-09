@@ -599,34 +599,26 @@ void processCommand(String input) {
     }
 
     NimBLEScan* pScan = NimBLEDevice::getScan();
-    if (pScan && pScan->isScanning()) {
-      pScan->stop();
-      delay(100);
-    }
+    if (pScan) {
+      if (pScan->isScanning()) {
+        pScan->stop();
+        delay(100);
+      }
+      pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), true);
+      pScan->setActiveScan(true);
+      pScan->setInterval(100);
+      pScan->setWindow(99);
 
-    Serial.println("[BLE Scan] Starting 5-second active discovery scan for mice...");
-    pScan->start(5, false);
+      Serial.println("[BLE Scan] Starting 5-second active discovery scan for mice...");
+      pScan->start(5, false);
+      pScan->clearResults();
+    }
     isScanningForMice = false;
     Serial.printf("[BLE Scan] Discovery scan complete! Discovered %d BLE devices.\n", (int)scannedMiceDoc.as<JsonArray>().size());
 
     String jsonStr;
     serializeJson(scannedMiceDoc, jsonStr);
     sendConfigResponse("MICE " + jsonStr);
-
-    if (targetMouseMac.length() > 0 && !connected) {
-      xTaskCreate([](void* param) {
-        delay(300);
-        NimBLEScan* pScan = NimBLEDevice::getScan();
-        if (pScan && !pScan->isScanning()) {
-          pScan->setActiveScan(false);
-          pScan->setInterval(160);
-          pScan->setWindow(40);
-          Serial.println("[BLE Scan] Resuming passive scan for target mouse...");
-          pScan->start(0, false);
-        }
-        vTaskDelete(NULL);
-      }, "bgScanTask", 4096, NULL, 1, NULL);
-    }
   } else if (input.startsWith("BIND_MOUSE ")) {
     String mac = input.substring(11);
     mac.toLowerCase();
@@ -640,18 +632,9 @@ void processCommand(String input) {
     if (pClient && pClient->isConnected()) {
       pClient->disconnect();
     }
-    xTaskCreate([](void* param) {
-      NimBLEScan* pScan = NimBLEDevice::getScan();
-      if (pScan) {
-        if (pScan->isScanning()) pScan->stop();
-        pScan->setActiveScan(false);
-        pScan->setInterval(160);
-        pScan->setWindow(40);
-        Serial.printf("[BLE Scan] Starting passive scan for locked mouse MAC (%s)...\n", targetMouseMac.c_str());
-        pScan->start(0, false);
-      }
-      vTaskDelete(NULL);
-    }, "bgScanTask", 4096, NULL, 1, NULL);
+    if (targetMouseMac.length() > 0) {
+      doConnect = true;
+    }
   } else if (input == "UNBIND_MOUSE") {
     preferences.begin(NVS_NAMESPACE, false);
     preferences.remove(NVS_KEY_MOUSE_MAC);

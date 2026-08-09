@@ -241,6 +241,13 @@ bool connectToServer() {
     return true;
 }
 
+#define CONFIG_SERVICE_UUID "12345678-1234-1234-1234-1234567890ab"
+#define CONFIG_RX_UUID      "12345678-1234-1234-1234-1234567890ac"
+#define CONFIG_TX_UUID      "12345678-1234-1234-1234-1234567890ad"
+
+NimBLECharacteristic* configTxChar = nullptr;
+NimBLECharacteristic* configRxChar = nullptr;
+
 static String targetMouseMac = "";
 static bool isScanningForMice = false;
 static JsonDocument scannedMiceDoc;
@@ -310,13 +317,6 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         }
     }
 };
-
-#define CONFIG_SERVICE_UUID "12345678-1234-1234-1234-1234567890ab"
-#define CONFIG_RX_UUID      "12345678-1234-1234-1234-1234567890ac"
-#define CONFIG_TX_UUID      "12345678-1234-1234-1234-1234567890ad"
-
-NimBLECharacteristic* configTxChar = nullptr;
-NimBLECharacteristic* configRxChar = nullptr;
 
 void loadConfiguration() {
   preferences.begin("kvm_config", true);

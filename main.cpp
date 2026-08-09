@@ -481,7 +481,7 @@ void loadConfiguration() {
           if (mac.length() > 0) {
             kvmClients[clientCount].mac = mac;
             kvmClients[clientCount].name = c["name"].as<String>();
-            kvmClients[clientCount].active = c["connected"].as<bool>();
+            kvmClients[clientCount].active = false; // Live BLE connection state starts as false at boot
             clientCount++;
           }
         }

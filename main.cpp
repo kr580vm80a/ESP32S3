@@ -277,13 +277,7 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         String devName = advertisedDevice->getName().c_str();
         int rssi = advertisedDevice->getRSSI();
 
-        bool isMouse = (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(hidServiceUUID)) ||
-                       devName.indexOf("MX Master") != -1 ||
-                       devName.indexOf("Logi") != -1 ||
-                       devName.indexOf("Mouse") != -1 ||
-                       devName.indexOf("Razer") != -1;
-
-        if (isScanningForMice && isMouse) {
+        if (isScanningForMice) {
             JsonArray arr = scannedMiceDoc.as<JsonArray>();
             bool exists = false;
             for (JsonObject m : arr) {
@@ -296,7 +290,7 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             if (!exists) {
                 JsonObject obj = arr.add<JsonObject>();
                 obj["mac"] = devMac;
-                obj["name"] = devName.length() > 0 ? devName : "Bluetooth Mouse";
+                obj["name"] = devName.length() > 0 ? devName : "Bluetooth Device";
                 obj["rssi"] = rssi;
             }
             return;
@@ -309,11 +303,13 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
                 advDevice = advertisedDevice;
                 doConnect = true;
             }
-        } else if (isMouse) {
-            Serial.printf("[BLE Scan] AUTO MATCH! Found HID Mouse: %s (%s)\n", devName.c_str(), devMac.c_str());
-            NimBLEDevice::getScan()->stop();
-            advDevice = advertisedDevice;
-            doConnect = true;
+        } else {
+            if (advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(hidServiceUUID)) {
+                Serial.printf("[BLE Scan] AUTO MATCH! Found HID Device: %s (%s)\n", devName.c_str(), devMac.c_str());
+                NimBLEDevice::getScan()->stop();
+                advDevice = advertisedDevice;
+                doConnect = true;
+            }
         }
     }
 };

@@ -245,6 +245,10 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
         Serial.println("[BLE Host] Connected to mouse!");
         connected = true;
+        NimBLEScan* pScan = NimBLEDevice::getScan();
+        if (pScan && pScan->isScanning()) {
+            pScan->stop();
+        }
     }
     void onDisconnect(NimBLEClient* pClient) {
         Serial.println("[BLE Host] Disconnected from mouse!");
@@ -731,9 +735,12 @@ void setup() {
     NimBLEScan* pScan = NimBLEDevice::getScan();
     pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks());
     pScan->setActiveScan(true);
-    pScan->setInterval(97);
-    pScan->setWindow(37);
-    pScan->start(0, false);
+    pScan->setInterval(160); // 100ms scan interval
+    pScan->setWindow(40);    // 25ms window (25% duty cycle to avoid choking BLE server connections)
+    if (targetMouseMac.length() > 0 && !connected) {
+      Serial.println("[BLE Scan] Starting background scan for bound target mouse...");
+      pScan->start(0, false);
+    }
     vTaskDelete(NULL);
   }, "bleScanTask", 4096, NULL, 1, NULL);
 }

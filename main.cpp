@@ -416,8 +416,26 @@ void executePendingSave() {
 void processCommand(String input) {
   input.trim();
   if (input.startsWith("SAVE_CONFIG ")) {
-    String jsonStr = input.substring(12);
-    jsonStr.trim();
+    String payload = input.substring(12);
+    payload.trim();
+    
+    int expectedLen = -1;
+    String jsonStr = payload;
+
+    int spaceIdx = payload.indexOf(' ');
+    if (spaceIdx > 0 && !payload.startsWith("{") && !payload.startsWith("[")) {
+      String lenHeader = payload.substring(0, spaceIdx);
+      expectedLen = lenHeader.toInt();
+      jsonStr = payload.substring(spaceIdx + 1);
+      jsonStr.trim();
+    }
+
+    if (expectedLen > 0 && (int)jsonStr.length() != expectedLen) {
+      Serial.printf("[SAVE CONFIG ERROR] Content-Length mismatch: received %d, expected %d\n", (int)jsonStr.length(), expectedLen);
+      sendConfigResponse("ERROR_SAVE Content-Length mismatch");
+      return;
+    }
+
     if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
       pendingSaveJson = jsonStr;
       doSaveConfig = true;

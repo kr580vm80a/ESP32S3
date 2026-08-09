@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 202;
+    const BUILD_VERSION = 203;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1394,7 +1394,7 @@
 
       if (activeConnectionType === 'bluetooth' && (window.esp32BleRxChar || window.esp32BleDevice)) {
         try {
-          await sendESP32Command(`SAVE_CONFIG ${minifiedJson}\n`);
+          await sendESP32Command(`SAVE_CONFIG ${minifiedJson.length} ${minifiedJson}\n`);
           console.log('[SAVE CONFIG SUCCESS] Config sent over BLE!');
           alert('✅ Дані успішно збережено в Flash-пам\'ять ESP32 через Bluetooth!');
         } catch (e) {
@@ -1403,7 +1403,7 @@
         }
       } else if (activeConnectionType === 'usb' && window.esp32SerialPort && window.esp32SerialPort.writable) {
         try {
-          await sendESP32Command(`SAVE_CONFIG ${minifiedJson}\n`);
+          await sendESP32Command(`SAVE_CONFIG ${minifiedJson.length} ${minifiedJson}\n`);
           console.log('[SAVE CONFIG SUCCESS] Config sent over USB Serial!');
           alert('✅ Дані успішно збережено в Flash-пам\'ять ESP32 через USB!');
         } catch (e) {

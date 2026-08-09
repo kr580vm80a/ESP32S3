@@ -765,22 +765,21 @@ void setup() {
   pAdvertising->setAppearance(0x03C2); // HID Mouse Appearance
   pAdvertising->addServiceUUID(hidDevice->hidService()->getUUID());
   pAdvertising->addServiceUUID(CONFIG_SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
   pAdvertising->start();
   Serial.println("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
 
-  // Automatic mouse connection at startup is disabled to isolate BLE Server stability
-  /*
+  // If targetMouseMac is bound, attempt direct non-blocking connection at startup
   if (targetMouseMac.length() > 0 && !connected) {
     xTaskCreate([](void* param) {
       vTaskDelay(pdMS_TO_TICKS(2000));
       if (targetMouseMac.length() > 0 && !connected) {
-        Serial.printf("[BLE Host] Initiating direct MAC connection for mouse (%s)...\n", targetMouseMac.c_str());
-        doConnect = true;
+        Serial.printf("[BLE Host] Initiating direct MAC connection for bound mouse (%s)...\n", targetMouseMac.c_str());
+        connectToServer();
       }
       vTaskDelete(NULL);
     }, "mouseConnectTask", 4096, NULL, 1, NULL);
   }
-  */
 }
 
 void loop() {

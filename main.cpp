@@ -458,6 +458,13 @@ void processCommand(String input) {
     scannedMiceDoc.clear();
     scannedMiceDoc.to<JsonArray>();
 
+    // Disconnect from mouse if currently connected to avoid dual-role GATT conflict
+    if (pClient && pClient->isConnected()) {
+      Serial.println("[BLE Scan] Disconnecting from mouse before discovery scan...");
+      pClient->disconnect();
+      delay(200);
+    }
+
     NimBLEScan* pScan = NimBLEDevice::getScan();
     if (pScan && pScan->isScanning()) {
       pScan->stop();

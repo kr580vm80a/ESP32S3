@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 197;
+    const BUILD_VERSION = 198;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3166,11 +3166,9 @@
         const mac = line.substring(14).trim();
         console.log(`[${source} BIND MOUSE] Target locked to ${mac}`);
         setBoundMouseStatus(mac);
-        startBleMouseScan();
       } else if (line.startsWith('OK_UNBIND_MOUSE')) {
         console.log(`[${source} UNBIND MOUSE] Target mouse lock cleared`);
         setBoundMouseStatus('');
-        startBleMouseScan();
       } else if (line.startsWith('TARGET_MOUSE ')) {
         const mac = line.substring(13).trim();
         setBoundMouseStatus(mac);

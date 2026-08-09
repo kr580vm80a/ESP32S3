@@ -160,6 +160,14 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             vTaskDelete(NULL);
         }, "bgAdvTask", 2048, NULL, 1, NULL);
     }
+
+    void onAuthenticationComplete(ble_gap_conn_desc* desc) {
+        if (!desc->sec_state.encrypted) {
+            Serial.println("[BLE Server] Pairing/Encryption failed! PC disconnected or key mismatch.");
+        } else {
+            Serial.println("[BLE Server] Connection paired & encrypted successfully!");
+        }
+    }
 };
 
 // --- BLE Host (Central) Variables ---
@@ -694,7 +702,7 @@ void setup() {
   Serial.println("[BLE] Initializing NimBLE...");
   NimBLEDevice::init("ESP32 KVM Mouse");
   NimBLEDevice::setMTU(512);
-  NimBLEDevice::setSecurityAuth(true, true, true);
+  NimBLEDevice::setSecurityAuth(true, false, true); // Just Works pairing (bonding=true, mitm=false, secure_connections=true)
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
   
   // Setup BLE Server (Peripheral)

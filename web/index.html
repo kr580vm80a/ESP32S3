@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 259;
+    const BUILD_VERSION = 260;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1766,7 +1766,6 @@
 
           const minLeft = Math.min(...items.map(d => d.left));
           const minTop = Math.min(...items.map(d => d.top));
-          const maxBottom = Math.max(...items.map(d => d.bottom));
 
           // Check if this computer group already exists in layout
           const existingGroupScreens = screens.filter(s => s.group === currentDeviceId);
@@ -1787,15 +1786,15 @@
               preservedGroupName = customInputName;
             }
 
-            // Group ALREADY EXISTS: preserve bottom-left coordinates of lowest monitor
+            // Group ALREADY EXISTS: preserve top-left coordinates of top-most monitor
             anchorLayoutY = Math.min(...existingGroupScreens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
-            const lowestMonitors = existingGroupScreens.filter(s => (s.layoutY !== undefined ? s.layoutY : 0) === anchorLayoutY);
-            anchorLayoutX = Math.min(...lowestMonitors.map(s => s.layoutX !== undefined ? s.layoutX : 0));
+            const topmostMonitors = existingGroupScreens.filter(s => (s.layoutY !== undefined ? s.layoutY : 0) === anchorLayoutY);
+            anchorLayoutX = Math.min(...topmostMonitors.map(s => s.layoutX !== undefined ? s.layoutX : 0));
           } else {
             if (customInputName !== '') {
               preservedGroupName = customInputName;
             }
-            // NEW GROUP: align with lowest Y coordinate rectangle across existing screens
+            // NEW GROUP: align with top-most Y coordinate rectangle across existing screens
             if (screens.length > 0) {
               anchorLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
               const maxX = Math.max(...screens.map(s => (s.layoutX !== undefined ? s.layoutX : 0) + s.width));
@@ -1819,7 +1818,7 @@
             infoHtml += `• <b>${d.label}</b>: ${d.width}x${d.height} px<br>`;
 
             const rawRelX = item.left - minLeft;
-            const rawRelY = maxBottom - item.bottom;
+            const rawRelY = item.top - minTop;
 
             const finalLayoutX = anchorLayoutX + rawRelX;
             const finalLayoutY = anchorLayoutY + rawRelY;
@@ -1843,17 +1842,18 @@
           });
           syncActiveLayoutScreens();
 
-          // Synchronize canvas s.x and s.y for ALL screens in layout using global maxLayoutY baseline
+          // Synchronize canvas s.x and s.y for ALL screens in layout using Top-Left (0,0)
           const scale = 0.12;
-          const baseCanvasX = 50;
-          const maxLayoutY = Math.max(...screens.map(s => (s.layoutY !== undefined ? s.layoutY : 0) + s.height));
-          const baseCanvasBottomY = 120 + Math.round(maxLayoutY * scale);
+          const baseCanvasX = 20;
+          const baseCanvasTopY = 20;
+          const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : 0));
+          const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
 
           screens.forEach(s => {
             const ly = s.layoutY !== undefined ? s.layoutY : 0;
-            const lx = s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale);
-            s.x = baseCanvasX + Math.round(lx * scale);
-            s.y = baseCanvasBottomY - Math.round((ly + s.height) * scale);
+            const lx = s.layoutX !== undefined ? s.layoutX : 0;
+            s.x = baseCanvasX + Math.round((lx - minLayoutX) * scale);
+            s.y = baseCanvasTopY + Math.round((ly - minLayoutY) * scale);
           });
 
           setDetectBoxHtml(infoHtml);
@@ -2153,7 +2153,7 @@
       // Compute dynamic fitScale & viewport bounds so ALL screens fit 100% inside canvas
       let fitScale = 0.12;
       let baseCanvasX = 20;
-      let baseCanvasBottomY = canvas.height - 20;
+      let baseCanvasTopY = 20;
 
       if (screens.length > 0) {
         const minLX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / 0.12)));
@@ -2172,7 +2172,7 @@
 
         fitScale = Math.min(0.12, scaleX, scaleY);
         baseCanvasX = marginX;
-        baseCanvasBottomY = canvas.height - marginY;
+        baseCanvasTopY = marginY;
       }
 
       // Lock scale during drag so monitors don't change size while dragging
@@ -2183,7 +2183,7 @@
       }
       const scale = fitScale;
 
-      // Compute relative Cartesian bottom-left coordinates (0,0) baseline for labels
+      // Compute relative Top-Left (0,0) baseline for labels
       const minLayoutX = screens.length > 0 ? Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - baseCanvasX) / scale))) : 0;
       const minLayoutY = screens.length > 0 ? Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0)) : 0;
 
@@ -2197,7 +2197,7 @@
           const cx = baseCanvasX + Math.round((g.layoutPos - minLayoutX) * scale);
           ctx.moveTo(cx, 0); ctx.lineTo(cx, canvas.height);
         } else if (g.type === 'h') {
-          const cy = baseCanvasBottomY - Math.round((g.layoutPos - minLayoutY) * scale);
+          const cy = baseCanvasTopY + Math.round((g.layoutPos - minLayoutY) * scale);
           ctx.moveTo(0, cy); ctx.lineTo(canvas.width, cy);
         }
         ctx.stroke();
@@ -2212,7 +2212,7 @@
         // Auto-fit screen canvas coordinates when not actively dragging
         if (!isDragging) {
           s.x = baseCanvasX + Math.round((lx - minLayoutX) * scale);
-          s.y = baseCanvasBottomY - Math.round((ly - minLayoutY + s.height) * scale);
+          s.y = baseCanvasTopY + Math.round((ly - minLayoutY) * scale);
         }
 
         const sw = s.width * scale;
@@ -2722,7 +2722,7 @@
           const activeScale = dragLockedScale !== null ? dragLockedScale : lastComputedScale;
 
           let deltaLayoutX = Math.round(rawDeltaCanvasX / activeScale);
-          let deltaLayoutY = Math.round(-rawDeltaCanvasY / activeScale);
+          let deltaLayoutY = Math.round(rawDeltaCanvasY / activeScale);
 
           snapGuides = [];
           const SNAP_LAYOUT_DIST = 120; // 120 layout units (~14px on canvas)
@@ -2732,7 +2732,7 @@
           // Compute canvas transform parameters (same formula as draw())
           if (screens.length > 0) {
             const baseCanvasX = 20;
-            const baseCanvasBottomY = canvas.height - 20;
+            const baseCanvasTopY = 20;
 
             const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : 0));
             const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
@@ -2741,8 +2741,8 @@
             function layoutToCanvasX(lx) {
               return baseCanvasX + Math.round((lx - minLayoutX) * activeScale);
             }
-            function layoutToCanvasY(ly, h) {
-              return baseCanvasBottomY - Math.round((ly - minLayoutY + h) * activeScale);
+            function layoutToCanvasY(ly) {
+              return baseCanvasTopY + Math.round((ly - minLayoutY) * activeScale);
             }
 
             function addSnapGuide(type, layoutPos) {
@@ -2757,7 +2757,7 @@
               const glw = g.screen.width;
               const glh = g.screen.height;
 
-              // --- Snap to Global Bottom Baseline (y = 0) ---
+              // --- Snap to Global Top Baseline (y = 0) ---
               if (Math.abs(gly - 0) < SNAP_LAYOUT_DIST) {
                 deltaLayoutY = 0 - g.startLayoutY;
                 addSnapGuide('h', 0);
@@ -2784,7 +2784,7 @@
                   addSnapGuide('v', olx + olw);
                 }
 
-                // Horizontal snapping (Y axis in exact layout units)
+                // Horizontal snapping (Y axis in exact layout units for Top-Left 0,0)
                 if (Math.abs(gly - (oly + olh)) < SNAP_LAYOUT_DIST) {
                   deltaLayoutY = (oly + olh) - g.startLayoutY;
                   addSnapGuide('h', oly + olh);
@@ -2803,7 +2803,7 @@
           }
 
           let targetDeltaX = Math.round(deltaLayoutX * activeScale);
-          let targetDeltaY = Math.round(-deltaLayoutY * activeScale);
+          let targetDeltaY = Math.round(deltaLayoutY * activeScale);
 
           initialDetectedGroup.forEach(g => {
             g.screen.x = g.startX + targetDeltaX;
@@ -2821,21 +2821,13 @@
       if (isDragging || isResizing) {
         const scale = 0.12;
         if (screens.length > 0) {
-          // Normalize baseline (0,0) without floating point scale division quantization error
-          const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale)));
+          // Normalize top-left baseline (0,0)
+          const minLayoutX = Math.min(...screens.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale)));
           const minLayoutY = Math.min(...screens.map(s => s.layoutY !== undefined ? s.layoutY : 0));
 
           screens.forEach(s => {
-            if (s.layoutX !== undefined) {
-              s.layoutX -= minLayoutX;
-            } else {
-              s.layoutX = Math.round((s.x - 50) / scale) - minLayoutX;
-            }
-            if (s.layoutY !== undefined) {
-              s.layoutY -= minLayoutY;
-            } else {
-              s.layoutY = 0;
-            }
+            s.layoutX = (s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale)) - minLayoutX;
+            s.layoutY = (s.layoutY !== undefined ? s.layoutY : 0) - minLayoutY;
           });
 
           // --- Overlap Resolution: push overlapping monitors apart ---

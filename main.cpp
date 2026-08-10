@@ -199,19 +199,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     virtualX += dx;
     virtualY += dy;
 
-    // Boundaries clamping (bounding box around all monitors)
-    long minX = monitors[0].x, maxX = monitors[0].x + monitors[0].width;
-    long minY = monitors[0].y, maxY = monitors[0].y + monitors[0].height;
-    for (int i = 1; i < monitorCount; i++) {
-        if (monitors[i].x < minX) minX = monitors[i].x;
-        if (monitors[i].x + monitors[i].width > maxX) maxX = monitors[i].x + monitors[i].width;
-        if (monitors[i].y < minY) minY = monitors[i].y;
-        if (monitors[i].y + monitors[i].height > maxY) maxY = monitors[i].y + monitors[i].height;
-    }
-    if (virtualX < minX) virtualX = minX;
-    if (virtualX >= maxX) virtualX = maxX - 1;
-    if (virtualY < minY) virtualY = minY;
-    if (virtualY >= maxY) virtualY = maxY - 1;
+    MonitorConfig& currentMon = monitors[currentMonitorIndex];
 
     // Find which monitor we are currently in
     int newMonitorIndex = -1;
@@ -222,8 +210,59 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             break;
         }
     }
+
+    // Edge Push Detection: When cursor pushes past the edge of current monitor into PC boundary
     if (newMonitorIndex == -1) {
-        newMonitorIndex = currentMonitorIndex;
+        // Pushing UP past top edge of current monitor
+        if (dy < 0 && virtualY < currentMon.y) {
+            for (int i = 0; i < monitorCount; i++) {
+                if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
+                    newMonitorIndex = i;
+                    virtualY = monitors[i].y + monitors[i].height - 50;
+                    virtualX = constrain(virtualX, (long)monitors[i].x, (long)(monitors[i].x + monitors[i].width - 1));
+                    break;
+                }
+            }
+        }
+        // Pushing DOWN past bottom edge of current monitor
+        else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
+            for (int i = 0; i < monitorCount; i++) {
+                if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
+                    newMonitorIndex = i;
+                    virtualY = monitors[i].y + 50;
+                    virtualX = constrain(virtualX, (long)monitors[i].x, (long)(monitors[i].x + monitors[i].width - 1));
+                    break;
+                }
+            }
+        }
+        // Pushing LEFT past left edge of current monitor
+        else if (dx < 0 && virtualX < currentMon.x) {
+            for (int i = 0; i < monitorCount; i++) {
+                if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
+                    newMonitorIndex = i;
+                    virtualX = monitors[i].x + monitors[i].width - 50;
+                    virtualY = constrain(virtualY, (long)monitors[i].y, (long)(monitors[i].y + monitors[i].height - 1));
+                    break;
+                }
+            }
+        }
+        // Pushing RIGHT past right edge of current monitor
+        else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
+            for (int i = 0; i < monitorCount; i++) {
+                if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
+                    newMonitorIndex = i;
+                    virtualX = monitors[i].x + 50;
+                    virtualY = constrain(virtualY, (long)monitors[i].y, (long)(monitors[i].y + monitors[i].height - 1));
+                    break;
+                }
+            }
+        }
+
+        if (newMonitorIndex == -1) {
+            newMonitorIndex = currentMonitorIndex;
+            virtualX = constrain(virtualX, (long)currentMon.x, (long)(currentMon.x + currentMon.width - 1));
+            virtualY = constrain(virtualY, (long)currentMon.y, (long)(currentMon.y + currentMon.height - 1));
+        }
     }
     
     String targetMac = monitors[newMonitorIndex].mac;

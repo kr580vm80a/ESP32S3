@@ -87,10 +87,39 @@ const uint8_t hidReportMap[] = {
     0xC0               // End Collection
 };
 
-static NimBLEClient* pClient = nullptr;
+void logPrint(const char* format, ...) {
+    unsigned long ms = millis();
+    unsigned long seconds = ms / 1000;
+    unsigned long millisec = ms % 1000;
+    unsigned long minutes = (seconds / 60) % 60;
+    unsigned long hours = (seconds / 3600) % 24;
+    
+    char timeStr[24];
+    snprintf(timeStr, sizeof(timeStr), "[%02lu:%02lu:%02lu.%03lu] ", hours, minutes, seconds % 60, millisec);
+    
+    char buffer[384];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+
+    Serial.print(timeStr);
+    Serial.print(buffer);
+#if CONFIG_IDF_TARGET_ESP32S3
+    USBSerial.print(timeStr);
+    USBSerial.print(buffer);
+#endif
+}
+
 static String targetMouseMac = "";
 static bool isScanningForMice = false;
 static bool connected = false;
+static NimBLEClient* pClient = nullptr;
+static NimBLEAdvertisedDevice* advDevice = nullptr;
+static bool doConnect = false;
+
+static NimBLEUUID hidServiceUUID("1812");
+static NimBLEUUID reportCharUUID("2a4d");
 
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
@@ -184,14 +213,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 };
 
-// --- BLE Host (Central) Variables ---
-static NimBLEAdvertisedDevice* advDevice;
-
-
-static bool doConnect = false;
-
-static NimBLEUUID hidServiceUUID("1812");
-static NimBLEUUID reportCharUUID("2a4d");
+// --- BLE Host (Central) Functions ---
 
 void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t scroll, int8_t hScroll) {
     if (monitorCount == 0) return;
@@ -329,7 +351,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac)) {
             lastKvmSwitchTime = millis();
         }
-        Serial.printf("[KVM SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
+        logPrint("[KVM SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
                       virtualX, virtualY, newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(),
                       monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
                       monitors[newMonitorIndex].y, monitors[newMonitorIndex].y + monitors[newMonitorIndex].height,
@@ -374,9 +396,9 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         int8_t scroll = (int8_t)pData[5];
         int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
 
-        Serial.printf("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VScroll: %d, HScroll: %d\n",
-                      pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
-                      buttons, x, y, scroll, hScroll);
+        logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VScroll: %d, HScroll: %d\n",
+                 pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
+                 buttons, x, y, scroll, hScroll);
 
         updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
     }
@@ -392,16 +414,16 @@ void startMouseReconnectTask() {
     if (reconnTaskHandle != NULL) return;
 
     xTaskCreate([](void* param) {
-        vTaskDelay(pdMS_TO_TICKS(1500));
+        vTaskDelay(pdMS_TO_TICKS(1000));
         int retries = 0;
         while (!connected && targetMouseMac.length() > 0 && !isScanningForMice) {
-            Serial.printf("[BLE Host] Auto-reconnecting to bound mouse (%s) [attempt %d]...\n", targetMouseMac.c_str(), retries + 1);
+            logPrint("[BLE Host] Auto-reconnecting to bound mouse (%s) [attempt %d]...\n", targetMouseMac.c_str(), retries + 1);
             if (connectToServer()) {
-                Serial.println("[BLE Host] Reconnected to mouse successfully!");
+                logPrint("[BLE Host] Reconnected to mouse successfully!\n");
                 break;
             }
             retries++;
-            vTaskDelay(pdMS_TO_TICKS(3000));
+            vTaskDelay(pdMS_TO_TICKS(2000));
         }
         reconnTaskHandle = NULL;
         vTaskDelete(NULL);
@@ -411,11 +433,11 @@ void startMouseReconnectTask() {
 // Callback for BLE Connection Status
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
-        Serial.println("[BLE Host] Connected to mouse!");
+        logPrint("[BLE Host] Connected to mouse!\n");
         connected = true;
     }
     void onDisconnect(NimBLEClient* pClient) {
-        Serial.println("[BLE Host] Disconnected from mouse!");
+        logPrint("[BLE Host] Disconnected from mouse!\n");
         connected = false;
         startMouseReconnectTask();
     }
@@ -498,11 +520,17 @@ bool connectToServer() {
         return false;
     }
 
-    Serial.println("[BLE Host] Connected! Securing connection (Pairing)...");
+    logPrint("[BLE Host] Connected! Securing connection (Pairing)...\n");
     if (!pClient->secureConnection()) {
-        Serial.println("[BLE Host] Failed to secure connection. Mouse might reject it.");
+        logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...\n");
+        delay(100);
+        if (!pClient->secureConnection()) {
+            logPrint("[BLE Host] Secure connection retry failed. Proceeding with service discovery...\n");
+        } else {
+            logPrint("[BLE Host] Connection secured on retry!\n");
+        }
     } else {
-        Serial.println("[BLE Host] Connection secured!");
+        logPrint("[BLE Host] Connection secured!\n");
     }
 
     NimBLERemoteService* pService = pClient->getService(hidServiceUUID);
@@ -512,7 +540,7 @@ bool connectToServer() {
             if (pChar->getUUID() == reportCharUUID) {
                 if(pChar->canNotify()) {
                     pChar->subscribe(true, notifyCallback);
-                    Serial.println("[BLE Host] Subscribed to HID report!");
+                    logPrint("[BLE Host] Subscribed to HID report!\n");
                 }
             }
         }

@@ -199,27 +199,31 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     virtualX += dx;
     virtualY += dy;
 
-    // Boundaries clamping (simple bounding box around all monitors)
-    long minX = 0, maxX = 0, minY = 0, maxY = 0;
-    for (int i = 0; i < monitorCount; i++) {
+    // Boundaries clamping (bounding box around all monitors)
+    long minX = monitors[0].x, maxX = monitors[0].x + monitors[0].width;
+    long minY = monitors[0].y, maxY = monitors[0].y + monitors[0].height;
+    for (int i = 1; i < monitorCount; i++) {
         if (monitors[i].x < minX) minX = monitors[i].x;
         if (monitors[i].x + monitors[i].width > maxX) maxX = monitors[i].x + monitors[i].width;
         if (monitors[i].y < minY) minY = monitors[i].y;
         if (monitors[i].y + monitors[i].height > maxY) maxY = monitors[i].y + monitors[i].height;
     }
     if (virtualX < minX) virtualX = minX;
-    if (virtualX > maxX) virtualX = maxX;
+    if (virtualX >= maxX) virtualX = maxX - 1;
     if (virtualY < minY) virtualY = minY;
-    if (virtualY > maxY) virtualY = maxY;
+    if (virtualY >= maxY) virtualY = maxY - 1;
 
     // Find which monitor we are currently in
-    int newMonitorIndex = currentMonitorIndex;
+    int newMonitorIndex = -1;
     for (int i = 0; i < monitorCount; i++) {
-        if (virtualX >= monitors[i].x && virtualX <= monitors[i].x + monitors[i].width &&
-            virtualY >= monitors[i].y && virtualY <= monitors[i].y + monitors[i].height) {
+        if (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width &&
+            virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height) {
             newMonitorIndex = i;
             break;
         }
+    }
+    if (newMonitorIndex == -1) {
+        newMonitorIndex = currentMonitorIndex;
     }
     
     String targetMac = monitors[newMonitorIndex].mac;
@@ -235,8 +239,11 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     }
 
     if (newMonitorIndex != currentMonitorIndex) {
-        Serial.printf("[KVM SWITCH] Cursor crossed to Monitor #%d (ID: %s) | Target PC: %s | conn_handle: %d\n",
-                      newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(), targetMac.c_str(), targetConnHandle);
+        Serial.printf("[KVM SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
+                      virtualX, virtualY, newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(),
+                      monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
+                      monitors[newMonitorIndex].y, monitors[newMonitorIndex].y + monitors[newMonitorIndex].height,
+                      targetMac.c_str(), targetConnHandle);
         currentMonitorIndex = newMonitorIndex;
     }
 

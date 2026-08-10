@@ -383,6 +383,7 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
 }
 
 bool connectToServer();
+void sendConfigResponse(const String& response);
 
 static TaskHandle_t reconnTaskHandle = NULL;
 
@@ -441,10 +442,43 @@ bool connectToServer() {
         Serial.printf("[BLE Host] Connecting directly to target MAC (Public): %s...\n", targetMouseMac.c_str());
         NimBLEAddress addrPublic(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
         connRes = pClient->connect(addrPublic);
-        if (!connRes) {
-            Serial.printf("[BLE Host] Public connection failed. Trying target MAC (Random): %s...\n", targetMouseMac.c_str());
-            NimBLEAddress addrRandom(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
-            connRes = pClient->connect(addrRandom);
+        if (!connRes && targetMouseMac.length() >= 14) {
+            String macPrefix = targetMouseMac.substring(0, 14);
+            macPrefix.toLowerCase();
+            Serial.printf("[BLE Host] Connection to %s failed. Auto-resolving rotated MAC with prefix (%s*)...\n", targetMouseMac.c_str(), macPrefix.c_str());
+
+            NimBLEScan* pScan = NimBLEDevice::getScan();
+            if (pScan) {
+                pScan->setActiveScan(true);
+                pScan->setInterval(100);
+                pScan->setWindow(99);
+                NimBLEScanResults results = pScan->start(2, false);
+                String foundMac = "";
+                for (int i = 0; i < results.getCount(); i++) {
+                    NimBLEAdvertisedDevice dev = results.getDevice(i);
+                    String devMac = dev.getAddress().toString().c_str();
+                    devMac.toLowerCase();
+                    String devName = dev.getName().c_str();
+
+                    if (devMac.startsWith(macPrefix) || devName.equalsIgnoreCase("MX Master 3S") || devName.indexOf("MX Master") != -1) {
+                        foundMac = devMac;
+                        Serial.printf("[BLE Host] AUTO-RESOLVED rotated mouse MAC: %s (was %s)!\n", foundMac.c_str(), targetMouseMac.c_str());
+                        break;
+                    }
+                }
+                pScan->clearResults();
+
+                if (foundMac.length() > 0 && foundMac != targetMouseMac) {
+                    targetMouseMac = foundMac;
+                    preferences.begin(NVS_NAMESPACE, false);
+                    preferences.putString(NVS_KEY_MOUSE_MAC, targetMouseMac);
+                    preferences.end();
+                    sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
+
+                    NimBLEAddress newRandAddr(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
+                    connRes = pClient->connect(newRandAddr);
+                }
+            }
         }
     }
 

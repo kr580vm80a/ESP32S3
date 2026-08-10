@@ -387,6 +387,27 @@ void sendConfigResponse(const String& response);
 
 static TaskHandle_t reconnTaskHandle = NULL;
 
+void startMouseReconnectTask() {
+    if (targetMouseMac.length() == 0 || isScanningForMice || connected) return;
+    if (reconnTaskHandle != NULL) return;
+
+    xTaskCreate([](void* param) {
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        int retries = 0;
+        while (!connected && targetMouseMac.length() > 0 && !isScanningForMice) {
+            Serial.printf("[BLE Host] Auto-reconnecting to bound mouse (%s) [attempt %d]...\n", targetMouseMac.c_str(), retries + 1);
+            if (connectToServer()) {
+                Serial.println("[BLE Host] Reconnected to mouse successfully!");
+                break;
+            }
+            retries++;
+            vTaskDelay(pdMS_TO_TICKS(3000));
+        }
+        reconnTaskHandle = NULL;
+        vTaskDelete(NULL);
+    }, "mouseReconnectTask", 4096, NULL, 1, &reconnTaskHandle);
+}
+
 // Callback for BLE Connection Status
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
@@ -396,27 +417,7 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     void onDisconnect(NimBLEClient* pClient) {
         Serial.println("[BLE Host] Disconnected from mouse!");
         connected = false;
-        if (targetMouseMac.length() > 0 && !isScanningForMice) {
-            if (reconnTaskHandle != NULL) {
-                vTaskDelete(reconnTaskHandle);
-                reconnTaskHandle = NULL;
-            }
-            xTaskCreate([](void* param) {
-                vTaskDelay(pdMS_TO_TICKS(2000));
-                int retries = 0;
-                while (!connected && targetMouseMac.length() > 0 && !isScanningForMice && retries < 60) {
-                    Serial.printf("[BLE Host] Auto-reconnecting to bound mouse (%s) [attempt %d]...\n", targetMouseMac.c_str(), retries + 1);
-                    if (connectToServer()) {
-                        Serial.println("[BLE Host] Reconnected to mouse successfully!");
-                        break;
-                    }
-                    retries++;
-                    vTaskDelay(pdMS_TO_TICKS(3000));
-                }
-                reconnTaskHandle = NULL;
-                vTaskDelete(NULL);
-            }, "mouseReconnectTask", 4096, NULL, 1, &reconnTaskHandle);
-        }
+        startMouseReconnectTask();
     }
 };
 
@@ -442,10 +443,15 @@ bool connectToServer() {
         Serial.printf("[BLE Host] Connecting directly to target MAC (Public): %s...\n", targetMouseMac.c_str());
         NimBLEAddress addrPublic(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
         connRes = pClient->connect(addrPublic);
+        if (!connRes) {
+            NimBLEAddress addrRandom(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
+            connRes = pClient->connect(addrRandom);
+        }
+
         if (!connRes && targetMouseMac.length() >= 14) {
             String macPrefix = targetMouseMac.substring(0, 14);
             macPrefix.toLowerCase();
-            Serial.printf("[BLE Host] Connection to %s failed. Auto-resolving rotated MAC with prefix (%s*)...\n", targetMouseMac.c_str(), macPrefix.c_str());
+            Serial.printf("[BLE Host] Direct connection to %s failed. Auto-resolving rotated MAC with prefix (%s*)...\n", targetMouseMac.c_str(), macPrefix.c_str());
 
             NimBLEScan* pScan = NimBLEDevice::getScan();
             if (pScan) {
@@ -475,8 +481,12 @@ bool connectToServer() {
                     preferences.end();
                     sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
 
-                    NimBLEAddress newRandAddr(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
-                    connRes = pClient->connect(newRandAddr);
+                    NimBLEAddress newPubAddr(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
+                    connRes = pClient->connect(newPubAddr);
+                    if (!connRes) {
+                        NimBLEAddress newRandAddr(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
+                        connRes = pClient->connect(newRandAddr);
+                    }
                 }
             }
         }
@@ -945,16 +955,9 @@ void setup() {
   pAdvertising->start();
   Serial.println("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
 
-  // If targetMouseMac is bound, attempt direct non-blocking connection at startup
+  // If targetMouseMac is bound, start persistent background reconnect task
   if (targetMouseMac.length() > 0 && !connected) {
-    xTaskCreate([](void* param) {
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      if (targetMouseMac.length() > 0 && !connected) {
-        Serial.printf("[BLE Host] Initiating direct MAC connection for bound mouse (%s)...\n", targetMouseMac.c_str());
-        connectToServer();
-      }
-      vTaskDelete(NULL);
-    }, "mouseConnectTask", 4096, NULL, 1, NULL);
+    startMouseReconnectTask();
   }
 }
 

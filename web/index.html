@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 257;
+    const BUILD_VERSION = 258;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1880,7 +1880,7 @@
           • Device: <b>${currentDeviceName}</b><br>
           • Screen Size: <b>${screenW} × ${screenH} px</b><br>
           • Viewport: <sup>${rawW}×${rawH} (DPR: ${ratio.toFixed(1)})</sup>
-        `;
+        `);
 
         const pcInput = document.getElementById('pcNameInput');
         if (pcInput) pcInput.value = currentDeviceName;
@@ -1926,7 +1926,7 @@
           🎯 <span>Detected 2 displays (${osLabel}):</span><br>
           • Primary: <b>${preset.width}x${preset.height} px</b><br>
           • Secondary: <b>1920x1080 px</b>
-        `;
+        `);
 
         screens = [
           {
@@ -1961,7 +1961,7 @@
           🎯 <span>Physical Resolution (${osLabel}):</span><br>
           • Device: <b>${currentDeviceName}</b><br>
           • Preset: <b>${preset.width} x ${preset.height} px</b>
-        `;
+        `);
 
         screens = [{
           id: Date.now(),

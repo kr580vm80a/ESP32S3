@@ -457,16 +457,22 @@ bool connectToServer() {
         return true;
     }
 
+    bool wasAdvertising = false;
+    if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
+        wasAdvertising = true;
+        NimBLEDevice::getAdvertising()->stop();
+    }
+
     bool connRes = false;
     if (advDevice) {
-        Serial.printf("[BLE Host] Connecting to advertised device: %s...\n", advDevice->getAddress().toString().c_str());
+        logPrint("[BLE Host] Connecting to advertised device: %s...\n", advDevice->getAddress().toString().c_str());
         connRes = pClient->connect(advDevice);
     } else {
-        Serial.printf("[BLE Host] Connecting directly to target MAC (Random): %s...\n", targetMouseMac.c_str());
+        logPrint("[BLE Host] Connecting directly to target MAC (Random): %s...\n", targetMouseMac.c_str());
         NimBLEAddress addrRandom(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
         connRes = pClient->connect(addrRandom);
         if (!connRes) {
-            Serial.printf("[BLE Host] Random connection failed. Trying target MAC (Public): %s...\n", targetMouseMac.c_str());
+            logPrint("[BLE Host] Random connection failed. Trying target MAC (Public): %s...\n", targetMouseMac.c_str());
             NimBLEAddress addrPublic(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
             connRes = pClient->connect(addrPublic);
         }
@@ -474,7 +480,7 @@ bool connectToServer() {
         if (!connRes && targetMouseMac.length() >= 14) {
             String macPrefix = targetMouseMac.substring(0, 14);
             macPrefix.toLowerCase();
-            Serial.printf("[BLE Host] Direct connection to %s failed. Auto-resolving rotated MAC with prefix (%s*)...\n", targetMouseMac.c_str(), macPrefix.c_str());
+            logPrint("[BLE Host] Direct connection to %s failed. Auto-resolving rotated MAC with prefix (%s*)...\n", targetMouseMac.c_str(), macPrefix.c_str());
 
             NimBLEScan* pScan = NimBLEDevice::getScan();
             if (pScan) {
@@ -491,7 +497,7 @@ bool connectToServer() {
 
                     if (devMac.startsWith(macPrefix) || devName.equalsIgnoreCase("MX Master 3S") || devName.indexOf("MX Master") != -1) {
                         foundMac = devMac;
-                        Serial.printf("[BLE Host] AUTO-RESOLVED rotated mouse MAC: %s (was %s)!\n", foundMac.c_str(), targetMouseMac.c_str());
+                        logPrint("[BLE Host] AUTO-RESOLVED rotated mouse MAC: %s (was %s)!\n", foundMac.c_str(), targetMouseMac.c_str());
                         break;
                     }
                 }
@@ -513,6 +519,10 @@ bool connectToServer() {
                 }
             }
         }
+    }
+
+    if (wasAdvertising && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+        NimBLEDevice::getAdvertising()->start();
     }
 
     if (!connRes) {

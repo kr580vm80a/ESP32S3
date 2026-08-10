@@ -222,9 +222,23 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         }
     }
     
-    currentMonitorIndex = newMonitorIndex;
-    String targetMac = monitors[currentMonitorIndex].mac;
+    String targetMac = monitors[newMonitorIndex].mac;
     targetMac.toLowerCase();
+    targetMac.trim();
+
+    uint16_t targetConnHandle = 0;
+    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active && kvmClients[i].mac.equalsIgnoreCase(targetMac)) {
+            targetConnHandle = kvmClients[i].conn_id;
+            break;
+        }
+    }
+
+    if (newMonitorIndex != currentMonitorIndex) {
+        Serial.printf("[KVM SWITCH] Cursor crossed to Monitor #%d (ID: %s) | Target PC: %s | conn_handle: %d\n",
+                      newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(), targetMac.c_str(), targetConnHandle);
+        currentMonitorIndex = newMonitorIndex;
+    }
 
     // Send Standard HID Report (5 bytes: Buttons, dX, dY, VScroll, HScroll)
     uint8_t report[5] = { 
@@ -235,8 +249,12 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         (uint8_t)constrain(hScroll, -127, 127) 
     };
 
-    inputChar->setValue(report, sizeof(report));
-    inputChar->notify();
+    if (targetConnHandle != 0) {
+        inputChar->notify(report, sizeof(report), targetConnHandle);
+    } else {
+        inputChar->setValue(report, sizeof(report));
+        inputChar->notify();
+    }
 }
 
 // Callback when HID data is received from the mouse

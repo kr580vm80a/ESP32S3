@@ -158,7 +158,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         if (activeCount < MAX_KVM_CLIENTS) {
             xTaskCreate([](void* param) {
                 vTaskDelay(pdMS_TO_TICKS(1500));
-                if (NimBLEDevice::getAdvertising() && !isConnectingToMouse) {
+                if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
                     logPrint("[BLE Server] Resuming advertising for additional PC...\n");
                     NimBLEDevice::getAdvertising()->start();
                 }
@@ -524,13 +524,19 @@ bool connectToServer() {
         }
     }
 
-    if (wasAdvertising && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+    isConnectingToMouse = false;
+
+    int activeCount = 0;
+    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active) activeCount++;
+    }
+    if (activeCount < MAX_KVM_CLIENTS && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+        logPrint("[BLE Server] Resuming advertising for additional PC...\n");
         NimBLEDevice::getAdvertising()->start();
     }
 
     if (!connRes) {
         logPrint("[BLE Host] Connection attempt failed (mouse not advertising or out of range).\n");
-        isConnectingToMouse = false;
         return false;
     }
 

@@ -250,7 +250,10 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     };
 
     if (targetConnHandle != 0) {
-        inputChar->notify(report, sizeof(report), targetConnHandle);
+        os_mbuf *om = ble_hs_mbuf_from_flat(report, sizeof(report));
+        if (om != NULL) {
+            ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+        }
     } else {
         inputChar->setValue(report, sizeof(report));
         inputChar->notify();

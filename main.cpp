@@ -471,9 +471,9 @@ bool connectToServer() {
         NimBLEScan* pScan = NimBLEDevice::getScan();
         if (pScan) {
             pScan->setActiveScan(true);
-            pScan->setInterval(60);
-            pScan->setWindow(59);
-            NimBLEScanResults results = pScan->start(1, false);
+            pScan->setInterval(160);
+            pScan->setWindow(160);
+            NimBLEScanResults results = pScan->start(2, false);
             String macPrefix = targetMouseMac.length() >= 14 ? targetMouseMac.substring(0, 14) : "";
             macPrefix.toLowerCase();
             for (int i = 0; i < results.getCount(); i++) {
@@ -504,14 +504,8 @@ bool connectToServer() {
         logPrint("[BLE Host] Connecting directly to advertised device: %s...\n", advDevice->getAddress().toString().c_str());
         connRes = pClient->connect(advDevice);
     } else {
-        logPrint("[BLE Host] Fast scan missed mouse. Connecting directly to MAC (Random): %s...\n", targetMouseMac.c_str());
-        NimBLEAddress addrRandom(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
-        connRes = pClient->connect(addrRandom);
-        if (!connRes) {
-            logPrint("[BLE Host] Random connection failed. Trying target MAC (Public): %s...\n", targetMouseMac.c_str());
-            NimBLEAddress addrPublic(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
-            connRes = pClient->connect(addrPublic);
-        }
+        logPrint("[BLE Host] Mouse not advertising yet (retrying in background loop)...\n");
+        connRes = false;
     }
 
     isConnectingToMouse = false;

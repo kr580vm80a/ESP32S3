@@ -215,46 +215,86 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     if (newMonitorIndex == -1) {
         // Pushing UP past top edge of current monitor
         if (dy < 0 && virtualY < currentMon.y) {
+            int bestIdx = -1;
+            long bestScore = 9999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    newMonitorIndex = i;
-                    virtualY = monitors[i].y + monitors[i].height - 50;
-                    virtualX = constrain(virtualX, (long)monitors[i].x, (long)(monitors[i].x + monitors[i].width - 1));
-                    break;
+                    bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
+                    long yDist = abs(monitors[i].y - currentMon.y);
+                    long score = yDist - (xOverlap ? 100000 : 0);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestIdx = i;
+                    }
                 }
+            }
+            if (bestIdx != -1) {
+                newMonitorIndex = bestIdx;
+                virtualY = monitors[bestIdx].y + monitors[bestIdx].height - 50;
+                virtualX = constrain(virtualX, (long)monitors[bestIdx].x, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 1));
             }
         }
         // Pushing DOWN past bottom edge of current monitor
         else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
+            int bestIdx = -1;
+            long bestScore = 9999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    newMonitorIndex = i;
-                    virtualY = monitors[i].y + 50;
-                    virtualX = constrain(virtualX, (long)monitors[i].x, (long)(monitors[i].x + monitors[i].width - 1));
-                    break;
+                    bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
+                    long yDist = abs(monitors[i].y - currentMon.y);
+                    long score = yDist - (xOverlap ? 100000 : 0);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestIdx = i;
+                    }
                 }
+            }
+            if (bestIdx != -1) {
+                newMonitorIndex = bestIdx;
+                virtualY = monitors[bestIdx].y + 50;
+                virtualX = constrain(virtualX, (long)monitors[bestIdx].x, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 1));
             }
         }
         // Pushing LEFT past left edge of current monitor
         else if (dx < 0 && virtualX < currentMon.x) {
+            int bestIdx = -1;
+            long bestScore = 9999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    newMonitorIndex = i;
-                    virtualX = monitors[i].x + monitors[i].width - 50;
-                    virtualY = constrain(virtualY, (long)monitors[i].y, (long)(monitors[i].y + monitors[i].height - 1));
-                    break;
+                    bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
+                    long xDist = abs(monitors[i].x - currentMon.x);
+                    long score = xDist - (yOverlap ? 100000 : 0);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestIdx = i;
+                    }
                 }
+            }
+            if (bestIdx != -1) {
+                newMonitorIndex = bestIdx;
+                virtualX = monitors[bestIdx].x + monitors[bestIdx].width - 50;
+                virtualY = constrain(virtualY, (long)monitors[bestIdx].y, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 1));
             }
         }
         // Pushing RIGHT past right edge of current monitor
         else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
+            int bestIdx = -1;
+            long bestScore = 9999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    newMonitorIndex = i;
-                    virtualX = monitors[i].x + 50;
-                    virtualY = constrain(virtualY, (long)monitors[i].y, (long)(monitors[i].y + monitors[i].height - 1));
-                    break;
+                    bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
+                    long xDist = abs(monitors[i].x - currentMon.x);
+                    long score = xDist - (yOverlap ? 100000 : 0);
+                    if (score < bestScore) {
+                        bestScore = score;
+                        bestIdx = i;
+                    }
                 }
+            }
+            if (bestIdx != -1) {
+                newMonitorIndex = bestIdx;
+                virtualX = monitors[bestIdx].x + 50;
+                virtualY = constrain(virtualY, (long)monitors[bestIdx].y, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 1));
             }
         }
 

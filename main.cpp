@@ -266,6 +266,8 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
 
 bool connectToServer();
 
+static TaskHandle_t reconnTaskHandle = NULL;
+
 // Callback for BLE Connection Status
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
@@ -276,6 +278,10 @@ class ClientCallbacks : public NimBLEClientCallbacks {
         Serial.println("[BLE Host] Disconnected from mouse!");
         connected = false;
         if (targetMouseMac.length() > 0 && !isScanningForMice) {
+            if (reconnTaskHandle != NULL) {
+                vTaskDelete(reconnTaskHandle);
+                reconnTaskHandle = NULL;
+            }
             xTaskCreate([](void* param) {
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 int retries = 0;
@@ -288,8 +294,9 @@ class ClientCallbacks : public NimBLEClientCallbacks {
                     retries++;
                     vTaskDelay(pdMS_TO_TICKS(3000));
                 }
+                reconnTaskHandle = NULL;
                 vTaskDelete(NULL);
-            }, "mouseReconnectTask", 4096, NULL, 1, NULL);
+            }, "mouseReconnectTask", 4096, NULL, 1, &reconnTaskHandle);
         }
     }
 };
@@ -632,12 +639,17 @@ void processCommand(String input) {
 
     isScanningForMice = true;
 
-    // Disconnect from mouse if currently connected to avoid dual-role GATT conflict
+    // Cancel any background reconnect task and disconnect mouse to free radio
+    if (reconnTaskHandle != NULL) {
+      Serial.println("[BLE Scan] Cancelling background mouseReconnectTask for discovery scan...");
+      vTaskDelete(reconnTaskHandle);
+      reconnTaskHandle = NULL;
+    }
     if (pClient && pClient->isConnected()) {
       Serial.println("[BLE Scan] Disconnecting from mouse before discovery scan...");
       pClient->disconnect();
-      delay(300);
     }
+    delay(200);
 
     NimBLEScan* pScan = NimBLEDevice::getScan();
     if (pScan) {
@@ -670,6 +682,10 @@ void processCommand(String input) {
     targetMouseMac = mac;
     sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
 
+    if (reconnTaskHandle != NULL) {
+      vTaskDelete(reconnTaskHandle);
+      reconnTaskHandle = NULL;
+    }
     if (pClient && pClient->isConnected()) {
       pClient->disconnect();
     }
@@ -681,6 +697,13 @@ void processCommand(String input) {
     preferences.remove(NVS_KEY_MOUSE_MAC);
     preferences.end();
     targetMouseMac = "";
+    if (reconnTaskHandle != NULL) {
+      vTaskDelete(reconnTaskHandle);
+      reconnTaskHandle = NULL;
+    }
+    if (pClient && pClient->isConnected()) {
+      pClient->disconnect();
+    }
     sendConfigResponse("OK_UNBIND_MOUSE");
   } else if (input == "GET_TARGET_MOUSE") {
     sendConfigResponse("TARGET_MOUSE " + targetMouseMac);

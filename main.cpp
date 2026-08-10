@@ -440,12 +440,13 @@ bool connectToServer() {
         Serial.printf("[BLE Host] Connecting to advertised device: %s...\n", advDevice->getAddress().toString().c_str());
         connRes = pClient->connect(advDevice);
     } else {
-        Serial.printf("[BLE Host] Connecting directly to target MAC (Public): %s...\n", targetMouseMac.c_str());
-        NimBLEAddress addrPublic(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
-        connRes = pClient->connect(addrPublic);
+        Serial.printf("[BLE Host] Connecting directly to target MAC (Random): %s...\n", targetMouseMac.c_str());
+        NimBLEAddress addrRandom(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
+        connRes = pClient->connect(addrRandom);
         if (!connRes) {
-            NimBLEAddress addrRandom(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
-            connRes = pClient->connect(addrRandom);
+            Serial.printf("[BLE Host] Random connection failed. Trying target MAC (Public): %s...\n", targetMouseMac.c_str());
+            NimBLEAddress addrPublic(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
+            connRes = pClient->connect(addrPublic);
         }
 
         if (!connRes && targetMouseMac.length() >= 14) {
@@ -481,11 +482,11 @@ bool connectToServer() {
                     preferences.end();
                     sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
 
-                    NimBLEAddress newPubAddr(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
-                    connRes = pClient->connect(newPubAddr);
+                    NimBLEAddress newRandAddr(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
+                    connRes = pClient->connect(newRandAddr);
                     if (!connRes) {
-                        NimBLEAddress newRandAddr(targetMouseMac.c_str(), BLE_ADDR_RANDOM);
-                        connRes = pClient->connect(newRandAddr);
+                        NimBLEAddress newPubAddr(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
+                        connRes = pClient->connect(newPubAddr);
                     }
                 }
             }

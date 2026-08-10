@@ -216,13 +216,16 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         // Pushing UP past top edge of current monitor
         if (dy < 0 && virtualY < currentMon.y) {
             int bestIdx = -1;
+            long minScore = 99999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    if (monitors[i].id.indexOf("S2721DS") != -1 || monitors[i].id.indexOf("DELL") != -1) {
+                    bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
+                    long dist = abs((monitors[i].y + monitors[i].height) - currentMon.y);
+                    long score = dist + (xOverlap ? 0 : 100000);
+                    if (score < minScore) {
+                        minScore = score;
                         bestIdx = i;
-                        break;
                     }
-                    if (bestIdx == -1) bestIdx = i;
                 }
             }
             if (bestIdx != -1) {
@@ -234,10 +237,16 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         // Pushing DOWN past bottom edge of current monitor
         else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
             int bestIdx = -1;
+            long minScore = 99999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    bestIdx = i;
-                    break;
+                    bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
+                    long dist = abs(monitors[i].y - (currentMon.y + currentMon.height));
+                    long score = dist + (xOverlap ? 0 : 100000);
+                    if (score < minScore) {
+                        minScore = score;
+                        bestIdx = i;
+                    }
                 }
             }
             if (bestIdx != -1) {
@@ -249,10 +258,16 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         // Pushing LEFT past left edge of current monitor
         else if (dx < 0 && virtualX < currentMon.x) {
             int bestIdx = -1;
+            long minScore = 99999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    bestIdx = i;
-                    break;
+                    bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
+                    long dist = abs((monitors[i].x + monitors[i].width) - currentMon.x);
+                    long score = dist + (yOverlap ? 0 : 100000);
+                    if (score < minScore) {
+                        minScore = score;
+                        bestIdx = i;
+                    }
                 }
             }
             if (bestIdx != -1) {
@@ -264,10 +279,16 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         // Pushing RIGHT past right edge of current monitor
         else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
             int bestIdx = -1;
+            long minScore = 99999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    bestIdx = i;
-                    break;
+                    bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
+                    long dist = abs(monitors[i].x - (currentMon.x + currentMon.width));
+                    long score = dist + (yOverlap ? 0 : 100000);
+                    if (score < minScore) {
+                        minScore = score;
+                        bestIdx = i;
+                    }
                 }
             }
             if (bestIdx != -1) {

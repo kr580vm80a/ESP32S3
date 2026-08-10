@@ -14,6 +14,7 @@ Preferences preferences;
 const char* NVS_NAMESPACE = "kvm_config";
 const char* NVS_KEY_LAYOUT = "layout";
 const char* NVS_KEY_MOUSE_MAC = "mouse_mac";
+const char* NVS_KEY_MOUSE_NAME = "mouse_name";
 
 // Structure to store monitor configuration
 struct MonitorConfig {
@@ -112,6 +113,7 @@ void logPrint(const char* format, ...) {
 }
 
 static String targetMouseMac = "";
+static String targetMouseName = "";
 static bool isScanningForMice = false;
 static bool connected = false;
 static bool isConnectingToMouse = false;
@@ -632,20 +634,26 @@ void loadConfiguration() {
   preferences.begin(NVS_NAMESPACE, true);
   String json = preferences.getString(NVS_KEY_LAYOUT, "{}");
   targetMouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
+  targetMouseName = preferences.getString(NVS_KEY_MOUSE_NAME, "");
   preferences.end();
 
   targetMouseMac.toLowerCase();
   targetMouseMac.trim();
+  targetMouseName.trim();
 
   if (json.length() > 2 && json != "[]") {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json);
     if (!err) {
-      // Restore mouseMac if present in saved JSON
+      // Restore mouseMac & mouseName if present in saved JSON
       if (doc["mouseMac"].is<String>() && doc["mouseMac"].as<String>().length() > 0) {
         targetMouseMac = doc["mouseMac"].as<String>();
         targetMouseMac.toLowerCase();
         targetMouseMac.trim();
+      }
+      if (doc["mouseName"].is<String>() && doc["mouseName"].as<String>().length() > 0) {
+        targetMouseName = doc["mouseName"].as<String>();
+        targetMouseName.trim();
       }
 
       JsonArray arr;
@@ -699,7 +707,7 @@ void saveConfiguration(const String& jsonString) {
   preferences.begin(NVS_NAMESPACE, false);
   preferences.putString(NVS_KEY_LAYOUT, jsonString);
 
-  // Extract and persist mouseMac from save payload if present
+  // Extract and persist mouseMac & mouseName from save payload if present
   JsonDocument doc;
   if (!deserializeJson(doc, jsonString)) {
     if (doc["mouseMac"].is<String>()) {
@@ -709,6 +717,13 @@ void saveConfiguration(const String& jsonString) {
       preferences.putString(NVS_KEY_MOUSE_MAC, mac);
       targetMouseMac = mac;
       Serial.printf("[NVS] Updated targetMouseMac from save payload: %s\n", targetMouseMac.c_str());
+    }
+    if (doc["mouseName"].is<String>()) {
+      String name = doc["mouseName"].as<String>();
+      name.trim();
+      preferences.putString(NVS_KEY_MOUSE_NAME, name);
+      targetMouseName = name;
+      Serial.printf("[NVS] Updated targetMouseName from save payload: %s\n", targetMouseName.c_str());
     }
   }
   preferences.end();
@@ -788,8 +803,9 @@ void processCommand(String input) {
       doc["clients"].to<JsonArray>();
     }
 
-    // Include bound mouse MAC in the unified JSON payload for backup & restore
+    // Include bound mouse MAC & Name in the unified JSON payload for backup & restore
     doc["mouseMac"] = targetMouseMac;
+    doc["mouseName"] = targetMouseName.length() > 0 ? targetMouseName : (targetMouseMac.length() > 0 ? "BLE Mouse" : "");
 
     // Reset connected status for stored clients prior to active connection sync
     if (doc["clients"].is<JsonArray>()) {
@@ -870,13 +886,24 @@ void processCommand(String input) {
     serializeJson(scannedMiceDoc, jsonStr);
     sendConfigResponse("MICE " + jsonStr);
   } else if (input.startsWith("BIND_MOUSE ")) {
-    String mac = input.substring(11);
+    String param = input.substring(11);
+    param.trim();
+    String mac = param;
+    String name = "BLE Mouse";
+    int spaceIdx = param.indexOf(' ');
+    if (spaceIdx != -1) {
+      mac = param.substring(0, spaceIdx);
+      name = param.substring(spaceIdx + 1);
+      name.trim();
+    }
     mac.toLowerCase();
     mac.trim();
     preferences.begin(NVS_NAMESPACE, false);
     preferences.putString(NVS_KEY_MOUSE_MAC, mac);
+    preferences.putString(NVS_KEY_MOUSE_NAME, name);
     preferences.end();
     targetMouseMac = mac;
+    targetMouseName = name;
     sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
 
     if (reconnTaskHandle != NULL) {
@@ -892,8 +919,10 @@ void processCommand(String input) {
   } else if (input == "UNBIND_MOUSE") {
     preferences.begin(NVS_NAMESPACE, false);
     preferences.remove(NVS_KEY_MOUSE_MAC);
+    preferences.remove(NVS_KEY_MOUSE_NAME);
     preferences.end();
     targetMouseMac = "";
+    targetMouseName = "";
     if (reconnTaskHandle != NULL) {
       vTaskDelete(reconnTaskHandle);
       reconnTaskHandle = NULL;

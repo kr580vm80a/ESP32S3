@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 261;
+    const BUILD_VERSION = 262;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -540,6 +540,14 @@
     </div>
   </div>
 
+  <!-- Mouse Information Bar (Under Toolbar with clean spacing) -->
+  <div class="mouse-info-bar" id="mouseInfoBar" style="display: flex; align-items: center; gap: 6px; background: rgba(15, 23, 42, 0.85); border-bottom: 1px solid var(--border-color); padding: 5px 14px; font-size: 11px; flex-shrink: 0; margin-bottom: 4px; z-index: 90;">
+    <span style="font-weight: 700; color: var(--primary);">Mouse:</span>
+    <span id="mouseInfoText" style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">
+      <span style="color: #64748b;">Not Bound</span>
+    </span>
+  </div>
+
   <!-- Full Bleed Edge-to-Edge Layout Canvas Field -->
   <div class="canvas-wrapper">
     <canvas id="screenCanvas"></canvas>
@@ -986,7 +994,7 @@
               <div>
                 ${isBound ? 
                   '<span style="font-size: 10px; font-weight: 700; color: #34d399; padding: 2px 6px; background: rgba(52, 211, 153, 0.2); border-radius: 4px;">✓ Bound</span>' : 
-                  `<button class="btn btn-primary" onclick="bindTargetMouse('${m.mac}')" style="font-size: 10px; padding: 3px 8px; height: 24px;">Bind & Lock</button>`
+                  `<button class="btn btn-primary" onclick="bindTargetMouse('${m.mac}', '${(m.name || 'BLE Mouse').replace(/'/g, "\\'")}')" style="font-size: 10px; padding: 3px 8px; height: 24px;">Bind & Lock</button>`
                 }
               </div>
             </div>
@@ -998,23 +1006,48 @@
       }
     }
 
-    function bindTargetMouse(mac) {
+    let boundTargetMouseName = '';
+
+    function bindTargetMouse(mac, name) {
       if (!mac) return;
-      sendESP32Command(`BIND_MOUSE ${mac}\n`);
+      const mName = name || 'BLE Mouse';
+      sendESP32Command(`BIND_MOUSE ${mac} ${mName}\n`);
+      setBoundMouseStatus(mac, mName);
+      closeBleMouseModal();
     }
 
     function unbindTargetMouse() {
       sendESP32Command(`UNBIND_MOUSE\n`);
+      setBoundMouseStatus('', '');
     }
 
-    function setBoundMouseStatus(mac) {
+    function setBoundMouseStatus(mac, name) {
       boundTargetMouseMac = mac ? mac.toLowerCase().trim() : '';
+      if (name) {
+        boundTargetMouseName = name.trim();
+      } else if (!boundTargetMouseName && boundTargetMouseMac) {
+        boundTargetMouseName = 'BLE Mouse';
+      } else if (!boundTargetMouseMac) {
+        boundTargetMouseName = '';
+      }
+
+      const infoEl = document.getElementById('mouseInfoText');
+      if (infoEl) {
+        if (boundTargetMouseMac) {
+          const displayName = boundTargetMouseName || 'BLE Mouse';
+          infoEl.innerHTML = `<b style="color: #f8fafc;">${displayName}</b> <span style="color: #94a3b8;">(${boundTargetMouseMac.toUpperCase()})</span>`;
+        } else {
+          infoEl.innerHTML = `<span style="color: #64748b;">Not Bound</span>`;
+        }
+      }
+
       const statusDiv = document.getElementById('boundMouseStatus');
       const label = document.getElementById('boundMouseLabel');
 
       if (statusDiv && label) {
         if (boundTargetMouseMac) {
-          label.textContent = `Target Locked: ${boundTargetMouseMac.toUpperCase()}`;
+          const displayName = boundTargetMouseName || 'BLE Mouse';
+          label.textContent = `Target Locked: ${displayName} (${boundTargetMouseMac.toUpperCase()})`;
           statusDiv.style.display = 'flex';
         } else {
           statusDiv.style.display = 'none';
@@ -2452,6 +2485,10 @@
       };
 
       config.clients = kvmClients.map(c => ({ mac: c.mac, name: c.name, connected: c.connected || false }));
+      if (boundTargetMouseMac) {
+        config.mouseMac = boundTargetMouseMac;
+        config.mouseName = boundTargetMouseName || 'BLE Mouse';
+      }
 
       currentConfigJSON = JSON.stringify(config, null, 2);
       const jsonElem = document.getElementById('jsonOutput');

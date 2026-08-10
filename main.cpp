@@ -216,16 +216,13 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         // Pushing UP past top edge of current monitor
         if (dy < 0 && virtualY < currentMon.y) {
             int bestIdx = -1;
-            long bestScore = 9999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
-                    long yDist = abs(monitors[i].y - currentMon.y);
-                    long score = yDist - (xOverlap ? 100000 : 0);
-                    if (score < bestScore) {
-                        bestScore = score;
+                    if (monitors[i].id.indexOf("S2721DS") != -1 || monitors[i].id.indexOf("DELL") != -1) {
                         bestIdx = i;
+                        break;
                     }
+                    if (bestIdx == -1) bestIdx = i;
                 }
             }
             if (bestIdx != -1) {
@@ -237,16 +234,10 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         // Pushing DOWN past bottom edge of current monitor
         else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
             int bestIdx = -1;
-            long bestScore = 9999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
-                    long yDist = abs(monitors[i].y - currentMon.y);
-                    long score = yDist - (xOverlap ? 100000 : 0);
-                    if (score < bestScore) {
-                        bestScore = score;
-                        bestIdx = i;
-                    }
+                    bestIdx = i;
+                    break;
                 }
             }
             if (bestIdx != -1) {
@@ -258,16 +249,10 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         // Pushing LEFT past left edge of current monitor
         else if (dx < 0 && virtualX < currentMon.x) {
             int bestIdx = -1;
-            long bestScore = 9999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
-                    long xDist = abs(monitors[i].x - currentMon.x);
-                    long score = xDist - (yOverlap ? 100000 : 0);
-                    if (score < bestScore) {
-                        bestScore = score;
-                        bestIdx = i;
-                    }
+                    bestIdx = i;
+                    break;
                 }
             }
             if (bestIdx != -1) {
@@ -279,16 +264,10 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         // Pushing RIGHT past right edge of current monitor
         else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
             int bestIdx = -1;
-            long bestScore = 9999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
-                    long xDist = abs(monitors[i].x - currentMon.x);
-                    long score = xDist - (yOverlap ? 100000 : 0);
-                    if (score < bestScore) {
-                        bestScore = score;
-                        bestIdx = i;
-                    }
+                    bestIdx = i;
+                    break;
                 }
             }
             if (bestIdx != -1) {
@@ -323,6 +302,19 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                       monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
                       monitors[newMonitorIndex].y, monitors[newMonitorIndex].y + monitors[newMonitorIndex].height,
                       targetMac.c_str(), targetConnHandle);
+
+        // If target PC changed, send cursor warp positioning pulse to pull cursor onto target monitor
+        if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac) && targetConnHandle != 0) {
+            uint8_t warpReport[5] = { 0, 0, (uint8_t)(dy < 0 ? 127 : -127), 0, 0 };
+            for (int w = 0; w < 15; w++) {
+                os_mbuf *om = ble_hs_mbuf_from_flat(warpReport, sizeof(warpReport));
+                if (om != NULL) {
+                    ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+                }
+                delay(1);
+            }
+        }
+
         currentMonitorIndex = newMonitorIndex;
     }
 

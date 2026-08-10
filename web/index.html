@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 260;
+    const BUILD_VERSION = 261;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2240,16 +2240,22 @@
 
         ctx.shadowBlur = 0;
 
-        // Screen Title & Details
+        // Line 1: Coordinates in top-left corner above monitor name (Muted Gray, 10px)
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '500 10px "JetBrains Mono", monospace';
+        ctx.fillText(`(${relX}, ${relY})`, s.x + 14, s.y + 18);
+
+        // Line 2: Screen Title
         ctx.fillStyle = '#f8fafc';
         ctx.font = '600 13px "Outfit", system-ui, -apple-system, sans-serif';
-        ctx.fillText(s.name, s.x + 14, s.y + 26);
+        ctx.fillText(s.name, s.x + 14, s.y + 35);
 
+        // Line 3: Screen Resolution
         ctx.fillStyle = '#94a3b8';
         ctx.font = '400 11px "JetBrains Mono", monospace';
-        ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 44);
+        ctx.fillText(`${s.width}x${s.height} px`, s.x + 14, s.y + 51);
 
-        // Line 3: Render Computer Name & Bluetooth Icon ONLY on Primary Monitor of group
+        // Line 4: Render Computer Name & Bluetooth Icon ONLY on Primary Monitor of group
         const isPrimaryScreen = s.isPrimary || (s.group && primaryPerGroup[s.group] === s);
         if (isPrimaryScreen && (s.groupName || s.group)) {
           const gName = s.groupName || s.group;
@@ -2265,9 +2271,9 @@
 
           const fullLabel = gName + macSuffix;
 
-          // Draw Link / Unlink Icon (Matching Screenshot 2)
+          // Draw Link / Unlink Icon
           const iconX = s.x + 13;
-          const iconY = s.y + 51;
+          const iconY = s.y + 57;
           const hasMac = !!s.mac;
           const iconColor = hasMac ? '#38bdf8' : '#64748b';
 
@@ -2277,7 +2283,7 @@
           ctx.lineJoin = 'round';
 
           if (hasMac) {
-            // Connected Link Icon (Left icon in screenshot 2)
+            // Connected Link Icon
             ctx.beginPath();
             ctx.moveTo(iconX + 5, iconY + 2);
             ctx.lineTo(iconX + 7, iconY + 0);
@@ -2297,7 +2303,7 @@
             ctx.lineTo(iconX + 7, iconY + 2);
             ctx.stroke();
           } else {
-            // Unlinked / Broken Link Icon (Right icon in screenshot 2)
+            // Unlinked / Broken Link Icon
             ctx.beginPath();
             ctx.moveTo(iconX + 5, iconY + 2);
             ctx.lineTo(iconX + 7, iconY + 0);
@@ -2321,7 +2327,7 @@
           // Store hit box for Bluetooth Icon click
           s.btIconHitBox = {
             x: s.x + 8,
-            y: s.y + 46,
+            y: s.y + 52,
             w: 20,
             h: 20,
             screen: s
@@ -2330,12 +2336,12 @@
           // Draw Label Text right next to Bluetooth Icon
           ctx.fillStyle = color;
           ctx.font = '600 11px "Outfit", system-ui, -apple-system, sans-serif';
-          ctx.fillText(fullLabel, s.x + 26, s.y + 60);
+          ctx.fillText(fullLabel, s.x + 26, s.y + 66);
 
           const textWidth = ctx.measureText(fullLabel).width;
           s.groupNameHitBox = {
             x: s.x + 26,
-            y: s.y + 48,
+            y: s.y + 54,
             w: Math.max(60, textWidth),
             h: 18,
             group: s.group,
@@ -2346,10 +2352,6 @@
           s.btIconHitBox = null;
         }
 
-        // Bottom-Left Relative Coordinate Label (x, y)
-        ctx.fillStyle = '#38bdf8';
-        ctx.font = '600 11px "JetBrains Mono", monospace';
-        ctx.fillText(`(${relX}, ${relY})`, s.x + 14, s.y + sh - 12);
 
         // --- Red Delete Button (Top Right Corner) ---
         // For auto-detected screens, show delete button ONLY on Primary screen of its group

@@ -211,14 +211,19 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         }
     }
 
+    static unsigned long lastKvmSwitchTime = 0;
+
     // Edge Push Detection: When cursor pushes past the edge of current monitor into PC boundary
     if (newMonitorIndex == -1) {
+        bool canSwitchPC = (millis() - lastKvmSwitchTime > 300);
+
         // Pushing UP past top edge of current monitor
         if (dy < 0 && virtualY < currentMon.y) {
             int bestIdx = -1;
             long minScore = 99999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
+                    if (!canSwitchPC) continue;
                     bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
                     long dist = abs((monitors[i].y + monitors[i].height) - currentMon.y);
                     long score = dist + (xOverlap ? 0 : 100000);
@@ -230,8 +235,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             }
             if (bestIdx != -1) {
                 newMonitorIndex = bestIdx;
-                virtualY = monitors[bestIdx].y + monitors[bestIdx].height - 50;
-                virtualX = constrain(virtualX, (long)monitors[bestIdx].x, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 1));
+                virtualY = monitors[bestIdx].y + monitors[bestIdx].height - 200;
+                virtualX = constrain(virtualX, (long)monitors[bestIdx].x + 50, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 50));
             }
         }
         // Pushing DOWN past bottom edge of current monitor
@@ -240,6 +245,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             long minScore = 99999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
+                    if (!canSwitchPC) continue;
                     bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
                     long dist = abs(monitors[i].y - (currentMon.y + currentMon.height));
                     long score = dist + (xOverlap ? 0 : 100000);
@@ -251,8 +257,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             }
             if (bestIdx != -1) {
                 newMonitorIndex = bestIdx;
-                virtualY = monitors[bestIdx].y + 50;
-                virtualX = constrain(virtualX, (long)monitors[bestIdx].x, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 1));
+                virtualY = monitors[bestIdx].y + 200;
+                virtualX = constrain(virtualX, (long)monitors[bestIdx].x + 50, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 50));
             }
         }
         // Pushing LEFT past left edge of current monitor
@@ -261,6 +267,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             long minScore = 99999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
+                    if (!canSwitchPC) continue;
                     bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
                     long dist = abs((monitors[i].x + monitors[i].width) - currentMon.x);
                     long score = dist + (yOverlap ? 0 : 100000);
@@ -272,8 +279,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             }
             if (bestIdx != -1) {
                 newMonitorIndex = bestIdx;
-                virtualX = monitors[bestIdx].x + monitors[bestIdx].width - 50;
-                virtualY = constrain(virtualY, (long)monitors[bestIdx].y, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 1));
+                virtualX = monitors[bestIdx].x + monitors[bestIdx].width - 200;
+                virtualY = constrain(virtualY, (long)monitors[bestIdx].y + 50, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 50));
             }
         }
         // Pushing RIGHT past right edge of current monitor
@@ -282,6 +289,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             long minScore = 99999999;
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
+                    if (!canSwitchPC) continue;
                     bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
                     long dist = abs(monitors[i].x - (currentMon.x + currentMon.width));
                     long score = dist + (yOverlap ? 0 : 100000);
@@ -293,8 +301,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             }
             if (bestIdx != -1) {
                 newMonitorIndex = bestIdx;
-                virtualX = monitors[bestIdx].x + 50;
-                virtualY = constrain(virtualY, (long)monitors[bestIdx].y, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 1));
+                virtualX = monitors[bestIdx].x + 200;
+                virtualY = constrain(virtualY, (long)monitors[bestIdx].y + 50, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 50));
             }
         }
 
@@ -318,24 +326,14 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     }
 
     if (newMonitorIndex != currentMonitorIndex) {
+        if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac)) {
+            lastKvmSwitchTime = millis();
+        }
         Serial.printf("[KVM SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
                       virtualX, virtualY, newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(),
                       monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
                       monitors[newMonitorIndex].y, monitors[newMonitorIndex].y + monitors[newMonitorIndex].height,
                       targetMac.c_str(), targetConnHandle);
-
-        // If target PC changed, send cursor warp positioning pulse to pull cursor onto target monitor
-        if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac) && targetConnHandle != 0) {
-            uint8_t warpReport[5] = { 0, 0, (uint8_t)(dy < 0 ? 127 : -127), 0, 0 };
-            for (int w = 0; w < 15; w++) {
-                os_mbuf *om = ble_hs_mbuf_from_flat(warpReport, sizeof(warpReport));
-                if (om != NULL) {
-                    ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
-                }
-                delay(1);
-            }
-        }
-
         currentMonitorIndex = newMonitorIndex;
     }
 

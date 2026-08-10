@@ -114,6 +114,7 @@ void logPrint(const char* format, ...) {
 static String targetMouseMac = "";
 static bool isScanningForMice = false;
 static bool connected = false;
+static bool isConnectingToMouse = false;
 static NimBLEClient* pClient = nullptr;
 static NimBLEAdvertisedDevice* advDevice = nullptr;
 static bool doConnect = false;
@@ -126,8 +127,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         peerMac.toLowerCase();
         peerMac.trim();
-        Serial.printf("[BLE Server] PC Connected! MAC: %s (conn_handle: %d | itvl: %d | latency: %d | timeout: %d)\n",
-                      peerMac.c_str(), desc->conn_handle, desc->conn_itvl, desc->conn_latency, desc->supervision_timeout);
+        logPrint("[BLE Server] PC Connected! MAC: %s (conn_handle: %d | itvl: %d | latency: %d | timeout: %d)\n",
+                  peerMac.c_str(), desc->conn_handle, desc->conn_itvl, desc->conn_latency, desc->supervision_timeout);
         
         // Save connection
         bool updated = false;
@@ -157,8 +158,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         if (activeCount < MAX_KVM_CLIENTS) {
             xTaskCreate([](void* param) {
                 vTaskDelay(pdMS_TO_TICKS(1500));
-                if (NimBLEDevice::getAdvertising()) {
-                    Serial.println("[BLE Server] Resuming advertising for additional PC...");
+                if (NimBLEDevice::getAdvertising() && !isConnectingToMouse) {
+                    logPrint("[BLE Server] Resuming advertising for additional PC...\n");
                     NimBLEDevice::getAdvertising()->start();
                 }
                 vTaskDelete(NULL);
@@ -457,6 +458,8 @@ bool connectToServer() {
         return true;
     }
 
+    isConnectingToMouse = true;
+
     bool wasAdvertising = false;
     if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
         wasAdvertising = true;
@@ -526,7 +529,8 @@ bool connectToServer() {
     }
 
     if (!connRes) {
-        Serial.println("[BLE Host] Connection attempt failed (mouse not advertising or out of range).");
+        logPrint("[BLE Host] Connection attempt failed (mouse not advertising or out of range).\n");
+        isConnectingToMouse = false;
         return false;
     }
 
@@ -556,9 +560,11 @@ bool connectToServer() {
         }
     } else {
         pClient->disconnect();
+        isConnectingToMouse = false;
         return false;
     }
     connected = true;
+    isConnectingToMouse = false;
     return true;
 }
 

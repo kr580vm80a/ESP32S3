@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 256;
+    const BUILD_VERSION = 257;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1643,12 +1643,17 @@
 
       const getDetailsFn = window.getScreenDetails || window.getScreenDetails;
 
+      const setDetectBoxHtml = (html) => {
+        const db = document.getElementById('detectBox');
+        if (db) db.innerHTML = html;
+      };
+
       if (!window.isSecureContext && !isMobile) {
-        document.getElementById('detectBox')?.innerHTML = `
+        setDetectBoxHtml(`
           ⚠️ <span>HTTPS Required (${osLabel}):</span><br>
           • Chrome requires HTTPS or localhost for Multi-Screen Detection.<br>
           • Please open via HTTPS or use Presets below.
-        `;
+        `);
       }
 
       if (getDetailsFn && !isMobile) {
@@ -1844,7 +1849,7 @@
             s.y = baseCanvasBottomY - Math.round((ly + s.height) * scale);
           });
 
-          document.getElementById('detectBox')?.innerHTML = infoHtml;
+          setDetectBoxHtml(infoHtml);
           saveProjectState();
           draw();
           return;
@@ -1870,7 +1875,7 @@
         const screenW = (preset && Math.abs(preset.width - physW) < 120) ? preset.width : (physW > 0 ? physW : rawW);
         const screenH = (preset && Math.abs(preset.height - physH) < 120) ? preset.height : (physH > 0 ? physH : rawH);
 
-        document.getElementById('detectBox')?.innerHTML = `
+        setDetectBoxHtml(`
           🎯 <span>Smartphone/Tablet (${osLabel}):</span><br>
           • Device: <b>${currentDeviceName}</b><br>
           • Screen Size: <b>${screenW} × ${screenH} px</b><br>
@@ -1917,7 +1922,7 @@
       }
 
       if (isMultiMonitor) {
-        document.getElementById('detectBox')?.innerHTML = `
+        setDetectBoxHtml(`
           🎯 <span>Detected 2 displays (${osLabel}):</span><br>
           • Primary: <b>${preset.width}x${preset.height} px</b><br>
           • Secondary: <b>1920x1080 px</b>
@@ -1952,7 +1957,7 @@
           }
         ];
       } else {
-        document.getElementById('detectBox')?.innerHTML = `
+        setDetectBoxHtml(`
           🎯 <span>Physical Resolution (${osLabel}):</span><br>
           • Device: <b>${currentDeviceName}</b><br>
           • Preset: <b>${preset.width} x ${preset.height} px</b>

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 262;
+    const BUILD_VERSION = 263;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -337,6 +337,7 @@
       box-shadow: none;
     }
 
+    /* Full-height flexbox ensures layout canvas always spans to bottom of viewport without gaps */
     #screenCanvas {
       position: absolute;
       top: 0;
@@ -346,62 +347,6 @@
       background: transparent;
       cursor: default;
       touch-action: none;
-    }
-
-    #screenCanvas:active {
-      cursor: grabbing;
-    }
-
-    .canvas-instructions {
-      font-size: 11px;
-      color: var(--text-muted);
-      margin-top: 4px;
-      text-align: center;
-    }
-
-    .detected-info {
-      background: rgba(56, 189, 248, 0.08);
-      border: 1px solid rgba(56, 189, 248, 0.2);
-      border-radius: 6px;
-      padding: 6px 8px;
-      margin-bottom: 8px;
-      font-size: 11px;
-      line-height: 1.3;
-    }
-
-    .detected-info span {
-      font-weight: 600;
-      color: var(--primary);
-    }
-
-    @media (max-width: 768px) {
-      body {
-        height: auto;
-        max-height: none;
-        overflow-x: hidden;
-        overflow-y: auto;
-        padding: 6px;
-      }
-      .main-grid {
-        grid-template-columns: 1fr;
-        height: auto;
-        max-height: none;
-      }
-      .sidebar {
-        height: auto;
-        overflow-y: visible;
-      }
-      .editor-container {
-        height: auto;
-      }
-      .canvas-wrapper {
-        min-height: 440px;
-        height: 440px;
-      }
-      #screenCanvas {
-        min-height: 440px;
-        height: 440px;
-      }
     }
   </style>
 </head>
@@ -1649,7 +1594,7 @@
     function resizeCanvas() {
       if (canvas && canvas.parentElement) {
         canvas.width = canvas.parentElement.clientWidth;
-        canvas.height = canvas.parentElement.clientHeight || 440;
+        canvas.height = canvas.parentElement.clientHeight;
       }
       draw();
     }

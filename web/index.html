@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 255;
+    const BUILD_VERSION = 256;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -102,8 +102,8 @@
     }
 
     .main-grid {
-      display: grid;
-      grid-template-columns: 220px 1fr;
+      display: flex;
+      flex-direction: column;
       gap: 8px;
       height: calc(100vh - 16px);
       max-height: calc(100vh - 16px);
@@ -393,85 +393,64 @@
 <body>
 
   <div class="main-grid">
-    <!-- Sidebar Controls -->
-    <div class="sidebar">
-      
-      <header>
-        <div class="logo-container">
-          <div>
-            <h1>ESP32 Bluetooth KVM Switcher <span id="appBuildVersion" style="font-size: 10px; font-weight: 500; color: var(--primary); background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 6px; border-radius: 10px; margin-left: 4px; vertical-align: middle;"><script>document.write('v' + BUILD_VERSION);</script></span></h1>
-            <p style="font-size: 10px; color: var(--text-muted);">Smart Boundary Mouse & Keyboard Switcher</p>
-          </div>
-        </div>
-      <!-- Multi-Screen Detection Card -->
-      <div class="card">
-        <div class="card-title">Auto Detect</div>
-        <div style="margin-bottom: 8px;">
-          <label style="font-size: 10px; color: #94a3b8; display: block; margin-bottom: 3px;">Computer Label / Group Name:</label>
-          <input type="text" id="pcNameInput" style="width: 100%; background: #0f172a; border: 1px solid #334155; color: #f8fafc; border-radius: 6px; padding: 4px 8px; font-size: 12px;" placeholder="e.g. Lenovo Laptop, PC 1">
-        </div>
-        <div class="detected-info" id="detectBox">
-          Detects connected displays from OS.
-        </div>
-        <button class="btn btn-secondary" id="btnAutoDetect" style="width: 100%;">
-          <span>Detect</span>
-        </button>
-      </div>
-
-    </div>
 
     <!-- Main Canvas & Editor Controls -->
     <div class="editor-container">
       <div class="card" style="flex: 1; display: flex; flex-direction: column;">
         <div class="card-title" style="justify-content: space-between; flex-wrap: wrap; gap: 8px; align-items: center;">
           <!-- Left: Connection Controls & Layout Selector -->
-          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;" id="layoutControlsContainer">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;" id="layoutControlsContainer">
             
-            <!-- Connection & Storage Toolbar Group -->
-            <div style="display: flex; align-items: center; gap: 4px; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 2px 5px;">
-              <!-- USB Icon Button -->
-              <button class="icon-btn" id="btnConnectUSB" title="USB (Web Serial)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"></path><path d="M4.93 10.93l4.24 4.24"></path><path d="M19.07 10.93l-4.24 4.24"></path><rect x="9" y="14" width="6" height="8" rx="1"></rect><circle cx="12" cy="5" r="1"></circle></svg>
-              </button>
-              
-              <!-- Bluetooth Icon Button -->
-              <button class="icon-btn" id="btnConnectBT" title="Bluetooth BLE">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
-              </button>
-
-              <!-- Material Icon Button: Scan BLE Mouse (Disabled when disconnected) -->
-              <button class="icon-btn" id="btnScanBleMouse" disabled onclick="toggleBleMouseModal(event)" title="Scan & Bind BLE Mouse" style="opacity: 0.4; cursor: not-allowed;">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v10a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z"></path><line x1="12" y1="6" x2="12" y2="10"></line></svg>
-              </button>
-
-              <!-- Load Configuration from ESP32 Button (Disabled when disconnected) -->
-              <button class="icon-btn" id="btnLoadESP32" disabled title="Load configuration from ESP32" style="opacity: 0.4; cursor: not-allowed;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-              </button>
-
-              <!-- Save to ESP32 Flash Button -->
-              <button class="icon-btn icon-btn-primary" id="btnSyncESP32" title="Save to ESP32 Flash">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
-              </button>
-
-              <!-- Backup Layout JSON to Device Button -->
-              <button class="icon-btn" id="btnBackupJSON" title="Backup JSON to Device (PC / Mac / Android / iOS)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
-              </button>
-
-              <!-- Restore Layout JSON from Device File Button -->
-              <button class="icon-btn" id="btnRestoreJSON" title="Restore JSON from Device File">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-              </button>
-
-              <!-- Dump Flash Diagnostic Button -->
-              <button class="icon-btn" id="btnDumpFlash" title="Dump Flash NVS Diagnostic (Print to Console)">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-              </button>
-              
-              <!-- Hidden Native File Input for Cross-Platform Restore -->
-              <input type="file" id="jsonFileInput" accept=".json,application/json" style="display: none;">
+            <!-- ESP32 Title & Build Badge -->
+            <div style="display: flex; align-items: center; gap: 4px; margin-right: 2px;">
+              <span style="font-size: 13px; font-weight: 700; color: var(--text-main); letter-spacing: -0.3px;">ESP32</span>
+              <span id="appBuildVersion" style="font-size: 10px; font-weight: 600; color: var(--primary); background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); padding: 1px 5px; border-radius: 10px;">
+                <script>document.write('v' + BUILD_VERSION);</script>
+              </span>
             </div>
+
+            <!-- USB Icon Button -->
+            <button class="icon-btn" id="btnConnectUSB" title="USB (Web Serial)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"></path><path d="M4.93 10.93l4.24 4.24"></path><path d="M19.07 10.93l-4.24 4.24"></path><rect x="9" y="14" width="6" height="8" rx="1"></rect><circle cx="12" cy="5" r="1"></circle></svg>
+            </button>
+            
+            <!-- Bluetooth Icon Button -->
+            <button class="icon-btn" id="btnConnectBT" title="Bluetooth BLE">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
+            </button>
+
+            <!-- Material Icon Button: Scan BLE Mouse (Disabled when disconnected) -->
+            <button class="icon-btn" id="btnScanBleMouse" disabled onclick="toggleBleMouseModal(event)" title="Scan & Bind BLE Mouse" style="opacity: 0.4; cursor: not-allowed;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v10a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z"></path><line x1="12" y1="6" x2="12" y2="10"></line></svg>
+            </button>
+
+            <!-- Load Configuration from ESP32 Button (Disabled when disconnected) -->
+            <button class="icon-btn" id="btnLoadESP32" disabled title="Load configuration from ESP32" style="opacity: 0.4; cursor: not-allowed;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            </button>
+
+            <!-- Save to ESP32 Flash Button -->
+            <button class="icon-btn icon-btn-primary" id="btnSyncESP32" title="Save to ESP32 Flash">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            </button>
+
+            <!-- Backup Layout JSON to Device Button -->
+            <button class="icon-btn" id="btnBackupJSON" title="Backup JSON to Device (PC / Mac / Android / iOS)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+            </button>
+
+            <!-- Restore Layout JSON from Device File Button -->
+            <button class="icon-btn" id="btnRestoreJSON" title="Restore JSON from Device File">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            </button>
+
+            <!-- Dump Flash Diagnostic Button -->
+            <button class="icon-btn" id="btnDumpFlash" title="Dump Flash NVS Diagnostic (Print to Console)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+            </button>
+            
+            <!-- Hidden Native File Input for Cross-Platform Restore -->
+            <input type="file" id="jsonFileInput" accept=".json,application/json" style="display: none;">
 
             <div style="width: 1px; height: 18px; background: var(--border-color); margin: 0 2px;"></div>
 
@@ -482,6 +461,13 @@
                 <!-- Populated dynamically -->
               </select>
             </div>
+
+            <div style="width: 1px; height: 18px; background: var(--border-color); margin: 0 2px;"></div>
+
+            <!-- Detect Connected Displays Button -->
+            <button class="icon-btn" id="btnAutoDetect" title="Detect Connected Displays (OS)">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+            </button>
 
             <!-- Material Icon Button: Add Preset Screen Popover -->
             <div style="position: relative; display: inline-block;">
@@ -1658,7 +1644,7 @@
       const getDetailsFn = window.getScreenDetails || window.getScreenDetails;
 
       if (!window.isSecureContext && !isMobile) {
-        document.getElementById('detectBox').innerHTML = `
+        document.getElementById('detectBox')?.innerHTML = `
           ⚠️ <span>HTTPS Required (${osLabel}):</span><br>
           • Chrome requires HTTPS or localhost for Multi-Screen Detection.<br>
           • Please open via HTTPS or use Presets below.
@@ -1858,7 +1844,7 @@
             s.y = baseCanvasBottomY - Math.round((ly + s.height) * scale);
           });
 
-          document.getElementById('detectBox').innerHTML = infoHtml;
+          document.getElementById('detectBox')?.innerHTML = infoHtml;
           saveProjectState();
           draw();
           return;
@@ -1884,7 +1870,7 @@
         const screenW = (preset && Math.abs(preset.width - physW) < 120) ? preset.width : (physW > 0 ? physW : rawW);
         const screenH = (preset && Math.abs(preset.height - physH) < 120) ? preset.height : (physH > 0 ? physH : rawH);
 
-        document.getElementById('detectBox').innerHTML = `
+        document.getElementById('detectBox')?.innerHTML = `
           🎯 <span>Smartphone/Tablet (${osLabel}):</span><br>
           • Device: <b>${currentDeviceName}</b><br>
           • Screen Size: <b>${screenW} × ${screenH} px</b><br>
@@ -1931,7 +1917,7 @@
       }
 
       if (isMultiMonitor) {
-        document.getElementById('detectBox').innerHTML = `
+        document.getElementById('detectBox')?.innerHTML = `
           🎯 <span>Detected 2 displays (${osLabel}):</span><br>
           • Primary: <b>${preset.width}x${preset.height} px</b><br>
           • Secondary: <b>1920x1080 px</b>
@@ -1966,7 +1952,7 @@
           }
         ];
       } else {
-        document.getElementById('detectBox').innerHTML = `
+        document.getElementById('detectBox')?.innerHTML = `
           🎯 <span>Physical Resolution (${osLabel}):</span><br>
           • Device: <b>${currentDeviceName}</b><br>
           • Preset: <b>${preset.width} x ${preset.height} px</b>

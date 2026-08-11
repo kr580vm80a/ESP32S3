@@ -273,14 +273,20 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         }
     }
 
+    int scale = (targetMon.scale > 0) ? targetMon.scale : 100;
+    float targetScaleFactor = scale / 100.0f;
+
     int16_t relX = (int16_t)(targetGlobalX - minPcX);
     int16_t relY = (int16_t)(targetGlobalY - minPcY);
     if (relX < 0) relX = 0;
     if (relY < 0) relY = 0;
 
-    logPrint("[%s] Aligning PC %s (Mon #%d %s) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d]...\n",
-             contextLabel, targetMac.c_str(), monIndex + 1, targetMon.id.c_str(),
-             targetGlobalX, targetGlobalY, minPcX, minPcY, relX, relY);
+    int16_t scaledRelX = (int16_t)round(relX / targetScaleFactor);
+    int16_t scaledRelY = (int16_t)round(relY / targetScaleFactor);
+
+    logPrint("[%s] Aligning PC %s (Mon #%d %s Scale:%d%%) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d | Scaled HID Rel: %d, %d]...\n",
+             contextLabel, targetMac.c_str(), monIndex + 1, targetMon.id.c_str(), scale,
+             targetGlobalX, targetGlobalY, minPcX, minPcY, relX, relY, scaledRelX, scaledRelY);
 
     // Step A: Send HID packets to slam OS cursor all the way to target PC's Top-Left origin (minPcX, minPcY)
     // 35 pulses of (-127, -127) = -4445 px, guaranteeing OS cursor is at top-left-most pixel of target PC's virtual desktop
@@ -296,9 +302,9 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         delay(6);
     }
 
-    // Step B: Send HID packets to move from Top-Left origin to target coordinates (relX, relY)
-    int16_t remainingX = relX;
-    int16_t remainingY = relY;
+    // Step B: Send HID packets to move from Top-Left origin to target coordinates (scaledRelX, scaledRelY)
+    int16_t remainingX = scaledRelX;
+    int16_t remainingY = scaledRelY;
 
     while (remainingX > 0 || remainingY > 0) {
         int8_t stepX = constrain(remainingX, 0, 127);

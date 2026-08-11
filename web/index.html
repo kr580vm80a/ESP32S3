@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 280;
+    const BUILD_VERSION = 281;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2375,27 +2375,17 @@
           s.btIconHitBox = null;
         }
 
-        // --- Scale Indicator Badge (Bottom Left Corner) ---
+        // --- Scale Indicator Text (Bottom Left Corner) ---
         const scaleVal = s.scale || 100;
         const isNonDefaultScale = (scaleVal !== 100);
-        const badgeX = s.x + 10;
-        const badgeY = s.y + sh - 24;
-        const badgeW = 44;
-        const badgeH = 18;
+        const badgeX = s.x + 14;
+        const badgeY = s.y + sh - 14;
 
-        s.scaleBadgeHitBox = { x: badgeX - 2, y: badgeY - 2, w: badgeW + 4, h: badgeH + 4, screen: s };
+        s.scaleBadgeHitBox = { x: s.x + 10, y: s.y + sh - 26, w: 42, h: 18, screen: s };
 
-        ctx.fillStyle = isNonDefaultScale ? 'rgba(2, 6, 23, 0.92)' : 'rgba(15, 23, 42, 0.75)';
-        ctx.strokeStyle = isNonDefaultScale ? '#38bdf8' : '#334155';
-        ctx.lineWidth = isNonDefaultScale ? 1.4 : 1.0;
-        ctx.beginPath();
-        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = isNonDefaultScale ? '#38bdf8' : '#94a3b8';
-        ctx.font = '600 10px "JetBrains Mono", monospace';
-        ctx.fillText(`${scaleVal}%`, badgeX + 7, badgeY + 13);
+        ctx.fillStyle = isNonDefaultScale ? '#ffffff' : '#64748b';
+        ctx.font = '600 11px "JetBrains Mono", monospace';
+        ctx.fillText(`${scaleVal}%`, badgeX, badgeY);
 
 
         // --- Red Delete Button (Top Right Corner) ---
@@ -2710,6 +2700,7 @@
       let hoveringResize = false;
       let hoveringName = false;
       let hoveringBtIcon = false;
+      let hoveringScale = false;
       let hoveringScreen = false;
 
       screens.forEach(s => {
@@ -2721,6 +2712,12 @@
         if (!isDetected && s.resizeHandle && mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
             my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
           hoveringResize = true;
+        }
+        if (s.scaleBadgeHitBox) {
+          const hb = s.scaleBadgeHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            hoveringScale = true;
+          }
         }
         if (s.btIconHitBox) {
           const hb = s.btIconHitBox;
@@ -2742,7 +2739,7 @@
         }
       });
 
-      if (hoveringDelete || hoveringName || hoveringBtIcon) {
+      if (hoveringDelete || hoveringName || hoveringBtIcon || hoveringScale) {
         canvas.style.cursor = 'pointer';
       } else if (hoveringResize || isResizing) {
         canvas.style.cursor = 'nwse-resize';

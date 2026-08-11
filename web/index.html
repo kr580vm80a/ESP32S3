@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 264;
+    const BUILD_VERSION = 265;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -978,7 +978,7 @@
       if (infoEl) {
         if (boundTargetMouseMac) {
           const displayName = boundTargetMouseName || 'BLE Mouse';
-          infoEl.innerHTML = `<b style="color: #f8fafc;">${displayName}</b> <span style="color: #94a3b8;">(${boundTargetMouseMac.toUpperCase()})</span>`;
+          infoEl.innerHTML = `<b style="color: #f8fafc;">${displayName}</b> <span style="color: #94a3b8;">(${boundTargetMouseMac.toLowerCase()})</span>`;
         } else {
           infoEl.innerHTML = `<span style="color: #64748b;">Not Bound</span>`;
         }
@@ -990,7 +990,7 @@
       if (statusDiv && label) {
         if (boundTargetMouseMac) {
           const displayName = boundTargetMouseName || 'BLE Mouse';
-          label.textContent = `Target Locked: ${displayName} (${boundTargetMouseMac.toUpperCase()})`;
+          label.textContent = `Target Locked: ${displayName} (${boundTargetMouseMac.toLowerCase()})`;
           statusDiv.style.display = 'flex';
         } else {
           statusDiv.style.display = 'none';
@@ -2241,7 +2241,7 @@
           if (s.mac && s.mac.includes(':')) {
             const parts = s.mac.split(':');
             if (parts.length >= 3) {
-              macSuffix = ' (' + parts.slice(-3).join(':').toUpperCase() + ')';
+              macSuffix = ' (' + parts.slice(-3).join(':').toLowerCase() + ')';
             }
           }
 

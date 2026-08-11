@@ -356,8 +356,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     float rawStepX = (dx * scaleFactor) + subpixelX;
     float rawStepY = (dy * scaleFactor) + subpixelY;
 
-    long effectiveDx = (long)rawStepX;
-    long effectiveDy = (long)rawStepY;
+    long effectiveDx = (long)truncf(rawStepX);
+    long effectiveDy = (long)truncf(rawStepY);
 
     subpixelX = rawStepX - (float)effectiveDx;
     subpixelY = rawStepY - (float)effectiveDy;

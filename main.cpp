@@ -19,6 +19,7 @@ const char* NVS_KEY_MOUSE_NAME = "mouse_name";
 // Structure to store monitor configuration
 struct MonitorConfig {
   String id;
+  String name;
   int x;
   int y;
   int width;
@@ -242,6 +243,17 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 };
 
+String getMonDisplayName(int idx) {
+    if (idx < 0 || idx >= monitorCount) return "Unknown";
+    if (monitors[idx].name.length() > 0 && !monitors[idx].name.equalsIgnoreCase("null") && !monitors[idx].name.equalsIgnoreCase("unnamed")) {
+        return monitors[idx].name;
+    }
+    if (monitors[idx].id.length() > 0 && !monitors[idx].id.equalsIgnoreCase("null")) {
+        return monitors[idx].id;
+    }
+    return "Monitor #" + String(idx + 1);
+}
+
 // --- Unified PC Cursor Calibration & Edge Positioning Function ---
 void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
     if (monitorCount == 0 || monIndex < 0 || monIndex >= monitorCount) return;
@@ -310,7 +322,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     int16_t scaledRelX = (int16_t)round(sumScaledX);
     int16_t scaledRelY = (int16_t)round(sumScaledY);
 
-    String monDisplayName = (targetMon.id.length() > 0 && !targetMon.id.equalsIgnoreCase("null")) ? targetMon.id : ("Monitor #" + String(monIndex + 1));
+    String monDisplayName = getMonDisplayName(monIndex);
 
     logPrint("[%s] Aligning PC %s (Mon #%d %s Scale:%d%%) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d | Multi-Mon Scaled HID Rel: %d, %d]...\n",
              contextLabel, targetMac.c_str(), monIndex + 1, monDisplayName.c_str(), targetMon.scale,
@@ -553,7 +565,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             // 1D Axis Dead-End Side Auto-Calibration:
             // When pushing against a side with no neighboring monitor,
             // auto-calibrate the specific axis (X or Y) instantly to exact physical display bounds.
-            String curMonDisplayName = (currentMon.id.length() > 0 && !currentMon.id.equalsIgnoreCase("null")) ? currentMon.id : ("Monitor #" + String(currentMonitorIndex + 1));
+            String curMonDisplayName = getMonDisplayName(currentMonitorIndex);
             if (dx < 0 && virtualX < currentMon.x) {
                 virtualX = currentMon.x;
                 logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, curMonDisplayName.c_str());
@@ -595,7 +607,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         } else {
             currentMonitorIndex = newMonitorIndex;
         }
-        String newMonDisplayName = (monitors[newMonitorIndex].id.length() > 0 && !monitors[newMonitorIndex].id.equalsIgnoreCase("null")) ? monitors[newMonitorIndex].id : ("Monitor #" + String(newMonitorIndex + 1));
+        String newMonDisplayName = getMonDisplayName(newMonitorIndex);
         logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
                       virtualX, virtualY, newMonitorIndex + 1, newMonDisplayName.c_str(),
                       monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
@@ -640,15 +652,12 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         int8_t scroll = (int8_t)pData[5];
         int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
 
-        const char* monId = "None";
-        if (monitorCount > 0 && currentMonitorIndex >= 0 && currentMonitorIndex < monitorCount) {
-            monId = (monitors[currentMonitorIndex].id.length() > 0 && !monitors[currentMonitorIndex].id.equalsIgnoreCase("null")) ? monitors[currentMonitorIndex].id.c_str() : "Unnamed";
-        }
+        String curMonDisplayName = getMonDisplayName(currentMonitorIndex);
 
         logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%d (%s)\n",
                  pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
                  buttons, x, y, scroll, hScroll,
-                 virtualX, virtualY, currentMonitorIndex + 1, monId);
+                 virtualX, virtualY, currentMonitorIndex + 1, curMonDisplayName.c_str());
 
         updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
     }
@@ -921,17 +930,8 @@ void loadConfiguration() {
       monitorCount = 0;
       if (arr) {
         for (JsonObject repo : arr) {
-          String dispName = "";
-          if (repo["name"].is<String>() && repo["name"].as<String>().length() > 0) {
-            dispName = repo["name"].as<String>();
-          } else if (repo["id"].is<String>() && repo["id"].as<String>().length() > 0) {
-            dispName = repo["id"].as<String>();
-          }
-          dispName.trim();
-          if (dispName.length() == 0 || dispName.equalsIgnoreCase("null") || dispName.equalsIgnoreCase("unnamed")) {
-            dispName = "Monitor #" + String(monitorCount + 1);
-          }
-          monitors[monitorCount].id = dispName;
+          monitors[monitorCount].id = repo["id"].is<String>() ? repo["id"].as<String>() : String(monitorCount + 1);
+          monitors[monitorCount].name = repo["name"].is<String>() ? repo["name"].as<String>() : ("Monitor #" + String(monitorCount + 1));
           monitors[monitorCount].x = repo["x"];
           monitors[monitorCount].y = repo["y"];
           monitors[monitorCount].width = repo["width"];

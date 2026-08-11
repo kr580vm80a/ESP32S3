@@ -350,8 +350,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     int currentScale = (currentMon.scale > 0) ? currentMon.scale : 100;
     float scaleFactor = currentScale / 100.0f;
 
-    long effectiveDx = (long)round(dx / scaleFactor);
-    long effectiveDy = (long)round(dy / scaleFactor);
+    long effectiveDx = (long)round(dx * scaleFactor);
+    long effectiveDy = (long)round(dy * scaleFactor);
 
     virtualX += effectiveDx;
     virtualY += effectiveDy;

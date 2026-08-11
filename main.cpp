@@ -232,13 +232,16 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 };
 
-// --- Position Target PC's OS Cursor at Exact Boundary Entry Coordinates ---
-void slamPcCursorToEntryCoordinates(uint16_t targetConnHandle, String targetMac, long targetGlobalX, long targetGlobalY) {
-    if (targetConnHandle == 0 || monitorCount == 0) return;
+// --- Unified PC Cursor Calibration & Edge Positioning Function ---
+void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
+    if (monitorCount == 0 || monIndex < 0 || monIndex >= monitorCount) return;
+
+    MonitorConfig& targetMon = monitors[monIndex];
+    String targetMac = targetMon.mac;
     targetMac.toLowerCase();
     targetMac.trim();
 
-    // Calculate target PC's Top-Left origin (minPcX, minPcY)
+    // 1. Calculate target PC's dead-end top-left origin (minPcX, minPcY) across all its displays
     int minPcX = 99999;
     int minPcY = 99999;
     for (int i = 0; i < monitorCount; i++) {
@@ -247,70 +250,10 @@ void slamPcCursorToEntryCoordinates(uint16_t targetConnHandle, String targetMac,
             if (monitors[i].y < minPcY) minPcY = monitors[i].y;
         }
     }
-    if (minPcX == 99999) return;
-
-    int16_t relX = (int16_t)(targetGlobalX - minPcX);
-    int16_t relY = (int16_t)(targetGlobalY - minPcY);
-    if (relX < 0) relX = 0;
-    if (relY < 0) relY = 0;
-
-    logPrint("[KVM SYNC EDGE] Positioning PC %s cursor at edge entry (%ld, %ld) [Rel: %d, %d]...\n",
-             targetMac.c_str(), targetGlobalX, targetGlobalY, relX, relY);
-
-    // Step A: Slam OS cursor to Top-Left origin (minPcX, minPcY) of target PC
-    // 35 pulses of (-127, -127) = -4445 px, guaranteeing reaching top-left origin even across multiple 4K displays
-    uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
-    for (int p = 0; p < 35; p++) {
-        os_mbuf *om = ble_hs_mbuf_from_flat(topLeftReport, sizeof(topLeftReport));
-        if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
-        delay(6);
+    if (minPcX == 99999) {
+        minPcX = targetMon.x;
+        minPcY = targetMon.y;
     }
-
-    // Step B: Move OS cursor from (0,0) to exact entering edge coordinates (relX, relY)
-    int16_t remainingX = relX;
-    int16_t remainingY = relY;
-
-    while (remainingX > 0 || remainingY > 0) {
-        int8_t stepX = constrain(remainingX, 0, 127);
-        int8_t stepY = constrain(remainingY, 0, 127);
-
-        uint8_t stepReport[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
-        os_mbuf *om = ble_hs_mbuf_from_flat(stepReport, sizeof(stepReport));
-        if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
-
-        remainingX -= stepX;
-        remainingY -= stepY;
-        delay(6);
-    }
-}
-
-// --- Boot Center Calibration for First Connected PC ---
-void calibrateFirstConnectedPcToCenter(String targetMac) {
-    if (monitorCount == 0) return;
-    targetMac.toLowerCase();
-    targetMac.trim();
-
-    // 1. Find all monitors belonging to targetMac and calculate target PC's Top-Left origin
-    int primaryMonIdx = -1;
-    int minPcX = 99999;
-    int minPcY = 99999;
-
-    for (int i = 0; i < monitorCount; i++) {
-        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
-            if (primaryMonIdx == -1) primaryMonIdx = i;
-            if (monitors[i].x < minPcX) minPcX = monitors[i].x;
-            if (monitors[i].y < minPcY) minPcY = monitors[i].y;
-        }
-    }
-
-    if (primaryMonIdx == -1) {
-        primaryMonIdx = 0;
-        minPcX = monitors[0].x;
-        minPcY = monitors[0].y;
-    }
-
-    MonitorConfig& mon = monitors[primaryMonIdx];
-    currentMonitorIndex = primaryMonIdx;
 
     uint16_t targetConnHandle = 0;
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
@@ -320,17 +263,14 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
         }
     }
 
-    // Physical center of Primary Monitor in global canvas space:
-    long globalCenterX = mon.x + (mon.width / 2);
-    long globalCenterY = mon.y + (mon.height / 2);
+    int16_t relX = (int16_t)(targetGlobalX - minPcX);
+    int16_t relY = (int16_t)(targetGlobalY - minPcY);
+    if (relX < 0) relX = 0;
+    if (relY < 0) relY = 0;
 
-    // Relative delta from target PC's Top-Left-most pixel (minPcX, minPcY) to Primary Monitor center:
-    int16_t targetDeltaX = (int16_t)(globalCenterX - minPcX);
-    int16_t targetDeltaY = (int16_t)(globalCenterY - minPcY);
-
-    logPrint("[BOOT CALIBRATION] Centering PC %s on Primary Mon #%d %s (%dx%d). Global Center: (%ld, %ld), Top-Left Origin: (%d, %d)...\n",
-             targetMac.c_str(), primaryMonIdx + 1, mon.id.c_str(), mon.width, mon.height,
-             globalCenterX, globalCenterY, minPcX, minPcY);
+    logPrint("[%s] Aligning PC %s (Mon #%d %s) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d]...\n",
+             contextLabel, targetMac.c_str(), monIndex + 1, targetMon.id.c_str(),
+             targetGlobalX, targetGlobalY, minPcX, minPcY, relX, relY);
 
     // Step A: Send HID packets to slam OS cursor all the way to target PC's Top-Left origin (minPcX, minPcY)
     // 35 pulses of (-127, -127) = -4445 px, guaranteeing OS cursor is at top-left-most pixel of target PC's virtual desktop
@@ -343,12 +283,12 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
             inputChar->setValue(topLeftReport, sizeof(topLeftReport));
             inputChar->notify();
         }
-        delay(10);
+        delay(6);
     }
 
-    // Step B: Send HID packets to move from Top-Left origin to target Primary Monitor center
-    int16_t remainingX = targetDeltaX;
-    int16_t remainingY = targetDeltaY;
+    // Step B: Send HID packets to move from Top-Left origin to target coordinates (relX, relY)
+    int16_t remainingX = relX;
+    int16_t remainingY = relY;
 
     while (remainingX > 0 || remainingY > 0) {
         int8_t stepX = constrain(remainingX, 0, 127);
@@ -365,15 +305,38 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
 
         remainingX -= stepX;
         remainingY -= stepY;
-        delay(10);
+        delay(6);
     }
 
-    // Step C: Set ESP32's virtual cursor coordinates to exact physical center
-    virtualX = globalCenterX;
-    virtualY = globalCenterY;
+    // Step C: Set ESP32's virtual cursor coordinates to target position and update active monitor index
+    virtualX = targetGlobalX;
+    virtualY = targetGlobalY;
+    currentMonitorIndex = monIndex;
 
-    logPrint("[BOOT CALIBRATION] SUCCESS! PC centered & calibrated at (%ld, %ld) on Monitor #%d (%s)\n",
-             virtualX, virtualY, currentMonitorIndex + 1, mon.id.c_str());
+    logPrint("[%s] SUCCESS! Positioned & calibrated PC %s at (%ld, %ld) on Monitor #%d (%s)\n",
+             contextLabel, targetMac.c_str(), virtualX, virtualY, currentMonitorIndex + 1, targetMon.id.c_str());
+}
+
+// --- Boot Center Calibration Wrapper ---
+void calibrateFirstConnectedPcToCenter(String targetMac) {
+    if (monitorCount == 0) return;
+    targetMac.toLowerCase();
+    targetMac.trim();
+
+    int targetMonIdx = -1;
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
+            targetMonIdx = i;
+            break;
+        }
+    }
+    if (targetMonIdx == -1) targetMonIdx = 0;
+
+    MonitorConfig& mon = monitors[targetMonIdx];
+    long centerX = mon.x + (mon.width / 2);
+    long centerY = mon.y + (mon.height / 2);
+
+    alignPcCursorToCoordinates(targetMonIdx, centerX, centerY, "BOOT CALIBRATION");
 }
 
 // --- BLE Host (Central) Functions ---
@@ -557,15 +520,16 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     if (newMonitorIndex != currentMonitorIndex) {
         if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac)) {
             lastKvmSwitchTime = millis();
-            // Forcefully position target PC's OS cursor at the exact entering edge coordinates!
-            slamPcCursorToEntryCoordinates(targetConnHandle, targetMac, virtualX, virtualY);
+            // Position target PC's OS cursor at exact entering edge coordinates using unified function!
+            alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
+        } else {
+            currentMonitorIndex = newMonitorIndex;
         }
         logPrint("[KVM SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
                       virtualX, virtualY, newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(),
                       monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
                       monitors[newMonitorIndex].y, monitors[newMonitorIndex].y + monitors[newMonitorIndex].height,
                       targetMac.c_str(), targetConnHandle);
-        currentMonitorIndex = newMonitorIndex;
     }
 
     // Send Standard HID Report (5 bytes: Buttons, dX, dY, VScroll, HScroll)

@@ -357,6 +357,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
                     if (!canSwitchPC) continue;
+                    // Candidate monitor MUST be geometrically ABOVE current monitor
+                    if (monitors[i].y + monitors[i].height > currentMon.y) continue;
+
                     bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
                     long dist = abs((monitors[i].y + monitors[i].height) - currentMon.y);
                     long score = dist + (xOverlap ? 0 : 100000);
@@ -379,6 +382,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
                     if (!canSwitchPC) continue;
+                    // Candidate monitor MUST be geometrically BELOW current monitor
+                    if (monitors[i].y < currentMon.y + currentMon.height) continue;
+
                     bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
                     long dist = abs(monitors[i].y - (currentMon.y + currentMon.height));
                     long score = dist + (xOverlap ? 0 : 100000);
@@ -401,6 +407,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
                     if (!canSwitchPC) continue;
+                    // Candidate monitor MUST be geometrically TO THE LEFT of current monitor
+                    if (monitors[i].x + monitors[i].width > currentMon.x) continue;
+
                     bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
                     long dist = abs((monitors[i].x + monitors[i].width) - currentMon.x);
                     long score = dist + (yOverlap ? 0 : 100000);
@@ -423,6 +432,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             for (int i = 0; i < monitorCount; i++) {
                 if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
                     if (!canSwitchPC) continue;
+                    // Candidate monitor MUST be geometrically TO THE RIGHT of current monitor
+                    if (monitors[i].x < currentMon.x + currentMon.width) continue;
+
                     bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
                     long dist = abs(monitors[i].x - (currentMon.x + currentMon.width));
                     long score = dist + (yOverlap ? 0 : 100000);

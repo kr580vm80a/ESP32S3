@@ -36,6 +36,14 @@ long virtualX = 0;
 long virtualY = 0;
 int currentMonitorIndex = 0;
 
+static float subpixelX = 0.0f;
+static float subpixelY = 0.0f;
+
+void resetSubpixelAccumulators() {
+    subpixelX = 0.0f;
+    subpixelY = 0.0f;
+}
+
 // --- BLE Peripheral (Server) Variables ---
 NimBLEServer* pServer = nullptr;
 NimBLEHIDDevice* hidDevice = nullptr;
@@ -314,6 +322,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     virtualX = targetGlobalX;
     virtualY = targetGlobalY;
     currentMonitorIndex = monIndex;
+    resetSubpixelAccumulators();
 
     logPrint("[%s] SUCCESS! Positioned & calibrated PC %s at (%ld, %ld) on Monitor #%d (%s)\n",
              contextLabel, targetMac.c_str(), virtualX, virtualY, currentMonitorIndex + 1, targetMon.id.c_str());
@@ -353,8 +362,6 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
     if (currentScale != 100) {
         float scaleFactor = currentScale / 100.0f;
-        static float subpixelX = 0.0f;
-        static float subpixelY = 0.0f;
 
         float rawStepX = (dx * scaleFactor) + subpixelX;
         float rawStepY = (dy * scaleFactor) + subpixelY;
@@ -364,6 +371,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
         subpixelX = rawStepX - (float)effectiveDx;
         subpixelY = rawStepY - (float)effectiveDy;
+    } else {
+        subpixelX = 0.0f;
+        subpixelY = 0.0f;
     }
 
     virtualX += effectiveDx;

@@ -238,17 +238,23 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
     targetMac.toLowerCase();
     targetMac.trim();
 
-    // Find the first monitor belonging to this MAC address
+    // 1. Find all monitors belonging to targetMac and calculate target PC's Top-Left origin
     int primaryMonIdx = -1;
+    int minPcX = 99999;
+    int minPcY = 99999;
+
     for (int i = 0; i < monitorCount; i++) {
         if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
-            primaryMonIdx = i;
-            break;
+            if (primaryMonIdx == -1) primaryMonIdx = i;
+            if (monitors[i].x < minPcX) minPcX = monitors[i].x;
+            if (monitors[i].y < minPcY) minPcY = monitors[i].y;
         }
     }
 
     if (primaryMonIdx == -1) {
         primaryMonIdx = 0;
+        minPcX = monitors[0].x;
+        minPcY = monitors[0].y;
     }
 
     MonitorConfig& mon = monitors[primaryMonIdx];
@@ -262,13 +268,22 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
         }
     }
 
-    logPrint("[BOOT CALIBRATION] First connected PC (%s) active! Centering cursor on Primary Monitor #%d %s (%dx%d)...\n",
-             targetMac.c_str(), primaryMonIdx + 1, mon.id.c_str(), mon.width, mon.height);
+    // Physical center of Primary Monitor in global canvas space:
+    long globalCenterX = mon.x + (mon.width / 2);
+    long globalCenterY = mon.y + (mon.height / 2);
 
-    // Step 1: Send HID packets to slam OS cursor all the way to Top-Left (0, 0)
-    // 25 packets of (-127, -127) = -3175 px, guaranteeing OS cursor is at (0, 0)
+    // Relative delta from target PC's Top-Left-most pixel (minPcX, minPcY) to Primary Monitor center:
+    int16_t targetDeltaX = (int16_t)(globalCenterX - minPcX);
+    int16_t targetDeltaY = (int16_t)(globalCenterY - minPcY);
+
+    logPrint("[BOOT CALIBRATION] Centering PC %s on Primary Mon #%d %s (%dx%d). Global Center: (%ld, %ld), Top-Left Origin: (%d, %d)...\n",
+             targetMac.c_str(), primaryMonIdx + 1, mon.id.c_str(), mon.width, mon.height,
+             globalCenterX, globalCenterY, minPcX, minPcY);
+
+    // Step A: Send HID packets to slam OS cursor all the way to target PC's Top-Left origin (minPcX, minPcY)
+    // 35 pulses of (-127, -127) = -4445 px, guaranteeing OS cursor is at top-left-most pixel of target PC's virtual desktop
     uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
-    for (int p = 0; p < 25; p++) {
+    for (int p = 0; p < 35; p++) {
         if (targetConnHandle != 0) {
             os_mbuf *om = ble_hs_mbuf_from_flat(topLeftReport, sizeof(topLeftReport));
             if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
@@ -276,15 +291,12 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
             inputChar->setValue(topLeftReport, sizeof(topLeftReport));
             inputChar->notify();
         }
-        delay(12);
+        delay(10);
     }
 
-    // Step 2: Send HID packets to move from (0,0) to center of Primary Monitor (width / 2, height / 2)
-    int16_t targetX = mon.width / 2;
-    int16_t targetY = mon.height / 2;
-
-    int16_t remainingX = targetX;
-    int16_t remainingY = targetY;
+    // Step B: Send HID packets to move from Top-Left origin to target Primary Monitor center
+    int16_t remainingX = targetDeltaX;
+    int16_t remainingY = targetDeltaY;
 
     while (remainingX > 0 || remainingY > 0) {
         int8_t stepX = constrain(remainingX, 0, 127);
@@ -301,14 +313,14 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
 
         remainingX -= stepX;
         remainingY -= stepY;
-        delay(12);
+        delay(10);
     }
 
-    // Step 3: Set ESP32's virtual cursor coordinates to exact physical center
-    virtualX = mon.x + targetX;
-    virtualY = mon.y + targetY;
+    // Step C: Set ESP32's virtual cursor coordinates to exact physical center
+    virtualX = globalCenterX;
+    virtualY = globalCenterY;
 
-    logPrint("[BOOT CALIBRATION] SUCCESS! First PC centered & calibrated at (%ld, %ld) on Monitor #%d (%s)\n",
+    logPrint("[BOOT CALIBRATION] SUCCESS! PC centered & calibrated at (%ld, %ld) on Monitor #%d (%s)\n",
              virtualX, virtualY, currentMonitorIndex + 1, mon.id.c_str());
 }
 

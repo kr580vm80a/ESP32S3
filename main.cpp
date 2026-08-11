@@ -273,18 +273,47 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         }
     }
 
-    float targetScaleFactor = targetMon.scale / 100.0f;
-
     int16_t relX = (int16_t)(targetGlobalX - minPcX);
     int16_t relY = (int16_t)(targetGlobalY - minPcY);
     if (relX < 0) relX = 0;
     if (relY < 0) relY = 0;
 
-    int16_t scaledRelX = (int16_t)round(relX / targetScaleFactor);
-    int16_t scaledRelY = (int16_t)round(relY / targetScaleFactor);
+    // Segment-by-segment HID delta integration across displays of target PC
+    float sumScaledX = 0.0f;
+    for (int px = minPcX; px < targetGlobalX; px++) {
+        float sf = 1.0f;
+        for (int i = 0; i < monitorCount; i++) {
+            if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
+                if (px >= monitors[i].x && px < monitors[i].x + monitors[i].width) {
+                    sf = (monitors[i].scale > 0) ? (monitors[i].scale / 100.0f) : 1.0f;
+                    break;
+                }
+            }
+        }
+        sumScaledX += (1.0f / sf);
+    }
 
-    logPrint("[%s] Aligning PC %s (Mon #%d %s Scale:%d%%) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d | Scaled HID Rel: %d, %d]...\n",
-             contextLabel, targetMac.c_str(), monIndex + 1, targetMon.id.c_str(), targetMon.scale,
+    float sumScaledY = 0.0f;
+    for (int py = minPcY; py < targetGlobalY; py++) {
+        float sf = 1.0f;
+        for (int i = 0; i < monitorCount; i++) {
+            if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
+                if (py >= monitors[i].y && py < monitors[i].y + monitors[i].height) {
+                    sf = (monitors[i].scale > 0) ? (monitors[i].scale / 100.0f) : 1.0f;
+                    break;
+                }
+            }
+        }
+        sumScaledY += (1.0f / sf);
+    }
+
+    int16_t scaledRelX = (int16_t)round(sumScaledX);
+    int16_t scaledRelY = (int16_t)round(sumScaledY);
+
+    String monDisplayName = (targetMon.id.length() > 0 && !targetMon.id.equalsIgnoreCase("null")) ? targetMon.id : ("Monitor #" + String(monIndex + 1));
+
+    logPrint("[%s] Aligning PC %s (Mon #%d %s Scale:%d%%) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d | Multi-Mon Scaled HID Rel: %d, %d]...\n",
+             contextLabel, targetMac.c_str(), monIndex + 1, monDisplayName.c_str(), targetMon.scale,
              targetGlobalX, targetGlobalY, minPcX, minPcY, relX, relY, scaledRelX, scaledRelY);
 
     // Step A: Send HID packets to slam OS cursor all the way to target PC's Top-Left origin (minPcX, minPcY)
@@ -330,7 +359,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     resetSubpixelAccumulators();
 
     logPrint("[%s] SUCCESS! Positioned & calibrated PC %s at (%ld, %ld) on Monitor #%d (%s)\n",
-             contextLabel, targetMac.c_str(), virtualX, virtualY, currentMonitorIndex + 1, targetMon.id.c_str());
+             contextLabel, targetMac.c_str(), virtualX, virtualY, currentMonitorIndex + 1, monDisplayName.c_str());
 }
 
 // --- Boot Center Calibration Wrapper ---
@@ -524,20 +553,21 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             // 1D Axis Dead-End Side Auto-Calibration:
             // When pushing against a side with no neighboring monitor,
             // auto-calibrate the specific axis (X or Y) instantly to exact physical display bounds.
+            String curMonDisplayName = (currentMon.id.length() > 0 && !currentMon.id.equalsIgnoreCase("null")) ? currentMon.id : ("Monitor #" + String(currentMonitorIndex + 1));
             if (dx < 0 && virtualX < currentMon.x) {
                 virtualX = currentMon.x;
-                logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.id.c_str());
+                logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, curMonDisplayName.c_str());
             } else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
                 virtualX = currentMon.x + currentMon.width - 1;
-                logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.id.c_str());
+                logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)\n", virtualX, curMonDisplayName.c_str());
             }
 
             if (dy < 0 && virtualY < currentMon.y) {
                 virtualY = currentMon.y;
-                logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)\n", virtualY, currentMon.id.c_str());
+                logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)\n", virtualY, curMonDisplayName.c_str());
             } else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
                 virtualY = currentMon.y + currentMon.height - 1;
-                logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)\n", virtualY, currentMon.id.c_str());
+                logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)\n", virtualY, curMonDisplayName.c_str());
             }
 
             virtualX = constrain(virtualX, (long)currentMon.x, (long)(currentMon.x + currentMon.width - 1));
@@ -565,8 +595,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         } else {
             currentMonitorIndex = newMonitorIndex;
         }
+        String newMonDisplayName = (monitors[newMonitorIndex].id.length() > 0 && !monitors[newMonitorIndex].id.equalsIgnoreCase("null")) ? monitors[newMonitorIndex].id : ("Monitor #" + String(newMonitorIndex + 1));
         logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
-                      virtualX, virtualY, newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(),
+                      virtualX, virtualY, newMonitorIndex + 1, newMonDisplayName.c_str(),
                       monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
                       monitors[newMonitorIndex].y, monitors[newMonitorIndex].y + monitors[newMonitorIndex].height,
                       targetMac.c_str(), targetConnHandle);
@@ -611,10 +642,10 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
 
         const char* monId = "None";
         if (monitorCount > 0 && currentMonitorIndex >= 0 && currentMonitorIndex < monitorCount) {
-            monId = (monitors[currentMonitorIndex].id.length() > 0) ? monitors[currentMonitorIndex].id.c_str() : "Unnamed";
+            monId = (monitors[currentMonitorIndex].id.length() > 0 && !monitors[currentMonitorIndex].id.equalsIgnoreCase("null")) ? monitors[currentMonitorIndex].id.c_str() : "Unnamed";
         }
 
-        logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VScroll: %d, HScroll: %d | Pos: (%ld, %ld) Mon #%d (%s)\n",
+        logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%d (%s)\n",
                  pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
                  buttons, x, y, scroll, hScroll,
                  virtualX, virtualY, currentMonitorIndex + 1, monId);

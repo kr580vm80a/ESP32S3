@@ -548,13 +548,10 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     }
 
     if (newMonitorIndex != currentMonitorIndex) {
-        bool isDifferentPc = !monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac);
-        bool isDifferentScale = (monitors[newMonitorIndex].scale != monitors[currentMonitorIndex].scale);
-
-        if (isDifferentPc || isDifferentScale) {
-            if (isDifferentPc) lastKvmSwitchTime = millis();
-            // Position OS cursor at exact entering edge coordinates to eliminate scale asymmetry drift!
-            alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, isDifferentPc ? "KVM SYNC EDGE" : "INTRA-PC EDGE SYNC");
+        if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac)) {
+            lastKvmSwitchTime = millis();
+            // Position target PC's OS cursor at exact entering edge coordinates ONLY when switching to a different PC!
+            alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
         } else {
             currentMonitorIndex = newMonitorIndex;
         }

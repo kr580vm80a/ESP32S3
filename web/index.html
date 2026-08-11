@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 283;
+    const BUILD_VERSION = 284;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1846,6 +1846,7 @@
             const finalLayoutX = anchorLayoutX + rawRelX;
             const finalLayoutY = anchorLayoutY + rawRelY;
 
+            const detectedScale = Math.round((d.ratio || 1.0) * 100);
             screens.push({
               id: Date.now() + d.index,
               name: d.label,
@@ -1853,6 +1854,7 @@
               groupName: preservedGroupName,
               width: d.width,
               height: d.height,
+              scale: detectedScale || 100,
               layoutX: finalLayoutX,
               layoutY: finalLayoutY,
               x: 0,
@@ -3630,6 +3632,7 @@
           groupName: groupName,
           width: item.width,
           height: item.height,
+          scale: item.scale || 100,
           layoutX: item.x,
           layoutY: item.y,
           x: posX,

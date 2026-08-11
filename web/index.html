@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 277;
+    const BUILD_VERSION = 278;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -3099,7 +3099,22 @@
         };
 
         if (doc.clients && Array.isArray(doc.clients)) {
-          kvmClients = doc.clients;
+          kvmClients = doc.clients.map(c => {
+            const cMac = (c.mac || '').toLowerCase().trim();
+            // Search all screens across all layouts to see if this MAC has an assigned groupName/group
+            let resolvedGroup = '';
+            if (screens && screens.length > 0) {
+              const match = screens.find(s => s.mac && s.mac.toLowerCase().trim() === cMac);
+              if (match) resolvedGroup = match.groupName || match.group || '';
+            }
+            let name = c.name || '';
+            if (resolvedGroup) {
+              name = resolvedGroup;
+            } else if (!name || name === 'Mortar' || name === 'Detected Device') {
+              name = (c.name && c.name !== 'Mortar') ? c.name : 'Detected Device';
+            }
+            return { ...c, mac: cMac, name };
+          });
         }
 
         if (doc.mouseMac || doc.boundMouseMac) {

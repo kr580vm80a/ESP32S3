@@ -149,6 +149,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 if (!kvmClients[i].active) {
                     kvmClients[i].conn_id = desc->conn_handle;
                     kvmClients[i].mac = peerMac;
+                    kvmClients[i].name = ""; // Always reset name to prevent leaking stale name from previous device
                     kvmClients[i].active = true;
                     break;
                 }

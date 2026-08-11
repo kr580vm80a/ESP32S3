@@ -357,27 +357,28 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
     MonitorConfig& currentMon = monitors[currentMonitorIndex];
     int currentScale = (currentMon.scale > 0) ? currentMon.scale : 100;
-    long effectiveDx = dx;
-    long effectiveDy = dy;
+    
+    int16_t sendDx = dx;
+    int16_t sendDy = dy;
 
     if (currentScale != 100) {
         float scaleFactor = currentScale / 100.0f;
 
-        float rawStepX = (dx * scaleFactor) + subpixelX;
-        float rawStepY = (dy * scaleFactor) + subpixelY;
+        float rawSendX = (dx / scaleFactor) + subpixelX;
+        float rawSendY = (dy / scaleFactor) + subpixelY;
 
-        effectiveDx = (long)truncf(rawStepX);
-        effectiveDy = (long)truncf(rawStepY);
+        sendDx = (int16_t)truncf(rawSendX);
+        sendDy = (int16_t)truncf(rawSendY);
 
-        subpixelX = rawStepX - (float)effectiveDx;
-        subpixelY = rawStepY - (float)effectiveDy;
+        subpixelX = rawSendX - (float)sendDx;
+        subpixelY = rawSendY - (float)sendDy;
     } else {
         subpixelX = 0.0f;
         subpixelY = 0.0f;
     }
 
-    virtualX += effectiveDx;
-    virtualY += effectiveDy;
+    virtualX += dx;
+    virtualY += dy;
 
     // Find which monitor we are currently in
     int newMonitorIndex = -1;
@@ -565,8 +566,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     // Send Standard HID Report (5 bytes: Buttons, dX, dY, VScroll, HScroll)
     uint8_t report[5] = { 
         buttons, 
-        (uint8_t)constrain(dx, -127, 127), 
-        (uint8_t)constrain(dy, -127, 127), 
+        (uint8_t)constrain(sendDx, -127, 127), 
+        (uint8_t)constrain(sendDy, -127, 127), 
         (uint8_t)constrain(scroll, -127, 127),
         (uint8_t)constrain(hScroll, -127, 127) 
     };

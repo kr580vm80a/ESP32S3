@@ -348,19 +348,23 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
     MonitorConfig& currentMon = monitors[currentMonitorIndex];
     int currentScale = (currentMon.scale > 0) ? currentMon.scale : 100;
-    float scaleFactor = currentScale / 100.0f;
+    long effectiveDx = dx;
+    long effectiveDy = dy;
 
-    static float subpixelX = 0.0f;
-    static float subpixelY = 0.0f;
+    if (currentScale != 100) {
+        float scaleFactor = currentScale / 100.0f;
+        static float subpixelX = 0.0f;
+        static float subpixelY = 0.0f;
 
-    float rawStepX = (dx * scaleFactor) + subpixelX;
-    float rawStepY = (dy * scaleFactor) + subpixelY;
+        float rawStepX = (dx * scaleFactor) + subpixelX;
+        float rawStepY = (dy * scaleFactor) + subpixelY;
 
-    long effectiveDx = (long)truncf(rawStepX);
-    long effectiveDy = (long)truncf(rawStepY);
+        effectiveDx = (long)truncf(rawStepX);
+        effectiveDy = (long)truncf(rawStepY);
 
-    subpixelX = rawStepX - (float)effectiveDx;
-    subpixelY = rawStepY - (float)effectiveDy;
+        subpixelX = rawStepX - (float)effectiveDx;
+        subpixelY = rawStepY - (float)effectiveDy;
+    }
 
     virtualX += effectiveDx;
     virtualY += effectiveDy;

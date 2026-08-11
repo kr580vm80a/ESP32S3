@@ -244,14 +244,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 };
 
 String getMonDisplayName(int idx) {
-    if (idx < 0 || idx >= monitorCount) return "Unknown";
-    if (monitors[idx].name.length() > 0 && !monitors[idx].name.equalsIgnoreCase("null") && !monitors[idx].name.equalsIgnoreCase("unnamed")) {
-        return monitors[idx].name;
-    }
-    if (monitors[idx].id.length() > 0 && !monitors[idx].id.equalsIgnoreCase("null")) {
-        return monitors[idx].id;
-    }
-    return "Monitor #" + String(idx + 1);
+    return monitors[idx].name;
 }
 
 // --- Unified PC Cursor Calibration & Edge Positioning Function ---
@@ -652,12 +645,13 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         int8_t scroll = (int8_t)pData[5];
         int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
 
+        String curMonId = monitors[currentMonitorIndex].id;
         String curMonDisplayName = getMonDisplayName(currentMonitorIndex);
 
         logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%d (%s)\n",
                  pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
                  buttons, x, y, scroll, hScroll,
-                 virtualX, virtualY, currentMonitorIndex + 1, curMonDisplayName.c_str());
+                 virtualX, virtualY, curMonId.c_str(), curMonDisplayName.c_str());
 
         updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
     }

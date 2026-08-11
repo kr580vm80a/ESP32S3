@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 297;
+    const BUILD_VERSION = 298;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2471,8 +2471,8 @@
               const macVal = s.mac || (assignedClient ? assignedClient.mac : "");
 
               return {
-                id: index + 1,
-                name: s.name,
+                id: s.name || s.id || (`Monitor #${index + 1}`),
+                name: s.name || (`Monitor #${index + 1}`),
                 group: groupVal,
                 groupName: groupNameVal,
                 mac: macVal,

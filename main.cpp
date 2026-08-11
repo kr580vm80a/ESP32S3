@@ -921,8 +921,17 @@ void loadConfiguration() {
       monitorCount = 0;
       if (arr) {
         for (JsonObject repo : arr) {
-          if (monitorCount >= MAX_MONITORS) break;
-          monitors[monitorCount].id = repo["id"].as<String>();
+          String dispName = "";
+          if (repo["name"].is<String>() && repo["name"].as<String>().length() > 0) {
+            dispName = repo["name"].as<String>();
+          } else if (repo["id"].is<String>() && repo["id"].as<String>().length() > 0) {
+            dispName = repo["id"].as<String>();
+          }
+          dispName.trim();
+          if (dispName.length() == 0 || dispName.equalsIgnoreCase("null") || dispName.equalsIgnoreCase("unnamed")) {
+            dispName = "Monitor #" + String(monitorCount + 1);
+          }
+          monitors[monitorCount].id = dispName;
           monitors[monitorCount].x = repo["x"];
           monitors[monitorCount].y = repo["y"];
           monitors[monitorCount].width = repo["width"];

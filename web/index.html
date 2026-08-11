@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 295;
+    const BUILD_VERSION = 296;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2461,8 +2461,8 @@
             screens: sorted.map((s, index) => {
               const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
               const groupVal = s.group || (isDetected ? currentDeviceId : 'manual');
-              const groupNameVal = s.groupName || s.group_name || (isDetected ? currentDeviceName : 'Manual Preset');
-              const isPrimaryVal = !!(s.isPrimary || s.is_primary || (s.name && s.name.includes('Primary')));
+              const groupNameVal = s.groupName || (isDetected ? currentDeviceName : 'Manual Preset');
+              const isPrimaryVal = !!(s.isPrimary || (s.name && s.name.includes('Primary')));
 
               const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale)) - minLX);
               const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLY);
@@ -2471,7 +2471,7 @@
               const macVal = s.mac || (assignedClient ? assignedClient.mac : "");
 
               return {
-                index: index + 1,
+                id: index + 1,
                 name: s.name,
                 group: groupVal,
                 groupName: groupNameVal,

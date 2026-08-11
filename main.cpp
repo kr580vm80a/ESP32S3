@@ -364,6 +364,9 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     int16_t sendDx = dx;
     int16_t sendDy = dy;
 
+    long effectiveDx = dx;
+    long effectiveDy = dy;
+
     if (currentMon.scale != 100) {
         float scaleFactor = currentMon.scale / 100.0f;
 
@@ -375,13 +378,16 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
         subpixelX = rawSendX - (float)sendDx;
         subpixelY = rawSendY - (float)sendDy;
+
+        effectiveDx = (long)round(sendDx * scaleFactor);
+        effectiveDy = (long)round(sendDy * scaleFactor);
     } else {
         subpixelX = 0.0f;
         subpixelY = 0.0f;
     }
 
-    virtualX += dx;
-    virtualY += dy;
+    virtualX += effectiveDx;
+    virtualY += effectiveDy;
 
     // Find which monitor we are currently in
     int newMonitorIndex = -1;

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 265;
+    const BUILD_VERSION = 266;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -803,7 +803,7 @@
       if (!menu || !container) return;
 
       activeBindingScreen = screen;
-      const currentMac = screen.mac ? screen.mac.toLowerCase() : '';
+      const currentMac = screen.mac ? screen.mac : '';
 
       const btnUnlinkHeader = document.getElementById('btnUnlinkMacHeader');
       if (btnUnlinkHeader) {
@@ -816,7 +816,7 @@
         html += `<div style="font-size: 11px; color: var(--text-muted); padding: 6px;">No KVM Clients registered yet. Add clients in KVM Clients menu.</div>`;
       } else {
         html += kvmClients.map(c => {
-          const isSelected = currentMac && c.mac.toLowerCase() === currentMac;
+          const isSelected = currentMac && c.mac === currentMac;
           const connDot = c.connected ? '<span style="color: #34d399;">●</span>' : '<span style="color: #64748b;">○</span>';
 
           return `
@@ -922,7 +922,7 @@
         }
 
         container.innerHTML = mice.map(m => {
-          const isBound = boundTargetMouseMac && m.mac.toLowerCase() === boundTargetMouseMac.toLowerCase();
+          const isBound = boundTargetMouseMac && m.mac === boundTargetMouseMac;
           const rssiText = m.rssi ? `${m.rssi} dBm` : '';
 
           return `
@@ -967,7 +967,7 @@
     }
 
     function setBoundMouseStatus(mac, name) {
-      boundTargetMouseMac = mac ? mac.toLowerCase().trim() : '';
+      boundTargetMouseMac = mac ? mac : '';
       if (name && name.trim().length > 0) {
         boundTargetMouseName = name.trim();
       } else if (!boundTargetMouseMac) {
@@ -978,7 +978,7 @@
       if (infoEl) {
         if (boundTargetMouseMac) {
           const displayName = boundTargetMouseName || 'BLE Mouse';
-          infoEl.innerHTML = `<b style="color: #f8fafc;">${displayName}</b> <span style="color: #94a3b8;">(${boundTargetMouseMac.toLowerCase()})</span>`;
+          infoEl.innerHTML = `<b style="color: #f8fafc;">${displayName}</b> <span style="color: #94a3b8;">(${boundTargetMouseMac})</span>`;
         } else {
           infoEl.innerHTML = `<span style="color: #64748b;">Not Bound</span>`;
         }
@@ -990,7 +990,7 @@
       if (statusDiv && label) {
         if (boundTargetMouseMac) {
           const displayName = boundTargetMouseName || 'BLE Mouse';
-          label.textContent = `Target Locked: ${displayName} (${boundTargetMouseMac.toLowerCase()})`;
+          label.textContent = `Active: ${displayName} (${boundTargetMouseMac})`;
           statusDiv.style.display = 'flex';
         } else {
           statusDiv.style.display = 'none';
@@ -1042,18 +1042,28 @@
     document.addEventListener('DOMContentLoaded', () => {
       renderClientsList();
     });
-    const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
-    const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
-    const GROUP_COLORS = ['#34d399', '#38bdf8', '#a855f7', '#f43f5e', '#fbbf24', '#818cf8'];
+    const GROUP_COLORS = [
+      '#fbbf24', // 1. Amber / Warm Gold
+      '#38bdf8', // 2. Sky Blue
+      '#34d399', // 3. Emerald Green
+      '#a855f7', // 4. Purple / Violet
+      '#f43f5e', // 5. Rose / Neon Red
+      '#f97316', // 6. Orange
+      '#06b6d4', // 7. Cyan / Turquoise
+      '#ec4899', // 8. Pink / Magenta
+      '#84cc16', // 9. Lime Green
+      '#6366f1'  // 10. Indigo
+    ];
+
+    const groupColorMap = new Map();
 
     function getGroupColor(groupId) {
-      if (!groupId || groupId === 'manual') return COLOR_MANUAL;
-      let hash = 0;
-      for (let i = 0; i < groupId.length; i++) {
-        hash = groupId.charCodeAt(i) + ((hash << 5) - hash);
+      if (!groupId || groupId === 'manual') return '#38bdf8';
+      if (!groupColorMap.has(groupId)) {
+        const colorIndex = groupColorMap.size % GROUP_COLORS.length;
+        groupColorMap.set(groupId, GROUP_COLORS[colorIndex]);
       }
-      const index = Math.abs(hash) % GROUP_COLORS.length;
-      return GROUP_COLORS[index];
+      return groupColorMap.get(groupId);
     }
 
     // Device Identification for Multi-Computer KVM Layout (In-memory)
@@ -1881,7 +1891,7 @@
           layoutY: 0,
           x: 60,
           y: 120,
-          color: COLOR_DETECTED,
+          color: getGroupColor(currentDeviceId),
           isDetected: true,
           isLocked: true,
           isPrimary: true
@@ -1921,7 +1931,7 @@
             height: preset.height,
             x: 60,
             y: 140,
-            color: COLOR_DETECTED,
+            color: getGroupColor(currentDeviceId),
             isDetected: true,
             isLocked: true
           },
@@ -1934,7 +1944,7 @@
             height: 1080,
             x: 175,
             y: 20,
-            color: COLOR_DETECTED,
+            color: getGroupColor(currentDeviceId),
             isDetected: true,
             isLocked: true
           }
@@ -1955,7 +1965,7 @@
           height: preset.height,
           x: 60,
           y: 120,
-          color: COLOR_DETECTED,
+          color: getGroupColor(currentDeviceId),
           isDetected: true,
           isLocked: true
         }];
@@ -2241,7 +2251,7 @@
           if (s.mac && s.mac.includes(':')) {
             const parts = s.mac.split(':');
             if (parts.length >= 3) {
-              macSuffix = ' (' + parts.slice(-3).join(':').toLowerCase() + ')';
+              macSuffix = ' (' + parts.slice(-3).join(':') + ')';
             }
           }
 
@@ -2406,7 +2416,7 @@
               const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale)) - minLX);
               const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLY);
 
-              const assignedClient = kvmClients.find(c => c.mac.toLowerCase() === groupVal.toLowerCase() || c.name === groupNameVal);
+              const assignedClient = kvmClients.find(c => c.mac === groupVal || c.name === groupNameVal);
               const macVal = s.mac || (assignedClient ? assignedClient.mac : "");
 
               return {

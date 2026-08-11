@@ -260,8 +260,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             }
             if (bestIdx != -1) {
                 newMonitorIndex = bestIdx;
-                virtualY = monitors[bestIdx].y + monitors[bestIdx].height - 200;
-                virtualX = constrain(virtualX, (long)monitors[bestIdx].x + 50, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 50));
+                virtualY = monitors[bestIdx].y + monitors[bestIdx].height - 5;
+                virtualX = constrain(virtualX, (long)monitors[bestIdx].x, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 1));
             }
         }
         // Pushing DOWN past bottom edge of current monitor
@@ -282,8 +282,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             }
             if (bestIdx != -1) {
                 newMonitorIndex = bestIdx;
-                virtualY = monitors[bestIdx].y + 200;
-                virtualX = constrain(virtualX, (long)monitors[bestIdx].x + 50, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 50));
+                virtualY = monitors[bestIdx].y + 5;
+                virtualX = constrain(virtualX, (long)monitors[bestIdx].x, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 1));
             }
         }
         // Pushing LEFT past left edge of current monitor
@@ -304,8 +304,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             }
             if (bestIdx != -1) {
                 newMonitorIndex = bestIdx;
-                virtualX = monitors[bestIdx].x + monitors[bestIdx].width - 200;
-                virtualY = constrain(virtualY, (long)monitors[bestIdx].y + 50, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 50));
+                virtualX = monitors[bestIdx].x + monitors[bestIdx].width - 5;
+                virtualY = constrain(virtualY, (long)monitors[bestIdx].y, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 1));
             }
         }
         // Pushing RIGHT past right edge of current monitor
@@ -326,8 +326,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             }
             if (bestIdx != -1) {
                 newMonitorIndex = bestIdx;
-                virtualX = monitors[bestIdx].x + 200;
-                virtualY = constrain(virtualY, (long)monitors[bestIdx].y + 50, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 50));
+                virtualX = monitors[bestIdx].x + 5;
+                virtualY = constrain(virtualY, (long)monitors[bestIdx].y, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 1));
             }
         }
 
@@ -338,15 +338,19 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             // When pushing against a side with no neighboring monitor,
             // auto-calibrate the specific axis (X or Y) instantly to exact physical display bounds.
             if (dx < 0 && virtualX < currentMon.x) {
-                virtualX = currentMon.x; // Calibrate X to left physical edge
+                virtualX = currentMon.x;
+                logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.id.c_str());
             } else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
-                virtualX = currentMon.x + currentMon.width - 1; // Calibrate X to right physical edge
+                virtualX = currentMon.x + currentMon.width - 1;
+                logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.id.c_str());
             }
 
             if (dy < 0 && virtualY < currentMon.y) {
-                virtualY = currentMon.y; // Calibrate Y to top physical edge
+                virtualY = currentMon.y;
+                logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)\n", virtualY, currentMon.id.c_str());
             } else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
-                virtualY = currentMon.y + currentMon.height - 1; // Calibrate Y to bottom physical edge
+                virtualY = currentMon.y + currentMon.height - 1;
+                logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)\n", virtualY, currentMon.id.c_str());
             }
 
             virtualX = constrain(virtualX, (long)currentMon.x, (long)(currentMon.x + currentMon.width - 1));
@@ -415,9 +419,11 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         int8_t scroll = (int8_t)pData[5];
         int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
 
-        logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VScroll: %d, HScroll: %d\n",
+        logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VScroll: %d, HScroll: %d | Pos: (%ld, %ld) Mon #%d (%s)\n",
                  pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
-                 buttons, x, y, scroll, hScroll);
+                 buttons, x, y, scroll, hScroll,
+                 virtualX, virtualY, currentMonitorIndex + 1,
+                 monitorCount > 0 ? monitors[currentMonitorIndex].id.c_str() : "None");
 
         updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
     }

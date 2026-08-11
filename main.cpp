@@ -569,11 +569,15 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
         int8_t scroll = (int8_t)pData[5];
         int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
 
+        const char* monId = "None";
+        if (monitorCount > 0 && currentMonitorIndex >= 0 && currentMonitorIndex < monitorCount) {
+            monId = (monitors[currentMonitorIndex].id.length() > 0) ? monitors[currentMonitorIndex].id.c_str() : "Unnamed";
+        }
+
         logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VScroll: %d, HScroll: %d | Pos: (%ld, %ld) Mon #%d (%s)\n",
                  pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
                  buttons, x, y, scroll, hScroll,
-                 virtualX, virtualY, currentMonitorIndex + 1,
-                 monitorCount > 0 ? monitors[currentMonitorIndex].id.c_str() : "None");
+                 virtualX, virtualY, currentMonitorIndex + 1, monId);
 
         updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
     }

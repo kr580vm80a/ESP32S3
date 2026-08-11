@@ -273,8 +273,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         }
     }
 
-    int scale = targetMon.scale;
-    float targetScaleFactor = scale / 100.0f;
+    float targetScaleFactor = targetMon.scale / 100.0f;
 
     int16_t relX = (int16_t)(targetGlobalX - minPcX);
     int16_t relY = (int16_t)(targetGlobalY - minPcY);
@@ -285,7 +284,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     int16_t scaledRelY = (int16_t)round(relY / targetScaleFactor);
 
     logPrint("[%s] Aligning PC %s (Mon #%d %s Scale:%d%%) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d | Scaled HID Rel: %d, %d]...\n",
-             contextLabel, targetMac.c_str(), monIndex + 1, targetMon.id.c_str(), scale,
+             contextLabel, targetMac.c_str(), monIndex + 1, targetMon.id.c_str(), targetMon.scale,
              targetGlobalX, targetGlobalY, minPcX, minPcY, relX, relY, scaledRelX, scaledRelY);
 
     // Step A: Send HID packets to slam OS cursor all the way to target PC's Top-Left origin (minPcX, minPcY)
@@ -362,13 +361,11 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     if (monitorCount == 0) return;
 
     MonitorConfig& currentMon = monitors[currentMonitorIndex];
-    int currentScale = currentMon.scale;
-    
     int16_t sendDx = dx;
     int16_t sendDy = dy;
 
-    if (currentScale != 100) {
-        float scaleFactor = currentScale / 100.0f;
+    if (currentMon.scale != 100) {
+        float scaleFactor = currentMon.scale / 100.0f;
 
         float rawSendX = (dx / scaleFactor) + subpixelX;
         float rawSendY = (dy / scaleFactor) + subpixelY;

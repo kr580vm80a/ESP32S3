@@ -350,8 +350,17 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     int currentScale = (currentMon.scale > 0) ? currentMon.scale : 100;
     float scaleFactor = currentScale / 100.0f;
 
-    long effectiveDx = (long)round(dx * scaleFactor);
-    long effectiveDy = (long)round(dy * scaleFactor);
+    static float subpixelX = 0.0f;
+    static float subpixelY = 0.0f;
+
+    float rawStepX = (dx * scaleFactor) + subpixelX;
+    float rawStepY = (dy * scaleFactor) + subpixelY;
+
+    long effectiveDx = (long)rawStepX;
+    long effectiveDy = (long)rawStepY;
+
+    subpixelX = rawStepX - (float)effectiveDx;
+    subpixelY = rawStepY - (float)effectiveDy;
 
     virtualX += effectiveDx;
     virtualY += effectiveDy;

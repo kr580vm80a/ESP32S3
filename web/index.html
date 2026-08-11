@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 263;
+    const BUILD_VERSION = 264;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -968,10 +968,8 @@
 
     function setBoundMouseStatus(mac, name) {
       boundTargetMouseMac = mac ? mac.toLowerCase().trim() : '';
-      if (name) {
+      if (name && name.trim().length > 0) {
         boundTargetMouseName = name.trim();
-      } else if (!boundTargetMouseName && boundTargetMouseMac) {
-        boundTargetMouseName = 'BLE Mouse';
       } else if (!boundTargetMouseMac) {
         boundTargetMouseName = '';
       }
@@ -3095,7 +3093,7 @@
         }
 
         if (doc.mouseMac || doc.boundMouseMac) {
-          setBoundMouseStatus(doc.mouseMac || doc.boundMouseMac);
+          setBoundMouseStatus(doc.mouseMac || doc.boundMouseMac, doc.mouseName || doc.boundMouseName || '');
         }
 
         syncScreensReference();
@@ -3189,15 +3187,21 @@
         console.log(`[${source} MICE LOG] Received scanned mice from ESP32:`, jsonStr);
         renderScannedMiceList(jsonStr);
       } else if (line.startsWith('OK_BIND_MOUSE ')) {
-        const mac = line.substring(14).trim();
-        console.log(`[${source} BIND MOUSE] Target locked to ${mac}`);
-        setBoundMouseStatus(mac);
+        const payload = line.substring(14).trim();
+        const spaceIdx = payload.indexOf(' ');
+        const mac = spaceIdx !== -1 ? payload.substring(0, spaceIdx) : payload;
+        const name = spaceIdx !== -1 ? payload.substring(spaceIdx + 1) : (boundTargetMouseName || 'BLE Mouse');
+        console.log(`[${source} BIND MOUSE] Target locked to ${name} (${mac})`);
+        setBoundMouseStatus(mac, name);
       } else if (line.startsWith('OK_UNBIND_MOUSE')) {
         console.log(`[${source} UNBIND MOUSE] Target mouse lock cleared`);
-        setBoundMouseStatus('');
+        setBoundMouseStatus('', '');
       } else if (line.startsWith('TARGET_MOUSE ')) {
-        const mac = line.substring(13).trim();
-        setBoundMouseStatus(mac);
+        const payload = line.substring(13).trim();
+        const spaceIdx = payload.indexOf(' ');
+        const mac = spaceIdx !== -1 ? payload.substring(0, spaceIdx) : payload;
+        const name = spaceIdx !== -1 ? payload.substring(spaceIdx + 1) : (boundTargetMouseName || 'BLE Mouse');
+        setBoundMouseStatus(mac, name);
       } else if (line.startsWith('OK_SAVE')) {
         console.log(`[${source} SAVE LOG] ESP32 confirmed SAVE_CONFIG successful!`);
       }

@@ -124,6 +124,8 @@ static bool doConnect = false;
 static NimBLEUUID hidServiceUUID("1812");
 static NimBLEUUID reportCharUUID("2a4d");
 
+void calibrateFirstConnectedPcToCenter(String targetMac);
+
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
@@ -152,11 +154,25 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 }
             }
         }
-        // Resume advertising so 2nd PC (Mortar) can discover and connect
+        // Count active connections
         int activeCount = 0;
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
             if (kvmClients[i].active) activeCount++;
         }
+
+        // If this is the FIRST connected PC, assign control & calibrate cursor to center of primary screen!
+        if (activeCount == 1) {
+            String firstMac = peerMac;
+            xTaskCreate([](void* param) {
+                String* pMac = (String*)param;
+                vTaskDelay(pdMS_TO_TICKS(600));
+                calibrateFirstConnectedPcToCenter(*pMac);
+                delete pMac;
+                vTaskDelete(NULL);
+            }, "bootCalibTask", 3072, new String(firstMac), 1, NULL);
+        }
+
+        // Resume advertising so 2nd PC can discover and connect
         if (activeCount < MAX_KVM_CLIENTS) {
             xTaskCreate([](void* param) {
                 vTaskDelay(pdMS_TO_TICKS(1500));
@@ -215,6 +231,86 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         return true;
     }
 };
+
+// --- Boot Center Calibration for First Connected PC ---
+void calibrateFirstConnectedPcToCenter(String targetMac) {
+    if (monitorCount == 0) return;
+    targetMac.toLowerCase();
+    targetMac.trim();
+
+    // Find the first monitor belonging to this MAC address
+    int primaryMonIdx = -1;
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
+            primaryMonIdx = i;
+            break;
+        }
+    }
+
+    if (primaryMonIdx == -1) {
+        primaryMonIdx = 0;
+    }
+
+    MonitorConfig& mon = monitors[primaryMonIdx];
+    currentMonitorIndex = primaryMonIdx;
+
+    uint16_t targetConnHandle = 0;
+    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active && kvmClients[i].mac.equalsIgnoreCase(targetMac)) {
+            targetConnHandle = kvmClients[i].conn_id;
+            break;
+        }
+    }
+
+    logPrint("[BOOT CALIBRATION] First connected PC (%s) active! Centering cursor on Primary Monitor #%d %s (%dx%d)...\n",
+             targetMac.c_str(), primaryMonIdx + 1, mon.id.c_str(), mon.width, mon.height);
+
+    // Step 1: Send HID packets to slam OS cursor all the way to Top-Left (0, 0)
+    // 25 packets of (-127, -127) = -3175 px, guaranteeing OS cursor is at (0, 0)
+    uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
+    for (int p = 0; p < 25; p++) {
+        if (targetConnHandle != 0) {
+            os_mbuf *om = ble_hs_mbuf_from_flat(topLeftReport, sizeof(topLeftReport));
+            if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+        } else if (inputChar) {
+            inputChar->setValue(topLeftReport, sizeof(topLeftReport));
+            inputChar->notify();
+        }
+        delay(12);
+    }
+
+    // Step 2: Send HID packets to move from (0,0) to center of Primary Monitor (width / 2, height / 2)
+    int16_t targetX = mon.width / 2;
+    int16_t targetY = mon.height / 2;
+
+    int16_t remainingX = targetX;
+    int16_t remainingY = targetY;
+
+    while (remainingX > 0 || remainingY > 0) {
+        int8_t stepX = constrain(remainingX, 0, 127);
+        int8_t stepY = constrain(remainingY, 0, 127);
+
+        uint8_t stepReport[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
+        if (targetConnHandle != 0) {
+            os_mbuf *om = ble_hs_mbuf_from_flat(stepReport, sizeof(stepReport));
+            if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+        } else if (inputChar) {
+            inputChar->setValue(stepReport, sizeof(stepReport));
+            inputChar->notify();
+        }
+
+        remainingX -= stepX;
+        remainingY -= stepY;
+        delay(12);
+    }
+
+    // Step 3: Set ESP32's virtual cursor coordinates to exact physical center
+    virtualX = mon.x + targetX;
+    virtualY = mon.y + targetY;
+
+    logPrint("[BOOT CALIBRATION] SUCCESS! First PC centered & calibrated at (%ld, %ld) on Monitor #%d (%s)\n",
+             virtualX, virtualY, currentMonitorIndex + 1, mon.id.c_str());
+}
 
 // --- BLE Host (Central) Functions ---
 

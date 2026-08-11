@@ -232,6 +232,57 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 };
 
+// --- Position Target PC's OS Cursor at Exact Boundary Entry Coordinates ---
+void slamPcCursorToEntryCoordinates(uint16_t targetConnHandle, String targetMac, long targetGlobalX, long targetGlobalY) {
+    if (targetConnHandle == 0 || monitorCount == 0) return;
+    targetMac.toLowerCase();
+    targetMac.trim();
+
+    // Calculate target PC's Top-Left origin (minPcX, minPcY)
+    int minPcX = 99999;
+    int minPcY = 99999;
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
+            if (monitors[i].x < minPcX) minPcX = monitors[i].x;
+            if (monitors[i].y < minPcY) minPcY = monitors[i].y;
+        }
+    }
+    if (minPcX == 99999) return;
+
+    int16_t relX = (int16_t)(targetGlobalX - minPcX);
+    int16_t relY = (int16_t)(targetGlobalY - minPcY);
+    if (relX < 0) relX = 0;
+    if (relY < 0) relY = 0;
+
+    logPrint("[KVM SYNC EDGE] Positioning PC %s cursor at edge entry (%ld, %ld) [Rel: %d, %d]...\n",
+             targetMac.c_str(), targetGlobalX, targetGlobalY, relX, relY);
+
+    // Step A: Slam OS cursor to Top-Left origin (0, 0) of target PC
+    uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
+    for (int p = 0; p < 25; p++) {
+        os_mbuf *om = ble_hs_mbuf_from_flat(topLeftReport, sizeof(topLeftReport));
+        if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+        delay(6);
+    }
+
+    // Step B: Move OS cursor from (0,0) to exact entering edge coordinates (relX, relY)
+    int16_t remainingX = relX;
+    int16_t remainingY = relY;
+
+    while (remainingX > 0 || remainingY > 0) {
+        int8_t stepX = constrain(remainingX, 0, 127);
+        int8_t stepY = constrain(remainingY, 0, 127);
+
+        uint8_t stepReport[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
+        os_mbuf *om = ble_hs_mbuf_from_flat(stepReport, sizeof(stepReport));
+        if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+
+        remainingX -= stepX;
+        remainingY -= stepY;
+        delay(6);
+    }
+}
+
 // --- Boot Center Calibration for First Connected PC ---
 void calibrateFirstConnectedPcToCenter(String targetMac) {
     if (monitorCount == 0) return;
@@ -505,6 +556,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     if (newMonitorIndex != currentMonitorIndex) {
         if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac)) {
             lastKvmSwitchTime = millis();
+            // Forcefully position target PC's OS cursor at the exact entering edge coordinates!
+            slamPcCursorToEntryCoordinates(targetConnHandle, targetMac, virtualX, virtualY);
         }
         logPrint("[KVM SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
                       virtualX, virtualY, newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(),

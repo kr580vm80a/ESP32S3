@@ -359,12 +359,15 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                     if (!canSwitchPC) continue;
                     // Candidate monitor MUST be geometrically ABOVE current monitor
                     if (monitors[i].y + monitors[i].height > currentMon.y) continue;
-
+                    // Candidate monitor MUST touch/overlap along X axis
                     bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
+                    if (!xOverlap) continue;
+                    // Distance between edges must be adjacent (no large gap)
                     long dist = abs((monitors[i].y + monitors[i].height) - currentMon.y);
-                    long score = dist + (xOverlap ? 0 : 100000);
-                    if (score < minScore) {
-                        minScore = score;
+                    if (dist > 150) continue;
+
+                    if (dist < minScore) {
+                        minScore = dist;
                         bestIdx = i;
                     }
                 }
@@ -384,12 +387,15 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                     if (!canSwitchPC) continue;
                     // Candidate monitor MUST be geometrically BELOW current monitor
                     if (monitors[i].y < currentMon.y + currentMon.height) continue;
-
+                    // Candidate monitor MUST touch/overlap along X axis
                     bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
+                    if (!xOverlap) continue;
+                    // Distance between edges must be adjacent (no large gap)
                     long dist = abs(monitors[i].y - (currentMon.y + currentMon.height));
-                    long score = dist + (xOverlap ? 0 : 100000);
-                    if (score < minScore) {
-                        minScore = score;
+                    if (dist > 150) continue;
+
+                    if (dist < minScore) {
+                        minScore = dist;
                         bestIdx = i;
                     }
                 }
@@ -409,12 +415,15 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                     if (!canSwitchPC) continue;
                     // Candidate monitor MUST be geometrically TO THE LEFT of current monitor
                     if (monitors[i].x + monitors[i].width > currentMon.x) continue;
-
+                    // Candidate monitor MUST touch/overlap along Y axis
                     bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
+                    if (!yOverlap) continue;
+                    // Distance between edges must be adjacent (no large gap)
                     long dist = abs((monitors[i].x + monitors[i].width) - currentMon.x);
-                    long score = dist + (yOverlap ? 0 : 100000);
-                    if (score < minScore) {
-                        minScore = score;
+                    if (dist > 150) continue;
+
+                    if (dist < minScore) {
+                        minScore = dist;
                         bestIdx = i;
                     }
                 }
@@ -434,12 +443,15 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                     if (!canSwitchPC) continue;
                     // Candidate monitor MUST be geometrically TO THE RIGHT of current monitor
                     if (monitors[i].x < currentMon.x + currentMon.width) continue;
-
+                    // Candidate monitor MUST touch/overlap along Y axis
                     bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
+                    if (!yOverlap) continue;
+                    // Distance between edges must be adjacent (no large gap)
                     long dist = abs(monitors[i].x - (currentMon.x + currentMon.width));
-                    long score = dist + (yOverlap ? 0 : 100000);
-                    if (score < minScore) {
-                        minScore = score;
+                    if (dist > 150) continue;
+
+                    if (dist < minScore) {
+                        minScore = dist;
                         bestIdx = i;
                     }
                 }

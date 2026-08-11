@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 278;
+    const BUILD_VERSION = 279;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -499,9 +499,9 @@
   </div>
 
   <!-- Floating Bluetooth Binding Dropdown Menu (Direct Child of Body) -->
-  <div id="btBindingMenu" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 320px; max-height: 320px; overflow: hidden; z-index: 100000; padding: 8px;">
+  <div id="btBindingMenu" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 320px; max-height: 360px; overflow: hidden; z-index: 100000; padding: 8px;">
     <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-      <span>Bind Client</span>
+      <span>Bind Client & Scale</span>
       <div style="display: flex; align-items: center; gap: 4px;">
         <button class="icon-btn icon-btn-danger" id="btnUnlinkMacHeader" onclick="unbindScreenMac()" title="Unbind / Disconnect MAC" style="width: 22px; height: 22px; color: #ef4444; display: none;">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="2" x2="22" y2="22"></line><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
@@ -509,7 +509,18 @@
         <button class="icon-btn" onclick="closeBtBindingMenu()" title="Close" style="width: 22px; height: 22px; color: #94a3b8;">✕</button>
       </div>
     </div>
-    <div id="btBindingList" class="preset-list" style="max-height: 250px; overflow-y: auto;"></div>
+    <div id="btBindingList" class="preset-list" style="max-height: 200px; overflow-y: auto;"></div>
+    <div style="font-size: 10px; font-weight: 700; color: #94a3b8; padding: 6px; border-top: 1px solid var(--border-color); margin-top: 6px; display: flex; justify-content: space-between; align-items: center; background: rgba(2, 6, 23, 0.4); border-radius: 6px;">
+      <span style="display: flex; align-items: center; gap: 4px; color: #f8fafc;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+        Display Scale:
+      </span>
+      <select id="btBindingScaleSelect" onchange="updateActiveBindingScreenScale(this.value)" style="background: #020617; border: 1px solid #334155; color: #38bdf8; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600; border-radius: 4px; padding: 2px 6px; outline: none; cursor: pointer;">
+        <option value="100">100% (Default)</option>
+        <option value="125">125% (Laptop Scale)</option>
+        <option value="150">150% (High DPI)</option>
+      </select>
+    </div>
   </div>
 
   <!-- Floating BLE Mouse Scanner Modal (Direct Child of Body) -->
@@ -834,9 +845,14 @@
 
       container.innerHTML = html;
 
+      const scaleSelect = document.getElementById('btBindingScaleSelect');
+      if (scaleSelect) {
+        scaleSelect.value = String(screen.scale || 100);
+      }
+
       window.justOpenedBtMenu = true;
       const menuWidth = 320;
-      const menuHeight = 260;
+      const menuHeight = 310;
 
       // Position exactly 12px to the right of the clicked Bluetooth icon
       let left = clientX + 12;
@@ -863,6 +879,27 @@
       const menu = document.getElementById('btBindingMenu');
       if (menu) menu.style.display = 'none';
       activeBindingScreen = null;
+    }
+
+    function updateActiveBindingScreenScale(val) {
+      if (!activeBindingScreen) return;
+      const parsedScale = parseInt(val, 10) || 100;
+      activeBindingScreen.scale = parsedScale;
+      saveAndSyncLayout();
+      draw();
+    }
+
+    function cycleScreenScale(screen) {
+      if (!screen) return;
+      const cur = screen.scale || 100;
+      let nextScale = 100;
+      if (cur === 100) nextScale = 125;
+      else if (cur === 125) nextScale = 150;
+      else nextScale = 100;
+      
+      screen.scale = nextScale;
+      saveAndSyncLayout();
+      draw();
     }
 
     // --- BLE Mouse Scanner & Target Lock ---
@@ -2338,6 +2375,31 @@
           s.btIconHitBox = null;
         }
 
+        // --- Scale Indicator Badge (Bottom Left Corner) - ONLY IF scale !== 100 ---
+        const scaleVal = s.scale || 100;
+        if (scaleVal !== 100) {
+          const badgeX = s.x + 10;
+          const badgeY = s.y + sh - 24;
+          const badgeW = 44;
+          const badgeH = 18;
+
+          s.scaleBadgeHitBox = { x: badgeX - 2, y: badgeY - 2, w: badgeW + 4, h: badgeH + 4, screen: s };
+
+          ctx.fillStyle = 'rgba(2, 6, 23, 0.88)';
+          ctx.strokeStyle = '#38bdf8';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#38bdf8';
+          ctx.font = '600 10px "JetBrains Mono", monospace';
+          ctx.fillText(`${scaleVal}%`, badgeX + 7, badgeY + 13);
+        } else {
+          s.scaleBadgeHitBox = null;
+        }
+
 
         // --- Red Delete Button (Top Right Corner) ---
         // For auto-detected screens, show delete button ONLY on Primary screen of its group
@@ -2429,6 +2491,7 @@
                 y: relY,
                 width: s.width,
                 height: s.height,
+                scale: s.scale || 100,
                 isDetected: isDetected,
                 isPrimary: isPrimaryVal
               };
@@ -2548,6 +2611,16 @@
           const dist = Math.hypot(mx - s.deleteBtn.x, my - s.deleteBtn.y);
           if (dist <= s.deleteBtn.r + 4) {
             removeScreen(s.id);
+            return;
+          }
+        }
+
+        // Check Click on Scale Indicator Badge (Bottom Left Corner)
+        if (s.scaleBadgeHitBox) {
+          const hb = s.scaleBadgeHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            e.stopPropagation();
+            cycleScreenScale(s);
             return;
           }
         }
@@ -3089,6 +3162,7 @@
                 layoutY: posY,
                 width: s.width || 1920,
                 height: s.height || 1080,
+                scale: s.scale || 100,
                 color: s.color || getGroupColor(grp),
                 isDetected: isDet,
                 isLocked: isDet,
@@ -3099,22 +3173,7 @@
         };
 
         if (doc.clients && Array.isArray(doc.clients)) {
-          kvmClients = doc.clients.map(c => {
-            const cMac = (c.mac || '').toLowerCase().trim();
-            // Search all screens across all layouts to see if this MAC has an assigned groupName/group
-            let resolvedGroup = '';
-            if (screens && screens.length > 0) {
-              const match = screens.find(s => s.mac && s.mac.toLowerCase().trim() === cMac);
-              if (match) resolvedGroup = match.groupName || match.group || '';
-            }
-            let name = c.name || '';
-            if (resolvedGroup) {
-              name = resolvedGroup;
-            } else if (!name || name === 'Mortar' || name === 'Detected Device') {
-              name = (c.name && c.name !== 'Mortar') ? c.name : 'Detected Device';
-            }
-            return { ...c, mac: cMac, name };
-          });
+          kvmClients = doc.clients;
         }
 
         if (doc.mouseMac || doc.boundMouseMac) {

@@ -24,6 +24,7 @@ struct MonitorConfig {
   int width;
   int height;
   String mac;
+  int scale = 100;
 };
 
 #define MAX_MONITORS 10
@@ -345,10 +346,15 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
 void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t scroll, int8_t hScroll) {
     if (monitorCount == 0) return;
 
-    virtualX += dx;
-    virtualY += dy;
-
     MonitorConfig& currentMon = monitors[currentMonitorIndex];
+    int currentScale = (currentMon.scale > 0) ? currentMon.scale : 100;
+    float scaleFactor = currentScale / 100.0f;
+
+    long effectiveDx = (long)round(dx / scaleFactor);
+    long effectiveDy = (long)round(dy / scaleFactor);
+
+    virtualX += effectiveDx;
+    virtualY += effectiveDy;
 
     // Find which monitor we are currently in
     int newMonitorIndex = -1;
@@ -858,6 +864,7 @@ void loadConfiguration() {
           monitors[monitorCount].width = repo["width"];
           monitors[monitorCount].height = repo["height"];
           monitors[monitorCount].mac = repo["mac"].as<String>();
+          monitors[monitorCount].scale = repo["scale"].is<int>() ? repo["scale"].as<int>() : 100;
           monitorCount++;
         }
       }

@@ -548,14 +548,17 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     }
 
     if (newMonitorIndex != currentMonitorIndex) {
-        if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac)) {
-            lastKvmSwitchTime = millis();
-            // Position target PC's OS cursor at exact entering edge coordinates using unified function!
-            alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
+        bool isDifferentPc = !monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac);
+        bool isDifferentScale = (monitors[newMonitorIndex].scale != monitors[currentMonitorIndex].scale);
+
+        if (isDifferentPc || isDifferentScale) {
+            if (isDifferentPc) lastKvmSwitchTime = millis();
+            // Position OS cursor at exact entering edge coordinates to eliminate scale asymmetry drift!
+            alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, isDifferentPc ? "KVM SYNC EDGE" : "INTRA-PC EDGE SYNC");
         } else {
             currentMonitorIndex = newMonitorIndex;
         }
-        logPrint("[KVM SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
+        logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
                       virtualX, virtualY, newMonitorIndex + 1, monitors[newMonitorIndex].id.c_str(),
                       monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
                       monitors[newMonitorIndex].y, monitors[newMonitorIndex].y + monitors[newMonitorIndex].height,

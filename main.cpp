@@ -257,9 +257,10 @@ void slamPcCursorToEntryCoordinates(uint16_t targetConnHandle, String targetMac,
     logPrint("[KVM SYNC EDGE] Positioning PC %s cursor at edge entry (%ld, %ld) [Rel: %d, %d]...\n",
              targetMac.c_str(), targetGlobalX, targetGlobalY, relX, relY);
 
-    // Step A: Slam OS cursor to Top-Left origin (0, 0) of target PC
+    // Step A: Slam OS cursor to Top-Left origin (minPcX, minPcY) of target PC
+    // 35 pulses of (-127, -127) = -4445 px, guaranteeing reaching top-left origin even across multiple 4K displays
     uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
-    for (int p = 0; p < 25; p++) {
+    for (int p = 0; p < 35; p++) {
         os_mbuf *om = ble_hs_mbuf_from_flat(topLeftReport, sizeof(topLeftReport));
         if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
         delay(6);

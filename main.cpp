@@ -333,33 +333,24 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
         if (newMonitorIndex == -1) {
             newMonitorIndex = currentMonitorIndex;
-            long clampedX = constrain(virtualX, (long)currentMon.x, (long)(currentMon.x + currentMon.width - 1));
-            long clampedY = constrain(virtualY, (long)currentMon.y, (long)(currentMon.y + currentMon.height - 1));
 
-            // Dead-End Corner Auto-Calibration:
-            // When cursor is pushed continuously into a corner with no neighboring PC,
-            // reset virtual accumulator to exact monitor corner coordinates.
-            static unsigned long cornerParkStart = 0;
-            static bool cornerCalibrated = false;
-            bool isCorner = (clampedX == currentMon.x || clampedX == currentMon.x + currentMon.width - 1) &&
-                            (clampedY == currentMon.y || clampedY == currentMon.y + currentMon.height - 1);
-
-            if (isCorner) {
-                if (cornerParkStart == 0) {
-                    cornerParkStart = millis();
-                    cornerCalibrated = false;
-                } else if (!cornerCalibrated && (millis() - cornerParkStart > 150)) {
-                    cornerCalibrated = true;
-                    logPrint("[CALIBRATION] Dead-end corner auto-calibrated at (%ld, %ld) for monitor %s\n",
-                             clampedX, clampedY, currentMon.id.c_str());
-                }
-            } else {
-                cornerParkStart = 0;
-                cornerCalibrated = false;
+            // 1D Axis Dead-End Side Auto-Calibration:
+            // When pushing against a side with no neighboring monitor,
+            // auto-calibrate the specific axis (X or Y) instantly to exact physical display bounds.
+            if (dx < 0 && virtualX < currentMon.x) {
+                virtualX = currentMon.x; // Calibrate X to left physical edge
+            } else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
+                virtualX = currentMon.x + currentMon.width - 1; // Calibrate X to right physical edge
             }
 
-            virtualX = clampedX;
-            virtualY = clampedY;
+            if (dy < 0 && virtualY < currentMon.y) {
+                virtualY = currentMon.y; // Calibrate Y to top physical edge
+            } else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
+                virtualY = currentMon.y + currentMon.height - 1; // Calibrate Y to bottom physical edge
+            }
+
+            virtualX = constrain(virtualX, (long)currentMon.x, (long)(currentMon.x + currentMon.width - 1));
+            virtualY = constrain(virtualY, (long)currentMon.y, (long)(currentMon.y + currentMon.height - 1));
         }
     }
     

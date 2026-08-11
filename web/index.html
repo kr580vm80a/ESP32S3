@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 279;
+    const BUILD_VERSION = 280;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -2375,30 +2375,27 @@
           s.btIconHitBox = null;
         }
 
-        // --- Scale Indicator Badge (Bottom Left Corner) - ONLY IF scale !== 100 ---
+        // --- Scale Indicator Badge (Bottom Left Corner) ---
         const scaleVal = s.scale || 100;
-        if (scaleVal !== 100) {
-          const badgeX = s.x + 10;
-          const badgeY = s.y + sh - 24;
-          const badgeW = 44;
-          const badgeH = 18;
+        const isNonDefaultScale = (scaleVal !== 100);
+        const badgeX = s.x + 10;
+        const badgeY = s.y + sh - 24;
+        const badgeW = 44;
+        const badgeH = 18;
 
-          s.scaleBadgeHitBox = { x: badgeX - 2, y: badgeY - 2, w: badgeW + 4, h: badgeH + 4, screen: s };
+        s.scaleBadgeHitBox = { x: badgeX - 2, y: badgeY - 2, w: badgeW + 4, h: badgeH + 4, screen: s };
 
-          ctx.fillStyle = 'rgba(2, 6, 23, 0.88)';
-          ctx.strokeStyle = '#38bdf8';
-          ctx.lineWidth = 1.2;
-          ctx.beginPath();
-          ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
-          ctx.fill();
-          ctx.stroke();
+        ctx.fillStyle = isNonDefaultScale ? 'rgba(2, 6, 23, 0.92)' : 'rgba(15, 23, 42, 0.75)';
+        ctx.strokeStyle = isNonDefaultScale ? '#38bdf8' : '#334155';
+        ctx.lineWidth = isNonDefaultScale ? 1.4 : 1.0;
+        ctx.beginPath();
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 4);
+        ctx.fill();
+        ctx.stroke();
 
-          ctx.fillStyle = '#38bdf8';
-          ctx.font = '600 10px "JetBrains Mono", monospace';
-          ctx.fillText(`${scaleVal}%`, badgeX + 7, badgeY + 13);
-        } else {
-          s.scaleBadgeHitBox = null;
-        }
+        ctx.fillStyle = isNonDefaultScale ? '#38bdf8' : '#94a3b8';
+        ctx.font = '600 10px "JetBrains Mono", monospace';
+        ctx.fillText(`${scaleVal}%`, badgeX + 7, badgeY + 13);
 
 
         // --- Red Delete Button (Top Right Corner) ---

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 281;
+    const BUILD_VERSION = 282;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -879,6 +879,23 @@
       const menu = document.getElementById('btBindingMenu');
       if (menu) menu.style.display = 'none';
       activeBindingScreen = null;
+    }
+
+    async function saveESP32ConfigSilently() {
+      updateJSON();
+      try {
+        const parsed = JSON.parse(currentConfigJSON);
+        if (boundTargetMouseMac) parsed.mouseMac = boundTargetMouseMac;
+        const minifiedJson = JSON.stringify(parsed);
+        if (activeConnectionType !== 'none') {
+          await sendESP32Command(`SAVE_CONFIG ${minifiedJson.length} ${minifiedJson}\n`);
+        }
+      } catch(e) {}
+    }
+
+    function saveAndSyncLayout() {
+      updateJSON();
+      saveESP32ConfigSilently();
     }
 
     function updateActiveBindingScreenScale(val) {

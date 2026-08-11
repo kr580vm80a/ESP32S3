@@ -273,7 +273,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         }
     }
 
-    int scale = (targetMon.scale > 0) ? targetMon.scale : 100;
+    int scale = targetMon.scale;
     float targetScaleFactor = scale / 100.0f;
 
     int16_t relX = (int16_t)(targetGlobalX - minPcX);
@@ -362,7 +362,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     if (monitorCount == 0) return;
 
     MonitorConfig& currentMon = monitors[currentMonitorIndex];
-    int currentScale = (currentMon.scale > 0) ? currentMon.scale : 100;
+    int currentScale = currentMon.scale;
     
     int16_t sendDx = dx;
     int16_t sendDy = dy;

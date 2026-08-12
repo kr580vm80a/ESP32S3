@@ -147,7 +147,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         // Save connection
         bool updated = false;
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-            if (kvmClients[i].mac.equalsIgnoreCase(peerMac)) {
+            if (kvmClients[i].mac.equals(peerMac)) {
                 kvmClients[i].conn_id = desc->conn_handle;
                 kvmClients[i].active = true;
                 updated = true;
@@ -192,7 +192,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                     NimBLEDevice::getAdvertising()->start();
                 }
                 vTaskDelete(NULL);
-            }, "bgAdvTask", 2048, NULL, 1, NULL);
+            }, "bgAdvTask", 4096, NULL, 1, NULL);
         }
     }
 
@@ -217,7 +217,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 NimBLEDevice::getAdvertising()->start();
             }
             vTaskDelete(NULL);
-        }, "bgAdvTask", 2048, NULL, 1, NULL);
+        }, "bgAdvTask", 4096, NULL, 1, NULL);
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
@@ -247,6 +247,68 @@ String getMonDisplayName(int idx) {
     return monitors[idx].name;
 }
 
+uint16_t getTargetConnHandle(const String& targetMac) {
+    String cleanTargetMac = targetMac;
+    cleanTargetMac.toLowerCase();
+    cleanTargetMac.trim();
+
+    // 1. Direct MAC address match
+    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active && kvmClients[i].mac.equalsIgnoreCase(cleanTargetMac)) {
+            return kvmClients[i].conn_id;
+        }
+    }
+
+    // 2. Fallback: Group rank matching by distinct MAC index in layout
+    String distinctMacs[MAX_KVM_CLIENTS];
+    int distinctCount = 0;
+    for (int i = 0; i < monitorCount; i++) {
+        String mMac = monitors[i].mac;
+        mMac.toLowerCase();
+        mMac.trim();
+        if (mMac.length() == 0) continue;
+        bool exists = false;
+        for (int d = 0; d < distinctCount; d++) {
+            if (distinctMacs[d].equalsIgnoreCase(mMac)) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists && distinctCount < MAX_KVM_CLIENTS) {
+            distinctMacs[distinctCount++] = mMac;
+        }
+    }
+
+    int targetGroupIdx = -1;
+    for (int d = 0; d < distinctCount; d++) {
+        if (distinctMacs[d].equalsIgnoreCase(cleanTargetMac)) {
+            targetGroupIdx = d;
+            break;
+        }
+    }
+
+    if (targetGroupIdx >= 0) {
+        int activeIdx = 0;
+        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+            if (kvmClients[i].active) {
+                if (activeIdx == targetGroupIdx) {
+                    return kvmClients[i].conn_id;
+                }
+                activeIdx++;
+            }
+        }
+    }
+
+    // 3. Final Fallback: Return first active connection handle
+    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active) {
+            return kvmClients[i].conn_id;
+        }
+    }
+
+    return BLE_HS_CONN_HANDLE_NONE;
+}
+
 // --- Unified PC Cursor Calibration & Edge Positioning Function ---
 void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
     if (monitorCount == 0 || monIndex < 0 || monIndex >= monitorCount) return;
@@ -270,13 +332,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         minPcY = targetMon.y;
     }
 
-    uint16_t targetConnHandle = 0;
-    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active && kvmClients[i].mac.equalsIgnoreCase(targetMac)) {
-            targetConnHandle = kvmClients[i].conn_id;
-            break;
-        }
-    }
+    uint16_t targetConnHandle = getTargetConnHandle(targetMac);
 
     int16_t relX = (int16_t)(targetGlobalX - minPcX);
     int16_t relY = (int16_t)(targetGlobalY - minPcY);
@@ -325,9 +381,12 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     // 35 pulses of (-127, -127) = -4445 px, guaranteeing OS cursor is at top-left-most pixel of target PC's virtual desktop
     uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
     for (int p = 0; p < 35; p++) {
-        if (targetConnHandle != 0) {
+        if (inputChar && targetConnHandle != BLE_HS_CONN_HANDLE_NONE) {
             os_mbuf *om = ble_hs_mbuf_from_flat(topLeftReport, sizeof(topLeftReport));
-            if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+            if (om != NULL) {
+                int rc = ble_gatts_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+                if (rc != 0) os_mbuf_free_chain(om);
+            }
         } else if (inputChar) {
             inputChar->setValue(topLeftReport, sizeof(topLeftReport));
             inputChar->notify();
@@ -344,9 +403,12 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         int8_t stepY = constrain(remainingY, 0, 127);
 
         uint8_t stepReport[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
-        if (targetConnHandle != 0) {
+        if (inputChar && targetConnHandle != BLE_HS_CONN_HANDLE_NONE) {
             os_mbuf *om = ble_hs_mbuf_from_flat(stepReport, sizeof(stepReport));
-            if (om != NULL) ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+            if (om != NULL) {
+                int rc = ble_gatts_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+                if (rc != 0) os_mbuf_free_chain(om);
+            }
         } else if (inputChar) {
             inputChar->setValue(stepReport, sizeof(stepReport));
             inputChar->notify();
@@ -357,7 +419,6 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         delay(6);
     }
 
-    // Step C: Set ESP32's virtual cursor coordinates to target position and update active monitor index
     virtualX = targetGlobalX;
     virtualY = targetGlobalY;
     currentMonitorIndex = monIndex;
@@ -422,7 +483,6 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
     virtualX += effectiveDx;
     virtualY += effectiveDy;
-
     // Find which monitor we are currently in
     int newMonitorIndex = -1;
     for (int i = 0; i < monitorCount; i++) {
@@ -433,179 +493,47 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         }
     }
 
-    static unsigned long lastKvmSwitchTime = 0;
-
-    // Edge Push Detection: When cursor pushes past the edge of current monitor into PC boundary
     if (newMonitorIndex == -1) {
-        bool canSwitchPC = (millis() - lastKvmSwitchTime > 300);
-
-        // Pushing UP past top edge of current monitor
-        if (dy < 0 && virtualY < currentMon.y) {
-            int bestIdx = -1;
-            long minScore = 99999999;
-            for (int i = 0; i < monitorCount; i++) {
-                if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    if (!canSwitchPC) continue;
-                    // Candidate monitor MUST be geometrically ABOVE current monitor
-                    if (monitors[i].y + monitors[i].height > currentMon.y) continue;
-                    // Candidate monitor MUST touch/overlap along X axis
-                    bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
-                    if (!xOverlap) continue;
-                    // Distance between edges must be adjacent (no large gap)
-                    long dist = abs((monitors[i].y + monitors[i].height) - currentMon.y);
-                    if (dist > 150) continue;
-
-                    if (dist < minScore) {
-                        minScore = dist;
-                        bestIdx = i;
-                    }
-                }
-            }
-            if (bestIdx != -1) {
-                newMonitorIndex = bestIdx;
-                virtualY = monitors[bestIdx].y + monitors[bestIdx].height - 5;
-                virtualX = constrain(virtualX, (long)monitors[bestIdx].x, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 1));
-            }
+        newMonitorIndex = currentMonitorIndex;
+        if (virtualX < currentMon.x) {
+            virtualX = currentMon.x;
+            logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.name.c_str());
+        } else if (virtualY < currentMon.y) {
+            virtualY = currentMon.y;
+            logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)\n", virtualY, currentMon.name.c_str());
+        } else if (virtualX >= currentMon.x + currentMon.width) {
+            virtualX = currentMon.x + currentMon.width - 1;
+            logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.name.c_str());
+        } else if (virtualY >= currentMon.y + currentMon.height) {
+            virtualY = currentMon.y + currentMon.height - 1;
+            logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)\n", virtualY, currentMon.name.c_str());
         }
-        // Pushing DOWN past bottom edge of current monitor
-        else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
-            int bestIdx = -1;
-            long minScore = 99999999;
-            for (int i = 0; i < monitorCount; i++) {
-                if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    if (!canSwitchPC) continue;
-                    // Candidate monitor MUST be geometrically BELOW current monitor
-                    if (monitors[i].y < currentMon.y + currentMon.height) continue;
-                    // Candidate monitor MUST touch/overlap along X axis
-                    bool xOverlap = (virtualX >= monitors[i].x && virtualX < monitors[i].x + monitors[i].width);
-                    if (!xOverlap) continue;
-                    // Distance between edges must be adjacent (no large gap)
-                    long dist = abs(monitors[i].y - (currentMon.y + currentMon.height));
-                    if (dist > 150) continue;
-
-                    if (dist < minScore) {
-                        minScore = dist;
-                        bestIdx = i;
-                    }
-                }
-            }
-            if (bestIdx != -1) {
-                newMonitorIndex = bestIdx;
-                virtualY = monitors[bestIdx].y + 5;
-                virtualX = constrain(virtualX, (long)monitors[bestIdx].x, (long)(monitors[bestIdx].x + monitors[bestIdx].width - 1));
-            }
-        }
-        // Pushing LEFT past left edge of current monitor
-        else if (dx < 0 && virtualX < currentMon.x) {
-            int bestIdx = -1;
-            long minScore = 99999999;
-            for (int i = 0; i < monitorCount; i++) {
-                if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    if (!canSwitchPC) continue;
-                    // Candidate monitor MUST be geometrically TO THE LEFT of current monitor
-                    if (monitors[i].x + monitors[i].width > currentMon.x) continue;
-                    // Candidate monitor MUST touch/overlap along Y axis
-                    bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
-                    if (!yOverlap) continue;
-                    // Distance between edges must be adjacent (no large gap)
-                    long dist = abs((monitors[i].x + monitors[i].width) - currentMon.x);
-                    if (dist > 150) continue;
-
-                    if (dist < minScore) {
-                        minScore = dist;
-                        bestIdx = i;
-                    }
-                }
-            }
-            if (bestIdx != -1) {
-                newMonitorIndex = bestIdx;
-                virtualX = monitors[bestIdx].x + monitors[bestIdx].width - 5;
-                virtualY = constrain(virtualY, (long)monitors[bestIdx].y, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 1));
-            }
-        }
-        // Pushing RIGHT past right edge of current monitor
-        else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
-            int bestIdx = -1;
-            long minScore = 99999999;
-            for (int i = 0; i < monitorCount; i++) {
-                if (!monitors[i].mac.equalsIgnoreCase(currentMon.mac)) {
-                    if (!canSwitchPC) continue;
-                    // Candidate monitor MUST be geometrically TO THE RIGHT of current monitor
-                    if (monitors[i].x < currentMon.x + currentMon.width) continue;
-                    // Candidate monitor MUST touch/overlap along Y axis
-                    bool yOverlap = (virtualY >= monitors[i].y && virtualY < monitors[i].y + monitors[i].height);
-                    if (!yOverlap) continue;
-                    // Distance between edges must be adjacent (no large gap)
-                    long dist = abs(monitors[i].x - (currentMon.x + currentMon.width));
-                    if (dist > 150) continue;
-
-                    if (dist < minScore) {
-                        minScore = dist;
-                        bestIdx = i;
-                    }
-                }
-            }
-            if (bestIdx != -1) {
-                newMonitorIndex = bestIdx;
-                virtualX = monitors[bestIdx].x + 5;
-                virtualY = constrain(virtualY, (long)monitors[bestIdx].y, (long)(monitors[bestIdx].y + monitors[bestIdx].height - 1));
-            }
-        }
-
-        if (newMonitorIndex == -1) {
-            newMonitorIndex = currentMonitorIndex;
-
-            // 1D Axis Dead-End Side Auto-Calibration:
-            // When pushing against a side with no neighboring monitor,
-            // auto-calibrate the specific axis (X or Y) instantly to exact physical display bounds.
-            String curMonDisplayName = getMonDisplayName(currentMonitorIndex);
-            if (dx < 0 && virtualX < currentMon.x) {
-                virtualX = currentMon.x;
-                logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, curMonDisplayName.c_str());
-            } else if (dx > 0 && virtualX >= currentMon.x + currentMon.width) {
-                virtualX = currentMon.x + currentMon.width - 1;
-                logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)\n", virtualX, curMonDisplayName.c_str());
-            }
-
-            if (dy < 0 && virtualY < currentMon.y) {
-                virtualY = currentMon.y;
-                logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)\n", virtualY, curMonDisplayName.c_str());
-            } else if (dy > 0 && virtualY >= currentMon.y + currentMon.height) {
-                virtualY = currentMon.y + currentMon.height - 1;
-                logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)\n", virtualY, curMonDisplayName.c_str());
-            }
-
-            virtualX = constrain(virtualX, (long)currentMon.x, (long)(currentMon.x + currentMon.width - 1));
-            virtualY = constrain(virtualY, (long)currentMon.y, (long)(currentMon.y + currentMon.height - 1));
-        }
-    }
-    
-    String targetMac = monitors[newMonitorIndex].mac;
-    targetMac.toLowerCase();
-    targetMac.trim();
-
-    uint16_t targetConnHandle = 0;
-    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active && kvmClients[i].mac.equalsIgnoreCase(targetMac)) {
-            targetConnHandle = kvmClients[i].conn_id;
-            break;
-        }
-    }
-
-    if (newMonitorIndex != currentMonitorIndex) {
-        if (!monitors[newMonitorIndex].mac.equalsIgnoreCase(monitors[currentMonitorIndex].mac)) {
-            lastKvmSwitchTime = millis();
-            // Position target PC's OS cursor at exact entering edge coordinates ONLY when switching to a different PC!
-            alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
+    } else if (newMonitorIndex != currentMonitorIndex) {
+        if (monitors[newMonitorIndex].mac.equals(currentMon.mac)) {
+            logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%s (%s)\n",
+                virtualX, virtualY, monitors[newMonitorIndex].id, monitors[newMonitorIndex].name.c_str());
         } else {
-            currentMonitorIndex = newMonitorIndex;
+            if (virtualX < currentMon.x) {
+                virtualX = currentMon.x;
+                sendDx -= 50;
+                logPrint("[CALIBRATION1] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.name.c_str());
+            } else if (virtualY < currentMon.y) {
+                virtualY = currentMon.y;
+                sendDy -= 50;
+                logPrint("[CALIBRATION1] Calibrated TOP edge -> virtualY = %ld (%s)\n", virtualY, currentMon.name.c_str());
+            } else if (virtualX >= currentMon.x + currentMon.width) {
+                virtualX = currentMon.x + currentMon.width;
+                sendDx += 50;
+                logPrint("[CALIBRATION1] Calibrated RIGHT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.name.c_str());
+            } else if (virtualY >= currentMon.y + currentMon.height) {
+                virtualY = currentMon.y + currentMon.height;
+                sendDy += 50;
+                logPrint("[CALIBRATION1] Calibrated BOTTOM edge -> virtualY = %ld (%s)\n", virtualY, currentMon.name.c_str());
+            }
+            // Position target PC's OS cursor at exact entering edge coordinates ONLY when switching to a different PC!
+            //alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
         }
-        String newMonDisplayName = getMonDisplayName(newMonitorIndex);
-        logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (ID: %s | Bounds X:%d..%d Y:%d..%d) | Target PC: %s | conn_handle: %d\n",
-                      virtualX, virtualY, newMonitorIndex + 1, newMonDisplayName.c_str(),
-                      monitors[newMonitorIndex].x, monitors[newMonitorIndex].x + monitors[newMonitorIndex].width,
-                      monitors[newMonitorIndex].y, monitors[newMonitorIndex].y + monitors[newMonitorIndex].height,
-                      targetMac.c_str(), targetConnHandle);
+        currentMonitorIndex = newMonitorIndex;
     }
 
     // Send Standard HID Report (5 bytes: Buttons, dX, dY, VScroll, HScroll)
@@ -617,44 +545,39 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         (uint8_t)constrain(hScroll, -127, 127) 
     };
 
-    if (targetConnHandle != 0) {
-        os_mbuf *om = ble_hs_mbuf_from_flat(report, sizeof(report));
-        if (om != NULL) {
-            ble_gattc_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+    if (inputChar) {
+        uint16_t targetConnHandle = getTargetConnHandle(currentMon.mac);
+        if (targetConnHandle != BLE_HS_CONN_HANDLE_NONE) {
+            os_mbuf *om = ble_hs_mbuf_from_flat(report, sizeof(report));
+            if (om != NULL) {
+                int rc = ble_gatts_notify_custom(targetConnHandle, inputChar->getHandle(), om);
+                if (rc != 0) os_mbuf_free_chain(om);
+            }
+        } else {
+            inputChar->setValue(report, sizeof(report));
+            inputChar->notify();
         }
-    } else {
-        inputChar->setValue(report, sizeof(report));
-        inputChar->notify();
     }
 }
 
 // Callback when HID data is received from the mouse
 void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
-    if (length >= 6) {
-        // Logitech MX Master 3S HID report button mask can be in byte 0 or byte 1
-        uint8_t buttons = pData[0] | pData[1];
-        
-        // 12-bit X extraction
-        int16_t x = pData[2] | ((pData[3] & 0x0F) << 8);
-        if (x & 0x800) x |= 0xF000; // Sign extend to 16-bit
-        
-        // 12-bit Y extraction
-        int16_t y = (pData[3] >> 4) | (pData[4] << 4);
-        if (y & 0x800) y |= 0xF000; // Sign extend to 16-bit
-        
-        int8_t scroll = (int8_t)pData[5];
-        int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
-
-        String curMonId = monitors[currentMonitorIndex].id;
-        String curMonDisplayName = getMonDisplayName(currentMonitorIndex);
-
-        logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%d (%s)\n",
-                 pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
-                 buttons, x, y, scroll, hScroll,
-                 virtualX, virtualY, curMonId.c_str(), curMonDisplayName.c_str());
-
-        updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
-    }
+    if (!pData || length < 6) return;
+    // Logitech MX Master 3S HID report button mask can be in byte 0 or byte 1
+    uint8_t buttons = pData[0] | pData[1];
+    // 12-bit X extraction
+    int16_t x = pData[2] | ((pData[3] & 0x0F) << 8);
+    if (x & 0x800) x |= 0xF000; // Sign extend to 16-bit
+    // 12-bit Y extraction
+    int16_t y = (pData[3] >> 4) | (pData[4] << 4);
+    if (y & 0x800) y |= 0xF000; // Sign extend to 16-bit
+    int8_t scroll = (int8_t)pData[5];
+    int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
+    logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%s (%s)\n",
+                pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
+                buttons, x, y, scroll, hScroll, virtualX, virtualY,
+                monitors[currentMonitorIndex].id, monitors[currentMonitorIndex].name.c_str());
+    updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
 }
 
 bool connectToServer();

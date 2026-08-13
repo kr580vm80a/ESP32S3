@@ -210,35 +210,41 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
         }
 
-        xTaskCreate([](void* param) {
-            vTaskDelay(pdMS_TO_TICKS(1000));
-            if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-                Serial.println("[BLE Server] Resuming advertising after PC disconnect...");
-                NimBLEDevice::getAdvertising()->start();
-            }
-            vTaskDelete(NULL);
-        }, "bgAdvTask", 4096, NULL, 1, NULL);
+        // Debounce advertising restart to prevent FreeRTOS task flooding during rapid disconnect loops
+        static uint32_t lastDisconnectAdvTime = 0;
+        uint32_t now = millis();
+        if (now - lastDisconnectAdvTime > 1500) {
+            lastDisconnectAdvTime = now;
+            xTaskCreate([](void* param) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+                    Serial.println("[BLE Server] Resuming advertising after PC disconnect...");
+                    NimBLEDevice::getAdvertising()->start();
+                }
+                vTaskDelete(NULL);
+            }, "bgAdvTask", 4096, NULL, 1, NULL);
+        }
     }
 
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         peerMac.toLowerCase();
         peerMac.trim();
-        Serial.printf("[BLE Server] Auth Complete for %s | Encrypted: %d | Bonded: %d | KeySize: %d\n",
-                      peerMac.c_str(), desc->sec_state.encrypted, desc->sec_state.bonded, desc->sec_state.key_size);
-        if (!desc->sec_state.encrypted) {
-            Serial.printf("[BLE Server] Pairing/Encryption failed for %s! Deleting stale bond keys...\n", peerMac.c_str());
+        logPrint("[BLE Server] Auth Complete for %s | Encrypted: %d | Bonded: %d | KeySize: %d\n",
+                  peerMac.c_str(), desc->sec_state.encrypted, desc->sec_state.bonded, desc->sec_state.key_size);
+        if (!desc->sec_state.bonded) {
+            logPrint("[BLE Server] Bonding incomplete (Bonded: 0) for %s! Clearing stale bond key to allow fresh pairing...\n", peerMac.c_str());
             NimBLEDevice::deleteBond(desc->peer_ota_addr);
         }
     }
 
     uint32_t onPassKeyRequest() {
-        Serial.println("[BLE Server] PassKey requested by client");
+        logPrint("[BLE Server] PassKey requested by client\n");
         return 0;
     }
 
     bool onConfirmPIN(uint32_t pin) {
-        Serial.printf("[BLE Server] PIN confirmation requested: %06d\n", pin);
+        logPrint("[BLE Server] PIN confirmation requested: %06d\n", pin);
         return true;
     }
 };
@@ -339,33 +345,29 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     if (relX < 0) relX = 0;
     if (relY < 0) relY = 0;
 
-    // Segment-by-segment HID delta integration across displays of target PC
+    // Segment-by-segment HID delta integration across displays of target PC (O(N) segment math)
     float sumScaledX = 0.0f;
-    for (int px = minPcX; px < targetGlobalX; px++) {
-        float sf = 1.0f;
-        for (int i = 0; i < monitorCount; i++) {
-            if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
-                if (px >= monitors[i].x && px < monitors[i].x + monitors[i].width) {
-                    sf = (monitors[i].scale > 0) ? (monitors[i].scale / 100.0f) : 1.0f;
-                    break;
-                }
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
+            long segStart = max((long)minPcX, (long)monitors[i].x);
+            long segEnd = min(targetGlobalX, (long)(monitors[i].x + monitors[i].width));
+            if (segEnd > segStart) {
+                float sf = (monitors[i].scale > 0) ? (monitors[i].scale / 100.0f) : 1.0f;
+                sumScaledX += (float)(segEnd - segStart) / sf;
             }
         }
-        sumScaledX += (1.0f / sf);
     }
 
     float sumScaledY = 0.0f;
-    for (int py = minPcY; py < targetGlobalY; py++) {
-        float sf = 1.0f;
-        for (int i = 0; i < monitorCount; i++) {
-            if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
-                if (py >= monitors[i].y && py < monitors[i].y + monitors[i].height) {
-                    sf = (monitors[i].scale > 0) ? (monitors[i].scale / 100.0f) : 1.0f;
-                    break;
-                }
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
+            long segStart = max((long)minPcY, (long)monitors[i].y);
+            long segEnd = min(targetGlobalY, (long)(monitors[i].y + monitors[i].height));
+            if (segEnd > segStart) {
+                float sf = (monitors[i].scale > 0) ? (monitors[i].scale / 100.0f) : 1.0f;
+                sumScaledY += (float)(segEnd - segStart) / sf;
             }
         }
-        sumScaledY += (1.0f / sf);
     }
 
     int16_t scaledRelX = (int16_t)round(sumScaledX);
@@ -447,7 +449,7 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
     long centerX = mon.x + (mon.width / 2);
     long centerY = mon.y + (mon.height / 2);
 
-    alignPcCursorToCoordinates(targetMonIdx, centerX, centerY, "BOOT CALIBRATION");
+    //alignPcCursorToCoordinates(targetMonIdx, centerX, centerY, "BOOT CALIBRATION");
 }
 
 // --- BLE Host (Central) Functions ---
@@ -582,28 +584,62 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
 
 bool connectToServer();
 void sendConfigResponse(const String& response);
-
+static JsonDocument scannedMiceDoc;
 static TaskHandle_t reconnTaskHandle = NULL;
+
+class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
+    void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
+        String devMac = advertisedDevice->getAddress().toString().c_str();
+        devMac.toLowerCase();
+        devMac.trim();
+
+        String devName = advertisedDevice->getName().c_str();
+        int rssi = advertisedDevice->getRSSI();
+
+        if (isScanningForMice) {
+            JsonArray arr = scannedMiceDoc.as<JsonArray>();
+            bool exists = false;
+            for (JsonObject m : arr) {
+                if (m["mac"].as<String>() == devMac) {
+                    m["rssi"] = rssi;
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                JsonObject obj = arr.add<JsonObject>();
+                obj["mac"] = devMac;
+                obj["name"] = devName.length() > 0 ? devName : "Bluetooth Device";
+                obj["rssi"] = rssi;
+            }
+            return;
+        }
+
+        String macPrefix = targetMouseMac.length() >= 14 ? targetMouseMac.substring(0, 14) : "";
+
+        if (targetMouseMac.length() > 0 && (devMac == targetMouseMac || (macPrefix.length() > 0 && devMac.startsWith(macPrefix)) || devName.equalsIgnoreCase("MX Master 3S") || devName.indexOf("MX Master") != -1)) {
+            logPrint("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)\n", devName.c_str(), devMac.c_str());
+            NimBLEDevice::getScan()->stop();
+            advDevice = new NimBLEAdvertisedDevice(*advertisedDevice);
+            doConnect = true;
+        }
+    }
+};
 
 void startMouseReconnectTask() {
     if (targetMouseMac.length() == 0 || isScanningForMice || connected) return;
-    if (reconnTaskHandle != NULL) return;
+    if (NimBLEDevice::getScan()->isScanning()) return;
 
-    xTaskCreate([](void* param) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        int retries = 0;
-        while (!connected && targetMouseMac.length() > 0 && !isScanningForMice) {
-            logPrint("[BLE Host] Auto-reconnecting to bound mouse (%s) [attempt %d]...\n", targetMouseMac.c_str(), retries + 1);
-            if (connectToServer()) {
-                logPrint("[BLE Host] Reconnected to mouse successfully!\n");
-                break;
-            }
-            retries++;
-            vTaskDelay(pdMS_TO_TICKS(2000));
-        }
-        reconnTaskHandle = NULL;
-        vTaskDelete(NULL);
-    }, "mouseReconnectTask", 4096, NULL, 1, &reconnTaskHandle);
+    logPrint("[BLE Host] Starting continuous background scan for mouse (%s)...\n", targetMouseMac.c_str());
+    NimBLEScan* pScan = NimBLEDevice::getScan();
+    if (pScan) {
+        pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), false);
+        pScan->setActiveScan(true);
+        pScan->setInterval(160);
+        pScan->setWindow(160);
+        pScan->setDuplicateFilter(false);
+        pScan->start(0, false); // 0 = continuous background scanning without blind spots
+    }
 }
 
 // Callback for BLE Connection Status
@@ -615,7 +651,11 @@ class ClientCallbacks : public NimBLEClientCallbacks {
     void onDisconnect(NimBLEClient* pClient) {
         logPrint("[BLE Host] Disconnected from mouse!\n");
         connected = false;
-        startMouseReconnectTask();
+        xTaskCreate([](void* param) {
+            vTaskDelay(pdMS_TO_TICKS(500));
+            startMouseReconnectTask();
+            vTaskDelete(NULL);
+        }, "reconnTask", 3072, NULL, 1, NULL);
     }
 };
 
@@ -740,8 +780,6 @@ bool connectToServer() {
 NimBLECharacteristic* configTxChar = nullptr;
 NimBLECharacteristic* configRxChar = nullptr;
 
-static JsonDocument scannedMiceDoc;
-
 void sendConfigResponse(const String& response) {
   String fullResp = response;
   if (!fullResp.endsWith("\n")) fullResp += "\n";
@@ -766,42 +804,6 @@ void sendConfigResponse(const String& response) {
   }
 }
 
-class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
-    void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
-        String devMac = advertisedDevice->getAddress().toString().c_str();
-        devMac.toLowerCase();
-        devMac.trim();
-
-        String devName = advertisedDevice->getName().c_str();
-        int rssi = advertisedDevice->getRSSI();
-
-        if (isScanningForMice) {
-            JsonArray arr = scannedMiceDoc.as<JsonArray>();
-            bool exists = false;
-            for (JsonObject m : arr) {
-                if (m["mac"].as<String>() == devMac) {
-                    m["rssi"] = rssi;
-                    exists = true;
-                    break;
-                }
-            }
-            if (!exists) {
-                JsonObject obj = arr.add<JsonObject>();
-                obj["mac"] = devMac;
-                obj["name"] = devName.length() > 0 ? devName : "Bluetooth Device";
-                obj["rssi"] = rssi;
-            }
-            return;
-        }
-
-        if (targetMouseMac.length() > 0 && devMac == targetMouseMac) {
-            Serial.printf("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)\n", devName.c_str(), devMac.c_str());
-            NimBLEDevice::getScan()->stop();
-            advDevice = advertisedDevice;
-            doConnect = true;
-        }
-    }
-};
 
 void loadConfiguration() {
   preferences.begin(NVS_NAMESPACE, true);
@@ -1150,14 +1152,21 @@ void setup() {
 #endif
   delay(2000);
   
-  Serial.println("\n--- ESP32 KVM Switcher Started ---");
+  logPrint("\n--- ESP32 KVM Switcher Started ---\n");
   loadConfiguration();
   
-  Serial.println("[BLE] Initializing NimBLE...");
+  logPrint("[BLE] Initializing NimBLE...\n");
   NimBLEDevice::init("ESP32 KVM Mouse");
   NimBLEDevice::setMTU(512);
   NimBLEDevice::setSecurityAuth(true, false, false); // Compatible Just Works pairing (bonding=true, mitm=false, sc=false for legacy compatibility)
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+  
+  int numBonds = NimBLEDevice::getNumBonds();
+  logPrint("[BLE NVS BONDS] Saved bonded devices count: %d\n", numBonds);
+  for (int i = 0; i < numBonds; i++) {
+      NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(i);
+      logPrint("  -> Bonded Device #%d: MAC %s\n", i + 1, bondAddr.toString().c_str());
+  }
   
   // Setup BLE Server (Peripheral)
   pServer = NimBLEDevice::createServer();
@@ -1191,7 +1200,7 @@ void setup() {
   pAdvertising->addServiceUUID(CONFIG_SERVICE_UUID);
   pAdvertising->setScanResponse(true);
   pAdvertising->start();
-  Serial.println("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
+  logPrint("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...\n");
 
   // If targetMouseMac is bound, start persistent background reconnect task
   if (targetMouseMac.length() > 0 && !connected) {

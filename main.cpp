@@ -8,6 +8,8 @@
 #include <HWCDC.h>
 #endif
 
+#define BLE_DEVICE_NAME "ESP32 KVM Mouse"
+
 Preferences preferences;
 
 // NVS Flash Storage Constants
@@ -115,10 +117,10 @@ void logPrint(const char* format, ...) {
     va_end(args);
 
     Serial.print(timeStr);
-    Serial.print(buffer);
+    Serial.println(buffer);
 #if CONFIG_IDF_TARGET_ESP32S3
     USBSerial.print(timeStr);
-    USBSerial.print(buffer);
+    USBSerial.println(buffer);
 #endif
 }
 
@@ -141,7 +143,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         peerMac.toLowerCase();
         peerMac.trim();
-        logPrint("[BLE Server] PC Connected! MAC: %s (conn_handle: %d | itvl: %d | latency: %d | timeout: %d)\n",
+        logPrint("[BLE Server] PC Connected! MAC: %s (conn_handle: %d | itvl: %d | latency: %d | timeout: %d)",
                   peerMac.c_str(), desc->conn_handle, desc->conn_itvl, desc->conn_latency, desc->supervision_timeout);
         
         // Save connection
@@ -188,7 +190,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             xTaskCreate([](void* param) {
                 vTaskDelay(pdMS_TO_TICKS(1500));
                 if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-                    logPrint("[BLE Server] Resuming advertising for additional PC...\n");
+                    logPrint("[BLE Server] Resuming advertising for additional PC...");
                     NimBLEDevice::getAdvertising()->start();
                 }
                 vTaskDelete(NULL);
@@ -200,8 +202,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         peerMac.toLowerCase();
         peerMac.trim();
-        Serial.printf("[BLE Server] PC Disconnected! MAC: %s (conn_handle: %d)\n",
-                      peerMac.c_str(), desc->conn_handle);
+        logPrint("[BLE Server] PC Disconnected! MAC: %s (conn_handle: %d)", peerMac.c_str(), desc->conn_handle);
         
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
             if (kvmClients[i].conn_id == desc->conn_handle || (kvmClients[i].mac.length() > 0 && kvmClients[i].mac.equalsIgnoreCase(peerMac))) {
@@ -218,7 +219,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             xTaskCreate([](void* param) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-                    Serial.println("[BLE Server] Resuming advertising after PC disconnect...");
+                    logPrint("[BLE Server] Resuming advertising after PC disconnect...");
                     NimBLEDevice::getAdvertising()->start();
                 }
                 vTaskDelete(NULL);
@@ -230,22 +231,22 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         peerMac.toLowerCase();
         peerMac.trim();
-        logPrint("[BLE Server] Auth Complete for %s | Encrypted: %d | Bonded: %d | KeySize: %d\n",
+        logPrint("[BLE Server] Auth Complete for %s | Encrypted: %d | Bonded: %d | KeySize: %d",
                   peerMac.c_str(), desc->sec_state.encrypted, desc->sec_state.bonded, desc->sec_state.key_size);
         if (!desc->sec_state.bonded) {
-            logPrint("[BLE Server] Bonding incomplete (Bonded: 0) for %s! Clearing stale bond key to allow fresh pairing...\n", peerMac.c_str());
+            logPrint("[BLE Server] Bonding incomplete (Bonded: 0) for %s! Clearing stale bond key to allow fresh pairing...", peerMac.c_str());
             NimBLEDevice::deleteBond(desc->peer_ota_addr);
         }
     }
 
     uint32_t onPassKeyRequest() {
-        logPrint("[BLE Server] PassKey requested by client\n");
-        return 0;
+        logPrint("[BLE Server] PassKey requested by client! Enter PIN: 654321");
+        return 654321;
     }
 
     bool onConfirmPIN(uint32_t pin) {
-        logPrint("[BLE Server] PIN confirmation requested: %06d\n", pin);
-        return true;
+        logPrint("[BLE Server] PIN confirmation requested: %06d", pin);
+        return pin == 654321;
     }
 };
 
@@ -375,7 +376,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
 
     String monDisplayName = getMonDisplayName(monIndex);
 
-    logPrint("[%s] Aligning PC %s (Mon #%d %s Scale:%d%%) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d | Multi-Mon Scaled HID Rel: %d, %d]...\n",
+    logPrint("[%s] Aligning PC %s (Mon #%d %s Scale:%d%%) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d | Multi-Mon Scaled HID Rel: %d, %d]...",
              contextLabel, targetMac.c_str(), monIndex + 1, monDisplayName.c_str(), targetMon.scale,
              targetGlobalX, targetGlobalY, minPcX, minPcY, relX, relY, scaledRelX, scaledRelY);
 
@@ -426,7 +427,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     currentMonitorIndex = monIndex;
     resetSubpixelAccumulators();
 
-    logPrint("[%s] SUCCESS! Positioned & calibrated PC %s at (%ld, %ld) on Monitor #%d (%s)\n",
+    logPrint("[%s] SUCCESS! Positioned & calibrated PC %s at (%ld, %ld) on Monitor #%d (%s)",
              contextLabel, targetMac.c_str(), virtualX, virtualY, currentMonitorIndex + 1, monDisplayName.c_str());
 }
 
@@ -499,38 +500,38 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         newMonitorIndex = currentMonitorIndex;
         if (virtualX < currentMon.x) {
             virtualX = currentMon.x;
-            logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.name.c_str());
+            logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
         } else if (virtualY < currentMon.y) {
             virtualY = currentMon.y;
-            logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)\n", virtualY, currentMon.name.c_str());
+            logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
         } else if (virtualX >= currentMon.x + currentMon.width) {
             virtualX = currentMon.x + currentMon.width - 1;
-            logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.name.c_str());
+            logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
         } else if (virtualY >= currentMon.y + currentMon.height) {
             virtualY = currentMon.y + currentMon.height - 1;
-            logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)\n", virtualY, currentMon.name.c_str());
+            logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
         }
     } else if (newMonitorIndex != currentMonitorIndex) {
         if (monitors[newMonitorIndex].mac.equals(currentMon.mac)) {
-            logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%s (%s)\n",
+            logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%s (%s)",
                 virtualX, virtualY, monitors[newMonitorIndex].id, monitors[newMonitorIndex].name.c_str());
         } else {
             if (virtualX < currentMon.x) {
                 virtualX = currentMon.x;
                 sendDx -= 50;
-                logPrint("[CALIBRATION1] Calibrated LEFT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.name.c_str());
+                logPrint("[CALIBRATION1] Calibrated LEFT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
             } else if (virtualY < currentMon.y) {
                 virtualY = currentMon.y;
                 sendDy -= 50;
-                logPrint("[CALIBRATION1] Calibrated TOP edge -> virtualY = %ld (%s)\n", virtualY, currentMon.name.c_str());
+                logPrint("[CALIBRATION1] Calibrated TOP edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
             } else if (virtualX >= currentMon.x + currentMon.width) {
                 virtualX = currentMon.x + currentMon.width;
                 sendDx += 50;
-                logPrint("[CALIBRATION1] Calibrated RIGHT edge -> virtualX = %ld (%s)\n", virtualX, currentMon.name.c_str());
+                logPrint("[CALIBRATION1] Calibrated RIGHT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
             } else if (virtualY >= currentMon.y + currentMon.height) {
                 virtualY = currentMon.y + currentMon.height;
                 sendDy += 50;
-                logPrint("[CALIBRATION1] Calibrated BOTTOM edge -> virtualY = %ld (%s)\n", virtualY, currentMon.name.c_str());
+                logPrint("[CALIBRATION1] Calibrated BOTTOM edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
             }
             // Position target PC's OS cursor at exact entering edge coordinates ONLY when switching to a different PC!
             //alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
@@ -575,7 +576,7 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
     if (y & 0x800) y |= 0xF000; // Sign extend to 16-bit
     int8_t scroll = (int8_t)pData[5];
     int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
-    logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%s (%s)\n",
+    logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%s (%s)",
                 pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
                 buttons, x, y, scroll, hScroll, virtualX, virtualY,
                 monitors[currentMonitorIndex].id, monitors[currentMonitorIndex].name.c_str());
@@ -618,7 +619,7 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         String macPrefix = targetMouseMac.length() >= 14 ? targetMouseMac.substring(0, 14) : "";
 
         if (targetMouseMac.length() > 0 && (devMac == targetMouseMac || (macPrefix.length() > 0 && devMac.startsWith(macPrefix)) || devName.equalsIgnoreCase("MX Master 3S") || devName.indexOf("MX Master") != -1)) {
-            logPrint("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)\n", devName.c_str(), devMac.c_str());
+            logPrint("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)", devName.c_str(), devMac.c_str());
             NimBLEDevice::getScan()->stop();
             advDevice = new NimBLEAdvertisedDevice(*advertisedDevice);
             doConnect = true;
@@ -630,7 +631,7 @@ void startMouseReconnectTask() {
     if (targetMouseMac.length() == 0 || isScanningForMice || connected) return;
     if (NimBLEDevice::getScan()->isScanning()) return;
 
-    logPrint("[BLE Host] Starting continuous background scan for mouse (%s)...\n", targetMouseMac.c_str());
+    logPrint("[BLE Host] Starting continuous background scan for mouse (%s)...", targetMouseMac.c_str());
     NimBLEScan* pScan = NimBLEDevice::getScan();
     if (pScan) {
         pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), false);
@@ -645,11 +646,11 @@ void startMouseReconnectTask() {
 // Callback for BLE Connection Status
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
-        logPrint("[BLE Host] Connected to mouse!\n");
+        logPrint("[BLE Host] Connected to mouse!");
         connected = true;
     }
     void onDisconnect(NimBLEClient* pClient) {
-        logPrint("[BLE Host] Disconnected from mouse!\n");
+        logPrint("[BLE Host] Disconnected from mouse!");
         connected = false;
         xTaskCreate([](void* param) {
             vTaskDelay(pdMS_TO_TICKS(500));
@@ -682,7 +683,7 @@ bool connectToServer() {
     }
 
     if (!advDevice && targetMouseMac.length() > 0) {
-        logPrint("[BLE Host] Performing targeted fast probe scan for mouse (%s)...\n", targetMouseMac.c_str());
+        logPrint("[BLE Host] Performing targeted fast probe scan for mouse (%s)...", targetMouseMac.c_str());
         NimBLEScan* pScan = NimBLEDevice::getScan();
         if (pScan) {
             pScan->setActiveScan(true);
@@ -698,7 +699,7 @@ bool connectToServer() {
                 String devName = dev.getName().c_str();
                 if (devMac == targetMouseMac || (macPrefix.length() > 0 && devMac.startsWith(macPrefix)) || devName.equalsIgnoreCase("MX Master 3S") || devName.indexOf("MX Master") != -1) {
                     if (devMac != targetMouseMac) {
-                        logPrint("[BLE Host] AUTO-RESOLVED rotated mouse MAC: %s (was %s)!\n", devMac.c_str(), targetMouseMac.c_str());
+                        logPrint("[BLE Host] AUTO-RESOLVED rotated mouse MAC: %s (was %s)!", devMac.c_str(), targetMouseMac.c_str());
                         targetMouseMac = devMac;
                         preferences.begin(NVS_NAMESPACE, false);
                         preferences.putString(NVS_KEY_MOUSE_MAC, targetMouseMac);
@@ -706,7 +707,7 @@ bool connectToServer() {
                         sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
                     }
                     advDevice = new NimBLEAdvertisedDevice(dev);
-                    logPrint("[BLE Host] Fast probe scan found mouse: %s (name: %s)!\n", devMac.c_str(), devName.c_str());
+                    logPrint("[BLE Host] Fast probe scan found mouse: %s (name: %s)!", devMac.c_str(), devName.c_str());
                     break;
                 }
             }
@@ -716,10 +717,10 @@ bool connectToServer() {
 
     bool connRes = false;
     if (advDevice) {
-        logPrint("[BLE Host] Connecting directly to advertised device: %s...\n", advDevice->getAddress().toString().c_str());
+        logPrint("[BLE Host] Connecting directly to advertised device: %s...", advDevice->getAddress().toString().c_str());
         connRes = pClient->connect(advDevice);
     } else {
-        logPrint("[BLE Host] Mouse not advertising yet (retrying in background loop)...\n");
+        logPrint("[BLE Host] Mouse not advertising yet (retrying in background loop)...");
         connRes = false;
     }
 
@@ -730,26 +731,26 @@ bool connectToServer() {
         if (kvmClients[i].active) activeCount++;
     }
     if (activeCount < MAX_KVM_CLIENTS && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-        logPrint("[BLE Server] Resuming advertising for additional PC...\n");
+        logPrint("[BLE Server] Resuming advertising for additional PC...");
         NimBLEDevice::getAdvertising()->start();
     }
 
     if (!connRes) {
-        logPrint("[BLE Host] Connection attempt failed (mouse not advertising or out of range).\n");
+        logPrint("[BLE Host] Connection attempt failed (mouse not advertising or out of range).");
         return false;
     }
 
-    logPrint("[BLE Host] Connected! Securing connection (Pairing)...\n");
+    logPrint("[BLE Host] Connected! Securing connection (Pairing)...");
     if (!pClient->secureConnection()) {
-        logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...\n");
+        logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...");
         delay(100);
         if (!pClient->secureConnection()) {
-            logPrint("[BLE Host] Secure connection retry failed. Proceeding with service discovery...\n");
+            logPrint("[BLE Host] Secure connection retry failed. Proceeding with service discovery...");
         } else {
-            logPrint("[BLE Host] Connection secured on retry!\n");
+            logPrint("[BLE Host] Connection secured on retry!");
         }
     } else {
-        logPrint("[BLE Host] Connection secured!\n");
+        logPrint("[BLE Host] Connection secured!");
     }
 
     NimBLERemoteService* pService = pClient->getService(hidServiceUUID);
@@ -759,7 +760,7 @@ bool connectToServer() {
             if (pChar->getUUID() == reportCharUUID) {
                 if(pChar->canNotify()) {
                     pChar->subscribe(true, notifyCallback);
-                    logPrint("[BLE Host] Subscribed to HID report!\n");
+                    logPrint("[BLE Host] Subscribed to HID report!");
                 }
             }
         }
@@ -793,7 +794,7 @@ void sendConfigResponse(const String& response) {
     size_t chunkSize = (mtu > 28) ? (mtu - 5) : 240;
     if (chunkSize > 480) chunkSize = 480;
 
-    Serial.printf("[BLE TX] Sending %d bytes in %d-byte MTU chunks...\n", (int)len, (int)chunkSize);
+    logPrint("[BLE TX] Sending %d bytes in %d-byte MTU chunks...", (int)len, (int)chunkSize);
 
     for (size_t i = 0; i < len; i += chunkSize) {
       String chunk = fullResp.substring(i, min(i + chunkSize, len));
@@ -860,7 +861,7 @@ void loadConfiguration() {
           monitorCount++;
         }
       }
-      Serial.printf("Loaded %d monitors from NVS.\n", monitorCount);
+      logPrint("Loaded %d monitors from NVS.", monitorCount);
 
       if (doc["clients"].is<JsonArray>()) {
         int clientCount = 0;
@@ -892,18 +893,18 @@ void saveConfiguration(const String& jsonString) {
       mac.trim();
       preferences.putString(NVS_KEY_MOUSE_MAC, mac);
       targetMouseMac = mac;
-      Serial.printf("[NVS] Updated targetMouseMac from save payload: %s\n", targetMouseMac.c_str());
+      logPrint("[NVS] Updated targetMouseMac from save payload: %s", targetMouseMac.c_str());
     }
     if (doc["mouseName"].is<String>()) {
       String name = doc["mouseName"].as<String>();
       name.trim();
       preferences.putString(NVS_KEY_MOUSE_NAME, name);
       targetMouseName = name;
-      Serial.printf("[NVS] Updated targetMouseName from save payload: %s\n", targetMouseName.c_str());
+      logPrint("[NVS] Updated targetMouseName from save payload: %s", targetMouseName.c_str());
     }
   }
   preferences.end();
-  Serial.println("Configuration saved to NVS!");
+  logPrint("Configuration saved to NVS!");
 }
 
 static String pendingSaveJson = "";
@@ -948,7 +949,7 @@ void processCommand(String input) {
     }
 
     if (expectedLen > 0 && (int)jsonStr.length() != expectedLen) {
-      Serial.printf("[SAVE CONFIG ERROR] Content-Length mismatch: received %d, expected %d\n", (int)jsonStr.length(), expectedLen);
+      logPrint("[SAVE CONFIG ERROR] Content-Length mismatch: received %d, expected %d", (int)jsonStr.length(), expectedLen);
       sendConfigResponse("ERROR_SAVE Content-Length mismatch");
       return;
     }
@@ -1030,12 +1031,12 @@ void processCommand(String input) {
 
     // Cancel any background reconnect task and disconnect mouse to free radio
     if (reconnTaskHandle != NULL) {
-      Serial.println("[BLE Scan] Cancelling background mouseReconnectTask for discovery scan...");
+      logPrint("[BLE Scan] Cancelling background mouseReconnectTask for discovery scan...");
       vTaskDelete(reconnTaskHandle);
       reconnTaskHandle = NULL;
     }
     if (pClient && pClient->isConnected()) {
-      Serial.println("[BLE Scan] Disconnecting from mouse before discovery scan...");
+      logPrint("[BLE Scan] Disconnecting from mouse before discovery scan...");
       pClient->disconnect();
     }
     delay(200);
@@ -1051,12 +1052,12 @@ void processCommand(String input) {
       pScan->setInterval(100);
       pScan->setWindow(99);
 
-      Serial.println("[BLE Scan] Starting 5-second active discovery scan for mice...");
+      logPrint("[BLE Scan] Starting 5-second active discovery scan for mice...");
       pScan->start(5, false);
       pScan->clearResults();
     }
     isScanningForMice = false;
-    Serial.printf("[BLE Scan] Discovery scan complete! Discovered %d BLE devices.\n", (int)scannedMiceDoc.as<JsonArray>().size());
+    logPrint("[BLE Scan] Discovery scan complete! Discovered %d BLE devices.", (int)scannedMiceDoc.as<JsonArray>().size());
 
     String jsonStr;
     serializeJson(scannedMiceDoc, jsonStr);
@@ -1114,11 +1115,11 @@ void processCommand(String input) {
     String json = preferences.getString(NVS_KEY_LAYOUT, "{}");
     String mouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
     preferences.end();
-    Serial.println("\n--- [NVS FLASH DUMP] ---");
-    Serial.printf("Flash layout string length: %d bytes\n", json.length());
-    Serial.printf("Flash target mouse MAC: %s\n", mouseMac.c_str());
-    Serial.println(json);
-    Serial.println("--- [END NVS FLASH DUMP] ---\n");
+    logPrint("--- [NVS FLASH DUMP] ---");
+    logPrint("Flash layout string length: %d bytes", json.length());
+    logPrint("Flash target mouse MAC: %s", mouseMac.c_str());
+    logPrint("%s", json.c_str());
+    logPrint("--- [END NVS FLASH DUMP] ---");
   }
 }
 
@@ -1128,7 +1129,7 @@ static std::vector<String> bleCmdQueue;
 class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic) {
         std::string rxValue = pCharacteristic->getValue();
-        Serial.printf("[BLE RX DEBUG]: Received %d bytes: '%s'\n", (int)rxValue.length(), rxValue.c_str());
+        logPrint("[BLE RX DEBUG]: Received %d bytes: '%s'", (int)rxValue.length(), rxValue.c_str());
         if (rxValue.length() > 0) {
             bleRxBuffer += String(rxValue.c_str());
             while (bleRxBuffer.indexOf('\n') != -1) {
@@ -1152,20 +1153,20 @@ void setup() {
 #endif
   delay(2000);
   
-  logPrint("\n--- ESP32 KVM Switcher Started ---\n");
+  logPrint("--- ESP32 KVM Switcher Started ---");
   loadConfiguration();
   
-  logPrint("[BLE] Initializing NimBLE...\n");
-  NimBLEDevice::init("ESP32 KVM Mouse");
+  logPrint("[BLE] Initializing NimBLE...");
+  NimBLEDevice::init(BLE_DEVICE_NAME);
   NimBLEDevice::setMTU(512);
-  NimBLEDevice::setSecurityAuth(true, false, false); // Compatible Just Works pairing (bonding=true, mitm=false, sc=false for legacy compatibility)
-  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
+  NimBLEDevice::setSecurityAuth(true, false, true); // Compatible Just Works pairing for macOS/Windows (bonding=true, mitm=false, sc=true)
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT); // Standard HID Mouse IO Capability
   
   int numBonds = NimBLEDevice::getNumBonds();
-  logPrint("[BLE NVS BONDS] Saved bonded devices count: %d\n", numBonds);
+  logPrint("[BLE NVS BONDS] Saved bonded devices count: %d", numBonds);
   for (int i = 0; i < numBonds; i++) {
       NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(i);
-      logPrint("  -> Bonded Device #%d: MAC %s\n", i + 1, bondAddr.toString().c_str());
+      logPrint("  -> Bonded Device #%d: MAC %s", i + 1, bondAddr.toString().c_str());
   }
   
   // Setup BLE Server (Peripheral)
@@ -1200,7 +1201,7 @@ void setup() {
   pAdvertising->addServiceUUID(CONFIG_SERVICE_UUID);
   pAdvertising->setScanResponse(true);
   pAdvertising->start();
-  logPrint("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...\n");
+  logPrint("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
 
   // If targetMouseMac is bound, start persistent background reconnect task
   if (targetMouseMac.length() > 0 && !connected) {
@@ -1216,8 +1217,7 @@ void loop() {
   if (!bleCmdQueue.empty()) {
     String cmd = bleCmdQueue.front();
     bleCmdQueue.erase(bleCmdQueue.begin());
-    Serial.print("[BLE RX CMD]: ");
-    Serial.println(cmd);
+    logPrint("[BLE RX CMD]: %s", cmd.c_str());
     processCommand(cmd);
   }
 
@@ -1233,7 +1233,7 @@ void loop() {
     String input = Serial.readStringUntil('\n');
     input.trim();
     if (input.length() > 0) {
-      Serial.printf("[UART RX CMD]: %s\n", input.c_str());
+      logPrint("[UART RX CMD]: %s", input.c_str());
       processCommand(input);
     }
   }
@@ -1243,7 +1243,7 @@ void loop() {
     String input = USBSerial.readStringUntil('\n');
     input.trim();
     if (input.length() > 0) {
-      Serial.printf("[USB CDC RX CMD]: %s\n", input.c_str());
+      logPrint("[USB CDC RX CMD]: %s", input.c_str());
       processCommand(input);
     }
   }

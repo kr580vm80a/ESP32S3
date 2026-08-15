@@ -1439,9 +1439,9 @@
     }
 
     let layoutsData = {
-      activeLayoutId: 'layout_1',
+      activeLayoutId: 1,
       layouts: [
-        { id: 'layout_1', name: 'Default Layout', screens: [] }
+        { id: 1, name: 'Default Layout', screens: [] }
       ]
     };
     let screens = [];
@@ -1449,14 +1449,14 @@
     function getActiveLayout() {
       if (!layoutsData || !layoutsData.layouts || layoutsData.layouts.length === 0) {
         layoutsData = {
-          activeLayoutId: 'layout_1',
-          layouts: [{ id: 'layout_1', name: 'Default Layout', screens: [] }]
+          activeLayoutId: 1,
+          layouts: [{ id: 1, name: 'Default Layout', screens: [] }]
         };
       }
-      let layout = layoutsData.layouts.find(l => l.id === layoutsData.activeLayoutId);
+      let layout = layoutsData.layouts.find(l => Number(l.id) === Number(layoutsData.activeLayoutId));
       if (!layout) {
         layout = layoutsData.layouts[0];
-        layoutsData.activeLayoutId = layout.id;
+        layoutsData.activeLayoutId = Number(layout.id) || 1;
       }
       return layout;
     }
@@ -1477,9 +1477,9 @@
 
     function loadSavedProjectState() {
       layoutsData = {
-        activeLayoutId: 'layout_1',
+        activeLayoutId: 1,
         layouts: [
-          { id: 'layout_1', name: 'Default Layout', screens: [] }
+          { id: 1, name: 'Default Layout', screens: [] }
         ]
       };
       syncScreensReference();
@@ -1493,14 +1493,15 @@
         const opt = document.createElement('option');
         opt.value = l.id;
         opt.textContent = `${l.name} (${l.screens.length})`;
-        if (l.id === layoutsData.activeLayoutId) opt.selected = true;
+        if (Number(l.id) === Number(layoutsData.activeLayoutId)) opt.selected = true;
         select.appendChild(opt);
       });
     }
 
     function switchLayout(layoutId) {
-      if (layoutsData.activeLayoutId === layoutId) return;
-      layoutsData.activeLayoutId = layoutId;
+      const numId = Number(layoutId) || 1;
+      if (Number(layoutsData.activeLayoutId) === numId) return;
+      layoutsData.activeLayoutId = numId;
       syncScreensReference();
       selectedScreen = null;
       snapGuides = [];
@@ -1511,17 +1512,18 @@
     }
 
     function addBlankLayout() {
+      const nextId = (layoutsData.layouts.length > 0) ? Math.max(...layoutsData.layouts.map(l => Number(l.id) || 0)) + 1 : 1;
       const count = layoutsData.layouts.length + 1;
       const name = prompt('Введіть назву нової конфігурації (Layout):', `Layout ${count}`);
       if (name === null) return;
       const cleanName = name.trim() || `Layout ${count}`;
       const newLayout = {
-        id: 'layout_' + Date.now(),
+        id: nextId,
         name: cleanName,
         screens: []
       };
       layoutsData.layouts.push(newLayout);
-      layoutsData.activeLayoutId = newLayout.id;
+      layoutsData.activeLayoutId = nextId;
       syncScreensReference();
       selectedScreen = null;
       snapGuides = [];
@@ -1533,13 +1535,14 @@
 
     function duplicateCurrentLayout() {
       const active = getActiveLayout();
+      const nextId = (layoutsData.layouts.length > 0) ? Math.max(...layoutsData.layouts.map(l => Number(l.id) || 0)) + 1 : 1;
       const newLayout = {
-        id: 'layout_' + Date.now(),
+        id: nextId,
         name: `${active.name} (Copy)`,
         screens: JSON.parse(JSON.stringify(active.screens))
       };
       layoutsData.layouts.push(newLayout);
-      layoutsData.activeLayoutId = newLayout.id;
+      layoutsData.activeLayoutId = nextId;
       syncScreensReference();
       selectedScreen = null;
       snapGuides = [];
@@ -1609,8 +1612,8 @@
       const active = getActiveLayout();
       if (!confirm(`Ви дійсно бажаєте видалити конфігурацію "${active.name}"?`)) return;
 
-      layoutsData.layouts = layoutsData.layouts.filter(l => l.id !== active.id);
-      layoutsData.activeLayoutId = layoutsData.layouts[0].id;
+      layoutsData.layouts = layoutsData.layouts.filter(l => Number(l.id) !== Number(active.id));
+      layoutsData.activeLayoutId = Number(layoutsData.layouts[0].id) || 1;
       syncScreensReference();
       selectedScreen = null;
       snapGuides = [];
@@ -2445,8 +2448,7 @@
       const scale = 0.12;
 
       const config = {
-        device: "ESP32-KVM-Switch",
-        activeLayoutId: layoutsData.activeLayoutId,
+        activeLayoutId: Number(layoutsData.activeLayoutId) || 1,
         totalLayouts: layoutsData.layouts.length,
         layouts: layoutsData.layouts.map(l => {
           const sorted = [...l.screens].sort((a, b) => (a.layoutX !== undefined ? a.layoutX : a.x) - (b.layoutX !== undefined ? b.layoutX : b.x) || (b.layoutY !== undefined ? b.layoutY : b.y) - (a.layoutY !== undefined ? a.layoutY : a.y));
@@ -2455,7 +2457,7 @@
           const minLY = sorted.length > 0 ? Math.min(...sorted.map(s => s.layoutY !== undefined ? s.layoutY : 0)) : 0;
 
           return {
-            id: l.id,
+            id: Number(l.id) || 1,
             name: l.name,
             totalScreens: sorted.length,
             screens: sorted.map((s, index) => {
@@ -2471,7 +2473,7 @@
               const macVal = s.mac || (assignedClient ? assignedClient.mac : "");
 
               return {
-                id: s.name || s.id || (`Monitor #${index + 1}`),
+                id: index + 1,
                 name: s.name || (`Monitor #${index + 1}`),
                 group: groupVal,
                 groupName: groupNameVal,
@@ -3039,7 +3041,7 @@
       try {
         backupObj = JSON.parse(currentConfigJSON);
       } catch(e) {
-        backupObj = { device: "ESP32-KVM-Switch", activeLayoutId: layoutsData.activeLayoutId, layouts: [] };
+        backupObj = { activeLayoutId: layoutsData.activeLayoutId, layouts: [] };
       }
       backupObj.mouseMac = boundTargetMouseMac;
       const jsonStr = JSON.stringify(backupObj, null, 2);
@@ -3134,9 +3136,9 @@
         }
 
         layoutsData = {
-          activeLayoutId: doc.activeLayoutId || (layoutsArr[0] ? layoutsArr[0].id : 'layout_1'),
+          activeLayoutId: (typeof doc.activeLayoutId === 'number') ? doc.activeLayoutId : (parseInt(doc.activeLayoutId, 10) || (layoutsArr[0] ? (Number(layoutsArr[0].id) || 1) : 1)),
           layouts: layoutsArr.map((l, lIdx) => ({
-            id: l.id || ('layout_' + (lIdx + 1)),
+            id: (typeof l.id === 'number') ? l.id : (parseInt(l.id, 10) || (lIdx + 1)),
             name: l.name || ('Layout ' + (lIdx + 1)),
             screens: (l.screens || []).map((s, sIdx) => {
               const grp = s.group || 'manual';
@@ -3147,8 +3149,8 @@
               const isPrim = (s.isPrimary !== undefined) ? s.isPrimary : false;
 
               return {
-                id: s.id || ('screen_' + Date.now() + '_' + sIdx),
-                name: s.name || 'Display',
+                id: (typeof s.id === 'number') ? s.id : (parseInt(s.id, 10) || (sIdx + 1)),
+                name: s.name || ('Monitor #' + (sIdx + 1)),
                 group: grp,
                 groupName: grpName,
                 mac: s.mac || '',
@@ -3370,7 +3372,15 @@
             }
             try {
               const writer = window.esp32SerialPort.writable.getWriter();
-              await writer.write(new TextEncoder().encode(cmd));
+              const data = new TextEncoder().encode(cmd);
+              const chunkSize = 256;
+              for (let i = 0; i < data.length; i += chunkSize) {
+                const chunk = data.slice(i, i + chunkSize);
+                await writer.write(chunk);
+                if (i + chunkSize < data.length) {
+                  await new Promise(r => setTimeout(r, 5));
+                }
+              }
               writer.releaseLock();
               resolve(true);
             } catch (err) {

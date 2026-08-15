@@ -15,12 +15,10 @@ Preferences preferences;
 // NVS Flash Storage Constants
 const char* NVS_NAMESPACE = "kvm_config";
 const char* NVS_KEY_LAYOUT = "layout";
-const char* NVS_KEY_MOUSE_MAC = "mouse_mac";
-const char* NVS_KEY_MOUSE_NAME = "mouse_name";
 
 // Structure to store monitor configuration
 struct MonitorConfig {
-  String id;
+  int id = 1;
   String name;
   int x;
   int y;
@@ -527,7 +525,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         resetSubpixelAccumulators();
     } else if (newMonitorIndex != currentMonitorIndex) {
         if (monitors[newMonitorIndex].mac.equals(currentMon.mac)) {
-            logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%s (%s)",
+            logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (%s)",
                 virtualX, virtualY, monitors[newMonitorIndex].id, monitors[newMonitorIndex].name.c_str());
         } else {
             if (virtualX < currentMon.x) {
@@ -591,7 +589,7 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
     if (y & 0x800) y |= 0xF000; // Sign extend to 16-bit
     int8_t scroll = (int8_t)pData[5];
     int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
-    logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%s (%s)",
+    logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%d (%s)",
                 pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
                 buttons, x, y, scroll, hScroll, virtualX, virtualY,
                 monitors[currentMonitorIndex].id, monitors[currentMonitorIndex].name.c_str());
@@ -600,6 +598,8 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
 
 bool connectToServer();
 void sendConfigResponse(const String& response);
+void saveMouseToNvsLayout(String mac, String name);
+String loadLayoutJsonFromNVS();
 static JsonDocument scannedMiceDoc;
 static TaskHandle_t reconnTaskHandle = NULL;
 
@@ -715,10 +715,7 @@ bool connectToServer() {
                 if (devMac == targetMouseMac || (macPrefix.length() > 0 && devMac.startsWith(macPrefix)) || devName.equalsIgnoreCase("MX Master 3S") || devName.indexOf("MX Master") != -1) {
                     if (devMac != targetMouseMac) {
                         logPrint("[BLE Host] AUTO-RESOLVED rotated mouse MAC: %s (was %s)!", devMac.c_str(), targetMouseMac.c_str());
-                        targetMouseMac = devMac;
-                        preferences.begin(NVS_NAMESPACE, false);
-                        preferences.putString(NVS_KEY_MOUSE_MAC, targetMouseMac);
-                        preferences.end();
+                        saveMouseToNvsLayout(devMac, devName.length() > 0 ? devName : targetMouseName);
                         sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
                     }
                     advDevice = new NimBLEAdvertisedDevice(dev);
@@ -821,72 +818,125 @@ void sendConfigResponse(const String& response) {
 }
 
 
-void loadConfiguration() {
+String loadLayoutJsonFromNVS() {
   preferences.begin(NVS_NAMESPACE, true);
-  String json = preferences.getString(NVS_KEY_LAYOUT, "{}");
-  targetMouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
-  targetMouseName = preferences.getString(NVS_KEY_MOUSE_NAME, "");
+  String json = "{}";
+  size_t len = preferences.getBytesLength(NVS_KEY_LAYOUT);
+  if (len > 0) {
+    char* buf = (char*)malloc(len + 1);
+    if (buf) {
+      preferences.getBytes(NVS_KEY_LAYOUT, buf, len);
+      buf[len] = '\0';
+      json = String(buf);
+      free(buf);
+    }
+  }
   preferences.end();
 
-  targetMouseMac.toLowerCase();
-  targetMouseMac.trim();
-  targetMouseName.trim();
+  targetMouseMac = "";
+  targetMouseName = "";
+  if (json.length() > 2) {
+    JsonDocument doc;
+    if (!deserializeJson(doc, json) && doc.is<JsonObject>()) {
+      targetMouseMac = doc["mouseMac"] | "";
+      targetMouseName = doc["mouseName"] | "";
+    }
+  }
+  return json;
+}
 
-  if (json.length() > 2 && json != "[]") {
+void initDefaultConfigDoc(JsonDocument& doc) {
+  doc.clear();
+  doc["activeLayoutId"] = 1;
+  doc["totalLayouts"] = 1;
+  JsonArray layoutsArr = doc["layouts"].to<JsonArray>();
+  JsonObject layout1 = layoutsArr.add<JsonObject>();
+  layout1["id"] = 1;
+  layout1["name"] = "Default Layout";
+  layout1["totalScreens"] = 0;
+  layout1["screens"].to<JsonArray>();
+  doc["clients"].to<JsonArray>();
+}
+
+void saveMouseToNvsLayout(String mac, String name) {
+  mac.toLowerCase();
+  mac.trim();
+  name.trim();
+  targetMouseMac = mac;
+  targetMouseName = name;
+
+  String json = loadLayoutJsonFromNVS();
+  JsonDocument doc;
+  if (deserializeJson(doc, json) || !doc.is<JsonObject>()) {
+    initDefaultConfigDoc(doc);
+  }
+
+  doc["mouseMac"] = targetMouseMac;
+  doc["mouseName"] = targetMouseName;
+
+  String unifiedJson;
+  serializeJson(doc, unifiedJson);
+
+  preferences.begin(NVS_NAMESPACE, false);
+  preferences.remove(NVS_KEY_LAYOUT);
+  size_t bytesWritten = preferences.putBytes(NVS_KEY_LAYOUT, unifiedJson.c_str(), unifiedJson.length() + 1);
+  preferences.end();
+
+  if (bytesWritten > 0) {
+    logPrint("[NVS] Persisted mouse (%s, '%s') in unified JSON layout (%u bytes)!", targetMouseMac.c_str(), targetMouseName.c_str(), bytesWritten);
+  } else {
+    logPrint("[NVS ERROR] Failed to save mouse to layout (putBytes returned 0)!");
+  }
+}
+
+void loadConfiguration() {
+  String json = loadLayoutJsonFromNVS();
+
+  if (json.length() > 2) {
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json);
-    if (!err) {
-      // Restore mouseMac & mouseName if present in saved JSON
-      if (doc["mouseMac"].is<String>() && doc["mouseMac"].as<String>().length() > 0) {
-        targetMouseMac = doc["mouseMac"].as<String>();
-        targetMouseMac.toLowerCase();
-        targetMouseMac.trim();
-      }
-      if (doc["mouseName"].is<String>() && doc["mouseName"].as<String>().length() > 0) {
-        targetMouseName = doc["mouseName"].as<String>();
-        targetMouseName.trim();
-      }
-
+    if (!err && doc.is<JsonObject>()) {
       JsonArray arr;
       if (doc["layouts"].is<JsonArray>() && doc["layouts"].size() > 0) {
-        String activeId = doc["activeLayoutId"].as<String>();
         JsonObject activeLayout = doc["layouts"][0].as<JsonObject>();
+        int targetId = doc["activeLayoutId"] | 1;
         for (JsonObject l : doc["layouts"].as<JsonArray>()) {
-          if (l["id"].as<String>() == activeId) {
+          int lId = l["id"] | 0;
+          if (lId == targetId || (l["id"].as<String>() == String(targetId))) {
             activeLayout = l;
             break;
           }
         }
         arr = activeLayout["screens"].as<JsonArray>();
-      } else if (doc.is<JsonArray>()) {
-        arr = doc.as<JsonArray>();
       }
 
       monitorCount = 0;
       if (arr) {
         for (JsonObject repo : arr) {
-          monitors[monitorCount].id = repo["id"].is<String>() ? repo["id"].as<String>() : String(monitorCount + 1);
-          monitors[monitorCount].name = repo["name"].is<String>() ? repo["name"].as<String>() : ("Monitor #" + String(monitorCount + 1));
-          monitors[monitorCount].x = repo["x"];
-          monitors[monitorCount].y = repo["y"];
-          monitors[monitorCount].width = repo["width"];
-          monitors[monitorCount].height = repo["height"];
-          monitors[monitorCount].mac = repo["mac"].as<String>();
-          monitors[monitorCount].scale = repo["scale"].is<int>() ? repo["scale"].as<int>() : 100;
+          int defId = monitorCount + 1000;
+          String defName = "Monitor #" + String(defId);
+          monitors[monitorCount].id = repo["id"] | defId;
+          monitors[monitorCount].name = repo["name"] | defName;
+          monitors[monitorCount].x = repo["x"] | 0;
+          monitors[monitorCount].y = repo["y"] | 0;
+          monitors[monitorCount].width = repo["width"] | 1920;
+          monitors[monitorCount].height = repo["height"] | 1080;
+          monitors[monitorCount].mac = repo["mac"] | "";
+          monitors[monitorCount].scale = repo["scale"] | 100;
           monitorCount++;
         }
       }
-      logPrint("Loaded %d monitors from NVS.", monitorCount);
+      logPrint("Loaded %d monitors from NVS. Target mouse: %s (%s)", monitorCount, targetMouseMac.c_str(), targetMouseName.c_str());
 
       if (doc["clients"].is<JsonArray>()) {
         int clientCount = 0;
         for (JsonObject c : doc["clients"].as<JsonArray>()) {
           if (clientCount >= MAX_KVM_CLIENTS) break;
-          String mac = c["mac"].as<String>();
+          String mac = c["mac"] | "";
           if (mac.length() > 0) {
             kvmClients[clientCount].mac = mac;
-            kvmClients[clientCount].name = c["name"].as<String>();
-            kvmClients[clientCount].active = false; // Live BLE connection state starts as false at boot
+            kvmClients[clientCount].name = c["name"] | "Unknown PC";
+            kvmClients[clientCount].active = false;
             clientCount++;
           }
         }
@@ -896,30 +946,40 @@ void loadConfiguration() {
 }
 
 void saveConfiguration(const String& jsonString) {
-  preferences.begin(NVS_NAMESPACE, false);
-  preferences.putString(NVS_KEY_LAYOUT, jsonString);
-
-  // Extract and persist mouseMac & mouseName from save payload if present
   JsonDocument doc;
+  String finalJson = jsonString;
+
   if (!deserializeJson(doc, jsonString)) {
-    if (doc["mouseMac"].is<String>()) {
-      String mac = doc["mouseMac"].as<String>();
+    String mac = doc["mouseMac"] | "";
+    if (mac.length() > 0) {
       mac.toLowerCase();
       mac.trim();
-      preferences.putString(NVS_KEY_MOUSE_MAC, mac);
       targetMouseMac = mac;
-      logPrint("[NVS] Updated targetMouseMac from save payload: %s", targetMouseMac.c_str());
+    } else if (targetMouseMac.length() > 0) {
+      doc["mouseMac"] = targetMouseMac;
     }
-    if (doc["mouseName"].is<String>()) {
-      String name = doc["mouseName"].as<String>();
+
+    String name = doc["mouseName"] | "";
+    if (name.length() > 0) {
       name.trim();
-      preferences.putString(NVS_KEY_MOUSE_NAME, name);
       targetMouseName = name;
-      logPrint("[NVS] Updated targetMouseName from save payload: %s", targetMouseName.c_str());
+    } else if (targetMouseName.length() > 0) {
+      doc["mouseName"] = targetMouseName;
     }
+
+    serializeJson(doc, finalJson);
+    logPrint("[NVS] Persisted targetMouseMac '%s' and targetMouseName '%s' in unified JSON layout", targetMouseMac.c_str(), targetMouseName.c_str());
   }
+
+  preferences.begin(NVS_NAMESPACE, false);
+  preferences.remove(NVS_KEY_LAYOUT);
+  size_t bytesWritten = preferences.putBytes(NVS_KEY_LAYOUT, finalJson.c_str(), finalJson.length() + 1);
   preferences.end();
-  logPrint("Configuration saved to NVS!");
+  if (bytesWritten > 0) {
+    logPrint("[NVS] Configuration saved to NVS successfully (%u bytes)!", bytesWritten);
+  } else {
+    logPrint("[NVS ERROR] Failed to save configuration (putBytes returned 0)!");
+  }
 }
 
 static String pendingSaveJson = "";
@@ -974,40 +1034,31 @@ void processCommand(String input) {
       doSaveConfig = true;
     }
   } else if (input == "GET_CONFIG") {
-    preferences.begin(NVS_NAMESPACE, true);
-    String json = preferences.getString(NVS_KEY_LAYOUT, "{}");
-    preferences.end();
+    String json = loadLayoutJsonFromNVS();
 
     JsonDocument doc;
     DeserializationError err = deserializeJson(doc, json);
 
     if (err || !doc.is<JsonObject>()) {
-      doc.clear();
-      doc["device"] = "ESP32-KVM-Switch";
-      doc["activeLayoutId"] = "layout_1";
-      doc["totalLayouts"] = 1;
-      JsonArray layoutsArr = doc["layouts"].to<JsonArray>();
-      JsonObject layout1 = layoutsArr.add<JsonObject>();
-      layout1["id"] = "layout_1";
-      layout1["name"] = "Default Layout";
-      layout1["totalScreens"] = 0;
-      layout1["screens"].to<JsonArray>();
-      doc["clients"].to<JsonArray>();
+      initDefaultConfigDoc(doc);
     }
 
     // Include bound mouse MAC & Name in the unified JSON payload for backup & restore
     doc["mouseMac"] = targetMouseMac;
     doc["mouseName"] = targetMouseName.length() > 0 ? targetMouseName : (targetMouseMac.length() > 0 ? "BLE Mouse" : "");
 
-    // Reset connected status for stored clients prior to active connection sync
+    // Preserve stored clients and reset connected status prior to active connection sync
+    JsonArray clientsArr;
     if (doc["clients"].is<JsonArray>()) {
-      for (JsonObject c : doc["clients"].as<JsonArray>()) {
+      clientsArr = doc["clients"].as<JsonArray>();
+      for (JsonObject c : clientsArr) {
         c["connected"] = false;
       }
+    } else {
+      clientsArr = doc["clients"].to<JsonArray>();
     }
 
     // Dynamic merge of active connected BLE clients into unified JSON
-    JsonArray clientsArr = doc["clients"].is<JsonArray>() ? doc["clients"].as<JsonArray>() : doc["clients"].to<JsonArray>();
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
       if (kvmClients[i].active && kvmClients[i].mac.length() > 0) {
         String activeMac = kvmClients[i].mac;
@@ -1016,7 +1067,7 @@ void processCommand(String input) {
 
         bool exists = false;
         for (JsonObject c : clientsArr) {
-          String cMac = c["mac"].as<String>();
+          String cMac = c["mac"] | "";
           cMac.toLowerCase();
           cMac.trim();
           if (cMac == activeMac) {
@@ -1088,14 +1139,7 @@ void processCommand(String input) {
       name = param.substring(spaceIdx + 1);
       name.trim();
     }
-    mac.toLowerCase();
-    mac.trim();
-    preferences.begin(NVS_NAMESPACE, false);
-    preferences.putString(NVS_KEY_MOUSE_MAC, mac);
-    preferences.putString(NVS_KEY_MOUSE_NAME, name);
-    preferences.end();
-    targetMouseMac = mac;
-    targetMouseName = name;
+    saveMouseToNvsLayout(mac, name);
     sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
 
     if (reconnTaskHandle != NULL) {
@@ -1109,12 +1153,7 @@ void processCommand(String input) {
       doConnect = true;
     }
   } else if (input == "UNBIND_MOUSE") {
-    preferences.begin(NVS_NAMESPACE, false);
-    preferences.remove(NVS_KEY_MOUSE_MAC);
-    preferences.remove(NVS_KEY_MOUSE_NAME);
-    preferences.end();
-    targetMouseMac = "";
-    targetMouseName = "";
+    saveMouseToNvsLayout("", "");
     if (reconnTaskHandle != NULL) {
       vTaskDelete(reconnTaskHandle);
       reconnTaskHandle = NULL;
@@ -1126,13 +1165,10 @@ void processCommand(String input) {
   } else if (input == "GET_TARGET_MOUSE") {
     sendConfigResponse("TARGET_MOUSE " + targetMouseMac);
   } else if (input == "DUMP_FLASH") {
-    preferences.begin(NVS_NAMESPACE, true);
-    String json = preferences.getString(NVS_KEY_LAYOUT, "{}");
-    String mouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
-    preferences.end();
+    String json = loadLayoutJsonFromNVS();
     logPrint("--- [NVS FLASH DUMP] ---");
     logPrint("Flash layout string length: %d bytes", json.length());
-    logPrint("Flash target mouse MAC: %s", mouseMac.c_str());
+    logPrint("Flash target mouse MAC: %s", targetMouseMac.c_str());
     logPrint("%s", json.c_str());
     logPrint("--- [END NVS FLASH DUMP] ---");
   }
@@ -1161,7 +1197,7 @@ class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
 };
 
 void setup() {
-  Serial.setRxBufferSize(2048);
+  Serial.setRxBufferSize(16384);
   Serial.begin(115200);
 #if CONFIG_IDF_TARGET_ESP32S3
   USBSerial.begin(115200);

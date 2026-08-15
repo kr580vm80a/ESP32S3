@@ -34,19 +34,6 @@ struct MonitorConfig {
 MonitorConfig monitors[MAX_MONITORS];
 int monitorCount = 0;
 
-// Virtual Cursor Position
-long virtualX = 0;
-long virtualY = 0;
-int currentMonitorIndex = 0;
-
-static float subpixelX = 0.0f;
-static float subpixelY = 0.0f;
-
-void resetSubpixelAccumulators() {
-    subpixelX = 0.0f;
-    subpixelY = 0.0f;
-}
-
 // --- BLE Peripheral (Server) Variables ---
 NimBLEServer* pServer = nullptr;
 NimBLEHIDDevice* hidDevice = nullptr;
@@ -316,6 +303,23 @@ uint16_t getTargetConnHandle(const String& targetMac) {
     return BLE_HS_CONN_HANDLE_NONE;
 }
 
+// Virtual Cursor Position
+long virtualX = 0;
+long virtualY = 0;
+int currentMonitorIndex = 0;
+
+static float subpixelX = 0.0f;
+static float subpixelY = 0.0f;
+static float effectiveSubpixelX = 0.0f;
+static float effectiveSubpixelY = 0.0f;
+
+void resetSubpixelAccumulators() {
+    subpixelX = 0.0f;
+    subpixelY = 0.0f;
+    effectiveSubpixelX = 0.0f;
+    effectiveSubpixelY = 0.0f;
+}
+
 // --- Unified PC Cursor Calibration & Edge Positioning Function ---
 void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
     if (monitorCount == 0 || monIndex < 0 || monIndex >= monitorCount) return;
@@ -477,15 +481,22 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         subpixelX = rawSendX - (float)sendDx;
         subpixelY = rawSendY - (float)sendDy;
 
-        effectiveDx = (long)round(sendDx * scaleFactor);
-        effectiveDy = (long)round(sendDy * scaleFactor);
+        float rawEffX = ((float)sendDx * scaleFactor) + effectiveSubpixelX;
+        float rawEffY = ((float)sendDy * scaleFactor) + effectiveSubpixelY;
+
+        effectiveDx = (long)truncf(rawEffX);
+        effectiveDy = (long)truncf(rawEffY);
+
+        effectiveSubpixelX = rawEffX - (float)effectiveDx;
+        effectiveSubpixelY = rawEffY - (float)effectiveDy;
+        
+        virtualX += effectiveDx;
+        virtualY += effectiveDy;
     } else {
-        subpixelX = 0.0f;
-        subpixelY = 0.0f;
+        virtualX += sendDx;
+        virtualY += sendDy;
     }
 
-    virtualX += effectiveDx;
-    virtualY += effectiveDy;
     // Find which monitor we are currently in
     int newMonitorIndex = -1;
     for (int i = 0; i < monitorCount; i++) {
@@ -497,20 +508,23 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     }
 
     if (newMonitorIndex == -1) {
-        newMonitorIndex = currentMonitorIndex;
         if (virtualX < currentMon.x) {
             virtualX = currentMon.x;
             logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
-        } else if (virtualY < currentMon.y) {
+        }
+        if (virtualY < currentMon.y) {
             virtualY = currentMon.y;
             logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
-        } else if (virtualX >= currentMon.x + currentMon.width) {
+        }
+        if (virtualX >= currentMon.x + currentMon.width) {
             virtualX = currentMon.x + currentMon.width - 1;
             logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
-        } else if (virtualY >= currentMon.y + currentMon.height) {
+        }
+        if (virtualY >= currentMon.y + currentMon.height) {
             virtualY = currentMon.y + currentMon.height - 1;
             logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
         }
+        resetSubpixelAccumulators();
     } else if (newMonitorIndex != currentMonitorIndex) {
         if (monitors[newMonitorIndex].mac.equals(currentMon.mac)) {
             logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%s (%s)",
@@ -519,24 +533,25 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             if (virtualX < currentMon.x) {
                 virtualX = currentMon.x;
                 sendDx -= 50;
-                logPrint("[CALIBRATION1] Calibrated LEFT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
+                logPrint("[SWITCH CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
             } else if (virtualY < currentMon.y) {
                 virtualY = currentMon.y;
                 sendDy -= 50;
-                logPrint("[CALIBRATION1] Calibrated TOP edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
+                logPrint("[SWITCH CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
             } else if (virtualX >= currentMon.x + currentMon.width) {
                 virtualX = currentMon.x + currentMon.width;
                 sendDx += 50;
-                logPrint("[CALIBRATION1] Calibrated RIGHT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
+                logPrint("[SWITCH CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
             } else if (virtualY >= currentMon.y + currentMon.height) {
                 virtualY = currentMon.y + currentMon.height;
                 sendDy += 50;
-                logPrint("[CALIBRATION1] Calibrated BOTTOM edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
+                logPrint("[SWITCH CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
             }
             // Position target PC's OS cursor at exact entering edge coordinates ONLY when switching to a different PC!
             //alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
         }
         currentMonitorIndex = newMonitorIndex;
+        resetSubpixelAccumulators();
     }
 
     // Send Standard HID Report (5 bytes: Buttons, dX, dY, VScroll, HScroll)
@@ -639,7 +654,7 @@ void startMouseReconnectTask() {
         pScan->setInterval(160);
         pScan->setWindow(160);
         pScan->setDuplicateFilter(false);
-        pScan->start(0, false); // 0 = continuous background scanning without blind spots
+        pScan->start(0, nullptr, false); // Non-blocking continuous background scan
     }
 }
 

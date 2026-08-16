@@ -26,6 +26,7 @@ struct MonitorConfig {
     int height;
     String mac;
     int scale = 100;
+    bool isPrimary = false;
     int lastX = 0;
     int lastY = 0;
 };
@@ -48,6 +49,25 @@ struct KVMClient {
 };
 #define MAX_KVM_CLIENTS 2
 KVMClient kvmClients[MAX_KVM_CLIENTS];
+static TaskHandle_t bootCalibTaskHandle = NULL;
+uint16_t getTargetConnHandle(const String& targetMac);
+
+// Virtual Cursor Position & State
+long virtualX = 0;
+long virtualY = 0;
+int currentMonitorIndex = 0;
+
+static float subpixelX = 0.0f;
+static float subpixelY = 0.0f;
+static float effectiveSubpixelX = 0.0f;
+static float effectiveSubpixelY = 0.0f;
+
+void resetSubpixelAccumulators() {
+    subpixelX = 0.0f;
+    subpixelY = 0.0f;
+    effectiveSubpixelX = 0.0f;
+    effectiveSubpixelY = 0.0f;
+}
 
 const uint8_t hidReportMap[] = {
     0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
@@ -162,14 +182,21 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
         // If this is the FIRST connected PC, assign control & calibrate cursor to center of primary screen!
         if (activeCount == 1) {
+            if (bootCalibTaskHandle != NULL) {
+                vTaskDelete(bootCalibTaskHandle);
+                bootCalibTaskHandle = NULL;
+            }
             String firstMac = peerMac;
             xTaskCreate([](void* param) {
                 String* pMac = (String*)param;
                 vTaskDelay(pdMS_TO_TICKS(600));
-                calibrateFirstConnectedPcToCenter(*pMac);
+                if (getTargetConnHandle(*pMac) != BLE_HS_CONN_HANDLE_NONE) {
+                    calibrateFirstConnectedPcToCenter(*pMac);
+                }
                 delete pMac;
+                bootCalibTaskHandle = NULL;
                 vTaskDelete(NULL);
-            }, "bootCalibTask", 3072, new String(firstMac), 1, NULL);
+            }, "bootCalibTask", 3072, new String(firstMac), 1, &bootCalibTaskHandle);
         }
 
         // Resume advertising so 2nd PC can discover and connect
@@ -190,11 +217,58 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         peerMac.toLowerCase();
         peerMac.trim();
         logPrint("[BLE Server] PC Disconnected! MAC: %s (conn_handle: %d)", peerMac.c_str(), desc->conn_handle);
+
+        if (bootCalibTaskHandle != NULL) {
+            vTaskDelete(bootCalibTaskHandle);
+            bootCalibTaskHandle = NULL;
+        }
         
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-            if (kvmClients[i].conn_id == desc->conn_handle || (kvmClients[i].mac.length() > 0 && kvmClients[i].mac.equalsIgnoreCase(peerMac))) {
+            if (kvmClients[i].conn_id == desc->conn_handle || (kvmClients[i].mac.length() > 0 && kvmClients[i].mac.equals(peerMac))) {
                 kvmClients[i].active = false;
                 break;
+            }
+        }
+
+        // If the disconnected PC was the current active PC, failover to another connected PC!
+        if (monitorCount > 0 && monitors[currentMonitorIndex].mac.equals(peerMac)) {
+            String fallbackMac = "";
+            for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+                if (kvmClients[i].active && kvmClients[i].mac.length() > 0 && !kvmClients[i].mac.equals(peerMac)) {
+                    fallbackMac = kvmClients[i].mac;
+                    break;
+                }
+            }
+
+            if (fallbackMac.length() > 0) {
+                int targetMonIdx = -1;
+                for (int i = 0; i < monitorCount; i++) {
+                    if (monitors[i].isPrimary && monitors[i].mac.equals(fallbackMac)) {
+                        targetMonIdx = i;
+                        break;
+                    }
+                }
+
+                if (targetMonIdx != -1) {
+                    currentMonitorIndex = targetMonIdx;
+                    MonitorConfig& mon = monitors[targetMonIdx];
+                    if (mon.lastX >= mon.x && mon.lastX < mon.x + mon.width &&
+                        mon.lastY >= mon.y && mon.lastY < mon.y + mon.height) {
+                        virtualX = mon.lastX;
+                        virtualY = mon.lastY;
+                    } else {
+                        virtualX = mon.x + (mon.width / 2);
+                        virtualY = mon.y + (mon.height / 2);
+                    }
+                    mon.lastX = virtualX;
+                    mon.lastY = virtualY;
+                    resetSubpixelAccumulators();
+
+                    logPrint("[FAILOVER] Current PC %s disconnected! Switched control to active PC %s (Mon #%d: %s at %ld, %ld)",
+                             peerMac.c_str(), fallbackMac.c_str(), mon.id, mon.name.c_str(), virtualX, virtualY);
+                }
+            } else {
+                logPrint("[FAILOVER] Current PC %s disconnected and no other active PC available.", peerMac.c_str());
             }
         }
 
@@ -242,82 +316,13 @@ String getMonDisplayName(int idx) {
 }
 
 uint16_t getTargetConnHandle(const String& targetMac) {
-    String cleanTargetMac = targetMac;
-    cleanTargetMac.toLowerCase();
-    cleanTargetMac.trim();
-
     // 1. Direct MAC address match
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active && kvmClients[i].mac.equalsIgnoreCase(cleanTargetMac)) {
+        if (kvmClients[i].active && kvmClients[i].mac.equals(targetMac)) {
             return kvmClients[i].conn_id;
         }
     }
-
-    // 2. Fallback: Group rank matching by distinct MAC index in layout
-    String distinctMacs[MAX_KVM_CLIENTS];
-    int distinctCount = 0;
-    for (int i = 0; i < monitorCount; i++) {
-        String mMac = monitors[i].mac;
-        mMac.toLowerCase();
-        mMac.trim();
-        if (mMac.length() == 0) continue;
-        bool exists = false;
-        for (int d = 0; d < distinctCount; d++) {
-            if (distinctMacs[d].equalsIgnoreCase(mMac)) {
-                exists = true;
-                break;
-            }
-        }
-        if (!exists && distinctCount < MAX_KVM_CLIENTS) {
-            distinctMacs[distinctCount++] = mMac;
-        }
-    }
-
-    int targetGroupIdx = -1;
-    for (int d = 0; d < distinctCount; d++) {
-        if (distinctMacs[d].equalsIgnoreCase(cleanTargetMac)) {
-            targetGroupIdx = d;
-            break;
-        }
-    }
-
-    if (targetGroupIdx >= 0) {
-        int activeIdx = 0;
-        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-            if (kvmClients[i].active) {
-                if (activeIdx == targetGroupIdx) {
-                    return kvmClients[i].conn_id;
-                }
-                activeIdx++;
-            }
-        }
-    }
-
-    // 3. Final Fallback: Return first active connection handle
-    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active) {
-            return kvmClients[i].conn_id;
-        }
-    }
-
     return BLE_HS_CONN_HANDLE_NONE;
-}
-
-// Virtual Cursor Position
-long virtualX = 0;
-long virtualY = 0;
-int currentMonitorIndex = 0;
-
-static float subpixelX = 0.0f;
-static float subpixelY = 0.0f;
-static float effectiveSubpixelX = 0.0f;
-static float effectiveSubpixelY = 0.0f;
-
-void resetSubpixelAccumulators() {
-    subpixelX = 0.0f;
-    subpixelY = 0.0f;
-    effectiveSubpixelX = 0.0f;
-    effectiveSubpixelY = 0.0f;
 }
 
 // Send HID report to target connection handle or broadcast notify
@@ -359,6 +364,10 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     }
 
     uint16_t targetConnHandle = getTargetConnHandle(targetMac);
+    if (targetConnHandle == BLE_HS_CONN_HANDLE_NONE) {
+        logPrint("[%s] PC %s is not connected. Aborting calibration.", contextLabel, targetMac.c_str());
+        return;
+    }
 
     int16_t relX = (int16_t)(targetGlobalX - minPcX);
     int16_t relY = (int16_t)(targetGlobalY - minPcY);
@@ -403,8 +412,9 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     // 35 pulses of (-127, -127) = -4445 px, guaranteeing OS cursor is at top-left-most pixel of target PC's virtual desktop
     uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
     for (int p = 0; p < 35; p++) {
+        if (getTargetConnHandle(targetMac) == BLE_HS_CONN_HANDLE_NONE) return;
         sendHidReport(inputChar, targetConnHandle, topLeftReport, sizeof(topLeftReport));
-        delay(6);
+        vTaskDelay(pdMS_TO_TICKS(6));
     }
 
     // Step B: Send HID packets to move from Top-Left origin to target coordinates (scaledRelX, scaledRelY)
@@ -412,6 +422,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     int16_t remainingY = scaledRelY;
 
     while (remainingX > 0 || remainingY > 0) {
+        if (getTargetConnHandle(targetMac) == BLE_HS_CONN_HANDLE_NONE) return;
         int8_t stepX = constrain(remainingX, 0, 127);
         int8_t stepY = constrain(remainingY, 0, 127);
 
@@ -420,7 +431,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
 
         remainingX -= stepX;
         remainingY -= stepY;
-        delay(6);
+        vTaskDelay(pdMS_TO_TICKS(6));
     }
 
     virtualX = targetGlobalX;
@@ -451,7 +462,7 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
     long centerX = mon.x + (mon.width / 2);
     long centerY = mon.y + (mon.height / 2);
 
-    //alignPcCursorToCoordinates(targetMonIdx, centerX, centerY, "BOOT CALIBRATION");
+    alignPcCursorToCoordinates(targetMonIdx, centerX, centerY, "BOOT CALIBRATION");
 }
 
 // --- BLE Host (Central) Functions ---
@@ -462,6 +473,27 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     MonitorConfig& currentMon = monitors[currentMonitorIndex];
     int16_t sendDx = dx;
     int16_t sendDy = dy;
+
+    // --- Nested: Calibrate virtual cursor to stay within monitor bounds ---
+    auto monitorEdgeCalibration = [&](int shift = 0) {
+        if (virtualX < currentMon.x) { // Left edge
+            virtualX = currentMon.x - shift;
+            sendDx -= 127;
+        }
+        if (virtualY < currentMon.y) { // Top edge
+            virtualY = currentMon.y - shift;
+            sendDy -= 127;
+        }
+        if (virtualX >= currentMon.x + currentMon.width) { // Right edge
+            virtualX = currentMon.x + currentMon.width -1 + shift;
+            sendDx += 127;
+        }
+        if (virtualY >= currentMon.y + currentMon.height) { // Bottom edge
+            virtualY = currentMon.y + currentMon.height -1 + shift;
+            sendDy += 127;
+        }
+        logPrint("[CALIBRATION EDGE] Cursor at (%ld, %ld) on %s", virtualX, virtualY, currentMon.name.c_str());
+    };
 
     if (currentMon.scale != 100) {
 
@@ -506,59 +538,36 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     }
 
     if (newMonitorIndex == -1) {
-        if (virtualX < currentMon.x) {
-            virtualX = currentMon.x;
-            logPrint("[CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
-        }
-        if (virtualY < currentMon.y) {
-            virtualY = currentMon.y;
-            logPrint("[CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
-        }
-        if (virtualX >= currentMon.x + currentMon.width) {
-            virtualX = currentMon.x + currentMon.width - 1;
-            logPrint("[CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
-        }
-        if (virtualY >= currentMon.y + currentMon.height) {
-            virtualY = currentMon.y + currentMon.height - 1;
-            logPrint("[CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
-        }
+        monitorEdgeCalibration();
         resetSubpixelAccumulators();
     } else if (newMonitorIndex != currentMonitorIndex) {
         if (monitors[newMonitorIndex].mac.equals(currentMon.mac)) {
+            currentMonitorIndex = newMonitorIndex;
             logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (%s)",
                 virtualX, virtualY, monitors[newMonitorIndex].id, monitors[newMonitorIndex].name.c_str());
         } else {
-            if (virtualX < currentMon.x) {
-                virtualX = currentMon.x;
-                sendDx -= 50;
-                logPrint("[SWITCH CALIBRATION] Calibrated LEFT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
-            } else if (virtualY < currentMon.y) {
-                virtualY = currentMon.y;
-                sendDy -= 50;
-                logPrint("[SWITCH CALIBRATION] Calibrated TOP edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
-            } else if (virtualX >= currentMon.x + currentMon.width) {
-                virtualX = currentMon.x + currentMon.width;
-                sendDx += 50;
-                logPrint("[SWITCH CALIBRATION] Calibrated RIGHT edge -> virtualX = %ld (%s)", virtualX, currentMon.name.c_str());
-            } else if (virtualY >= currentMon.y + currentMon.height) {
-                virtualY = currentMon.y + currentMon.height;
-                sendDy += 50;
-                logPrint("[SWITCH CALIBRATION] Calibrated BOTTOM edge -> virtualY = %ld (%s)", virtualY, currentMon.name.c_str());
+            if (getTargetConnHandle(monitors[newMonitorIndex].mac) == BLE_HS_CONN_HANDLE_NONE) {
+                monitorEdgeCalibration();
+            } else {
+                monitorEdgeCalibration(1);
+                monitors[currentMonitorIndex].lastX = virtualX;
+                monitors[currentMonitorIndex].lastY = virtualY;
+                currentMonitorIndex = newMonitorIndex;
+                logPrint("[PC SWITCH] Cursor saved at (%ld, %ld)", virtualX, virtualY);
             }
             // Position target PC's OS cursor at exact entering edge coordinates ONLY when switching to a different PC!
             //alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
         }
-        currentMonitorIndex = newMonitorIndex;
         resetSubpixelAccumulators();
     }
 
     // Send Standard HID Report (5 bytes: Buttons, dX, dY, VScroll, HScroll)
     uint8_t report[5] = { 
         buttons, 
-        (uint8_t)constrain(sendDx, -127, 127), 
-        (uint8_t)constrain(sendDy, -127, 127), 
+        (uint8_t)constrain(sendDx, -127, 127),
+        (uint8_t)constrain(sendDy, -127, 127),
         (uint8_t)constrain(scroll, -127, 127),
-        (uint8_t)constrain(hScroll, -127, 127) 
+        (uint8_t)constrain(hScroll, -127, 127)
     };
 
     uint16_t targetConnHandle = getTargetConnHandle(currentMon.mac);
@@ -902,7 +911,7 @@ void loadConfiguration() {
       monitorCount = 0;
       if (arr) {
         for (JsonObject repo : arr) {
-          int defId = monitorCount + 1000;
+          int defId = monitorCount + 1;
           String defName = "Monitor #" + String(defId);
           monitors[monitorCount].id = repo["id"] | defId;
           monitors[monitorCount].name = repo["name"] | defName;
@@ -912,6 +921,7 @@ void loadConfiguration() {
           monitors[monitorCount].height = repo["height"] | 1080;
           monitors[monitorCount].mac = repo["mac"] | "";
           monitors[monitorCount].scale = repo["scale"] | 100;
+          monitors[monitorCount].isPrimary = repo["isPrimary"] | false;
           monitorCount++;
         }
       }
@@ -919,12 +929,12 @@ void loadConfiguration() {
 
       if (doc["clients"].is<JsonArray>()) {
         int clientCount = 0;
-        for (JsonObject c : doc["clients"].as<JsonArray>()) {
+        for (JsonObject client : doc["clients"].as<JsonArray>()) {
           if (clientCount >= MAX_KVM_CLIENTS) break;
-          String mac = c["mac"] | "";
+          String mac = client["mac"] | "";
           if (mac.length() > 0) {
             kvmClients[clientCount].mac = mac;
-            kvmClients[clientCount].name = c["name"] | "Unknown PC";
+            kvmClients[clientCount].name = client["name"] | "Unknown PC";
             kvmClients[clientCount].active = false;
             clientCount++;
           }

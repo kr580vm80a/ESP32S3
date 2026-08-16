@@ -18,14 +18,16 @@ const char* NVS_KEY_LAYOUT = "layout";
 
 // Structure to store monitor configuration
 struct MonitorConfig {
-  int id = 1;
-  String name;
-  int x;
-  int y;
-  int width;
-  int height;
-  String mac;
-  int scale = 100;
+    int id = 1;
+    String name;
+    int x;
+    int y;
+    int width;
+    int height;
+    String mac;
+    int scale = 100;
+    int lastX = 0;
+    int lastY = 0;
 };
 
 #define MAX_MONITORS 10
@@ -318,6 +320,21 @@ void resetSubpixelAccumulators() {
     effectiveSubpixelY = 0.0f;
 }
 
+// Send HID report to target connection handle or broadcast notify
+void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8_t* report, size_t length = 5) {
+    if (!pChar || !report || length == 0) return;
+    if (connHandle != BLE_HS_CONN_HANDLE_NONE) {
+        os_mbuf *om = ble_hs_mbuf_from_flat(report, length);
+        if (om != NULL) {
+            int rc = ble_gatts_notify_custom(connHandle, pChar->getHandle(), om);
+            if (rc != 0) os_mbuf_free_chain(om);
+        }
+    } else {
+        pChar->setValue(report, length);
+        pChar->notify();
+    }
+}
+
 // --- Unified PC Cursor Calibration & Edge Positioning Function ---
 void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
     if (monitorCount == 0 || monIndex < 0 || monIndex >= monitorCount) return;
@@ -386,16 +403,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
     // 35 pulses of (-127, -127) = -4445 px, guaranteeing OS cursor is at top-left-most pixel of target PC's virtual desktop
     uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
     for (int p = 0; p < 35; p++) {
-        if (inputChar && targetConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-            os_mbuf *om = ble_hs_mbuf_from_flat(topLeftReport, sizeof(topLeftReport));
-            if (om != NULL) {
-                int rc = ble_gatts_notify_custom(targetConnHandle, inputChar->getHandle(), om);
-                if (rc != 0) os_mbuf_free_chain(om);
-            }
-        } else if (inputChar) {
-            inputChar->setValue(topLeftReport, sizeof(topLeftReport));
-            inputChar->notify();
-        }
+        sendHidReport(inputChar, targetConnHandle, topLeftReport, sizeof(topLeftReport));
         delay(6);
     }
 
@@ -408,16 +416,7 @@ void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlo
         int8_t stepY = constrain(remainingY, 0, 127);
 
         uint8_t stepReport[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
-        if (inputChar && targetConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-            os_mbuf *om = ble_hs_mbuf_from_flat(stepReport, sizeof(stepReport));
-            if (om != NULL) {
-                int rc = ble_gatts_notify_custom(targetConnHandle, inputChar->getHandle(), om);
-                if (rc != 0) os_mbuf_free_chain(om);
-            }
-        } else if (inputChar) {
-            inputChar->setValue(stepReport, sizeof(stepReport));
-            inputChar->notify();
-        }
+        sendHidReport(inputChar, targetConnHandle, stepReport, sizeof(stepReport));
 
         remainingX -= stepX;
         remainingY -= stepY;
@@ -464,10 +463,11 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     int16_t sendDx = dx;
     int16_t sendDy = dy;
 
-    long effectiveDx = dx;
-    long effectiveDy = dy;
-
     if (currentMon.scale != 100) {
+
+        long effectiveDx = dx;
+        long effectiveDy = dy;
+
         float scaleFactor = currentMon.scale / 100.0f;
 
         float rawSendX = (dx / scaleFactor) + subpixelX;
@@ -561,19 +561,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         (uint8_t)constrain(hScroll, -127, 127) 
     };
 
-    if (inputChar) {
-        uint16_t targetConnHandle = getTargetConnHandle(currentMon.mac);
-        if (targetConnHandle != BLE_HS_CONN_HANDLE_NONE) {
-            os_mbuf *om = ble_hs_mbuf_from_flat(report, sizeof(report));
-            if (om != NULL) {
-                int rc = ble_gatts_notify_custom(targetConnHandle, inputChar->getHandle(), om);
-                if (rc != 0) os_mbuf_free_chain(om);
-            }
-        } else {
-            inputChar->setValue(report, sizeof(report));
-            inputChar->notify();
-        }
-    }
+    uint16_t targetConnHandle = getTargetConnHandle(currentMon.mac);
+    sendHidReport(inputChar, targetConnHandle, report, sizeof(report));
 }
 
 // Callback when HID data is received from the mouse

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 299;
+    const BUILD_VERSION = 300;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1076,9 +1076,9 @@
       updateJSON();
     }
 
-    document.addEventListener('DOMContentLoaded', () => {
-      renderClientsList();
-    });
+    const COLOR_DETECTED = '#34d399'; // Base Emerald color for auto-detected screens
+    const COLOR_MANUAL = '#38bdf8';   // Distinct Sky Blue for manually added screens
+
     const GROUP_COLORS = [
       '#fbbf24', // 1. Amber / Warm Gold
       '#38bdf8', // 2. Sky Blue
@@ -1095,7 +1095,10 @@
     const groupColorMap = new Map();
 
     function getGroupColor(groupId) {
-      if (!groupId || groupId === 'manual') return '#38bdf8';
+      if (groupId === undefined || groupId === null || groupId === 'manual') return '#38bdf8';
+      if (typeof groupId === 'number' && groupId > 0) {
+        return GROUP_COLORS[(groupId - 1) % GROUP_COLORS.length];
+      }
       if (!groupColorMap.has(groupId)) {
         const colorIndex = groupColorMap.size % GROUP_COLORS.length;
         groupColorMap.set(groupId, GROUP_COLORS[colorIndex]);
@@ -2456,26 +2459,37 @@
           const minLX = sorted.length > 0 ? Math.min(...sorted.map(s => s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale))) : 0;
           const minLY = sorted.length > 0 ? Math.min(...sorted.map(s => s.layoutY !== undefined ? s.layoutY : 0)) : 0;
 
+          // Collect distinct computer groups to assign sequential integer IDs: 1, 2, 3...
+          const distinctGroups = [];
+          sorted.forEach(s => {
+            const rawGrp = (s.group !== undefined && s.group !== null && s.group !== '') ? s.group : (s.isDetected ? currentDeviceId : 1);
+            if (!distinctGroups.includes(rawGrp)) {
+              distinctGroups.push(rawGrp);
+            }
+          });
+
           return {
             id: Number(l.id) || 1,
             name: l.name,
             totalScreens: sorted.length,
             screens: sorted.map((s, index) => {
               const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
-              const groupVal = s.group || (isDetected ? currentDeviceId : 'manual');
-              const groupNameVal = s.groupName || (isDetected ? currentDeviceName : 'Manual Preset');
+              const rawGroup = (s.group !== undefined && s.group !== null && s.group !== '') ? s.group : (isDetected ? currentDeviceId : 1);
+              let groupIndex = distinctGroups.indexOf(rawGroup);
+              const numericGroup = groupIndex >= 0 ? (groupIndex + 1) : 1;
+              const groupNameVal = s.groupName || (isDetected ? currentDeviceName : ('PC ' + numericGroup));
               const isPrimaryVal = !!(s.isPrimary || (s.name && s.name.includes('Primary')));
 
               const relX = Math.round((s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 20) / scale)) - minLX);
               const relY = Math.round((s.layoutY !== undefined ? s.layoutY : 0) - minLY);
 
-              const assignedClient = kvmClients.find(c => c.mac === groupVal || c.name === groupNameVal);
+              const assignedClient = kvmClients.find(c => c.mac === rawGroup || c.name === groupNameVal || c.id === numericGroup);
               const macVal = s.mac || (assignedClient ? assignedClient.mac : "");
 
               return {
                 id: index + 1,
                 name: s.name || (`Monitor #${index + 1}`),
-                group: groupVal,
+                group: numericGroup,
                 groupName: groupNameVal,
                 mac: macVal,
                 x: relX,

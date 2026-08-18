@@ -3,6 +3,7 @@
 #include <Preferences.h>
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
+#include <esp_mac.h>
 
 #if CONFIG_IDF_TARGET_ESP32S3
 #include <HWCDC.h>
@@ -39,6 +40,7 @@ int monitorCount = 0;
 NimBLEServer* pServer = nullptr;
 NimBLEHIDDevice* hidDevice = nullptr;
 NimBLECharacteristic* inputChar = nullptr;
+NimBLECharacteristic* absInputChar = nullptr;
 
 // Active KVM Connections (Mac addresses of connected PCs)
 struct KVMClient {
@@ -70,6 +72,7 @@ void resetSubpixelAccumulators() {
 }
 
 const uint8_t hidReportMap[] = {
+    // --- REPORT ID 1: Standard Relative Mouse (for natural physical movement) ---
     0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
     0x09, 0x02,        // Usage (Mouse)
     0xA1, 0x01,        // Collection (Application)
@@ -78,15 +81,15 @@ const uint8_t hidReportMap[] = {
     0xA1, 0x00,        //   Collection (Physical)
     0x05, 0x09,        //     Usage Page (Button)
     0x19, 0x01,        //     Usage Minimum (0x01)
-    0x29, 0x03,        //     Usage Maximum (0x03)
+    0x29, 0x05,        //     Usage Maximum (0x05)
     0x15, 0x00,        //     Logical Minimum (0)
     0x25, 0x01,        //     Logical Maximum (1)
-    0x95, 0x03,        //     Report Count (3)
+    0x95, 0x05,        //     Report Count (5)
     0x75, 0x01,        //     Report Size (1)
-    0x81, 0x02,        //     Input (Data,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+    0x81, 0x02,        //     Input (Data,Var,Abs)
     0x95, 0x01,        //     Report Count (1)
-    0x75, 0x05,        //     Report Size (5)
-    0x81, 0x03,        //     Input (Const,Var,Abs,No Wrap,Linear,Preferred State,No Null Position)
+    0x75, 0x03,        //     Report Size (3)
+    0x81, 0x03,        //     Input (Const,Var,Abs)
     0x05, 0x01,        //     Usage Page (Generic Desktop Ctrls)
     0x09, 0x30,        //     Usage (X)
     0x09, 0x31,        //     Usage (Y)
@@ -95,14 +98,59 @@ const uint8_t hidReportMap[] = {
     0x25, 0x7F,        //     Logical Maximum (127)
     0x75, 0x08,        //     Report Size (8)
     0x95, 0x03,        //     Report Count (3)
-    0x81, 0x06,        //     Input (Data,Var,Rel,No Wrap,Linear,Preferred State,No Null Position)
+    0x81, 0x06,        //     Input (Data,Var,Rel)
     0x05, 0x0C,        //     Usage Page (Consumer)
     0x0A, 0x38, 0x02,  //     Usage (AC Pan)
     0x15, 0x81,        //     Logical Minimum (-127)
     0x25, 0x7F,        //     Logical Maximum (127)
     0x75, 0x08,        //     Report Size (8)
     0x95, 0x01,        //     Report Count (1)
-    0x81, 0x06,        //     Input (Data,Var,Rel,No Wrap,Linear,Preferred State,No Null Position)
+    0x81, 0x06,        //     Input (Data,Var,Rel)
+    0xC0,              //   End Collection
+    0xC0,              // End Collection
+
+    // --- REPORT ID 2: Absolute Mouse / Pointer (for instant 0ms cross-PC transitions) ---
+    0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+    0x09, 0x02,        // Usage (Mouse)
+    0xA1, 0x01,        // Collection (Application)
+    0x85, 0x02,        //   Report ID (2)
+    0x09, 0x01,        //   Usage (Pointer)
+    0xA1, 0x00,        //   Collection (Physical)
+    0x05, 0x09,        //     Usage Page (Button)
+    0x19, 0x01,        //     Usage Minimum (0x01)
+    0x29, 0x05,        //     Usage Maximum (0x05)
+    0x15, 0x00,        //     Logical Minimum (0)
+    0x25, 0x01,        //     Logical Maximum (1)
+    0x95, 0x05,        //     Report Count (5)
+    0x75, 0x01,        //     Report Size (1)
+    0x81, 0x02,        //     Input (Data,Var,Abs)
+    0x95, 0x01,        //     Report Count (1)
+    0x75, 0x03,        //     Report Size (3)
+    0x81, 0x03,        //     Input (Const,Var,Abs)
+    0x05, 0x01,        //     Usage Page (Generic Desktop Ctrls)
+    0x09, 0x30,        //     Usage (X)
+    0x09, 0x31,        //     Usage (Y)
+    0x16, 0x00, 0x00,  //     Logical Minimum (0)
+    0x26, 0xFF, 0x7F,  //     Logical Maximum (32767)
+    0x36, 0x00, 0x00,  //     Physical Minimum (0)
+    0x46, 0xFF, 0x7F,  //     Physical Maximum (32767)
+    0x75, 0x10,        //     Report Size (16 bits = 2 bytes per axis)
+    0x95, 0x02,        //     Report Count (2 = X, Y)
+    0x81, 0x02,        //     Input (Data,Var,Abs)
+    0x05, 0x01,        //     Usage Page (Generic Desktop Ctrls)
+    0x09, 0x38,        //     Usage (Wheel)
+    0x15, 0x81,        //     Logical Minimum (-127)
+    0x25, 0x7F,        //     Logical Maximum (127)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x01,        //     Report Count (1)
+    0x81, 0x06,        //     Input (Data,Var,Rel)
+    0x05, 0x0C,        //     Usage Page (Consumer)
+    0x0A, 0x38, 0x02,  //     Usage (AC Pan)
+    0x15, 0x81,        //     Logical Minimum (-127)
+    0x25, 0x7F,        //     Logical Maximum (127)
+    0x75, 0x08,        //     Report Size (8)
+    0x95, 0x01,        //     Report Count (1)
+    0x81, 0x06,        //     Input (Data,Var,Rel)
     0xC0,              //   End Collection
     0xC0               // End Collection
 };
@@ -174,6 +222,11 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 }
             }
         }
+        // Explicitly request security/bonding if peer is not encrypted yet
+        if (!desc->sec_state.encrypted) {
+            NimBLEDevice::startSecurity(desc->conn_handle);
+        }
+
         // Count active connections
         int activeCount = 0;
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
@@ -190,9 +243,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             xTaskCreate([](void* param) {
                 String* pMac = (String*)param;
                 vTaskDelay(pdMS_TO_TICKS(600));
-                if (getTargetConnHandle(*pMac) != BLE_HS_CONN_HANDLE_NONE) {
-                    calibrateFirstConnectedPcToCenter(*pMac);
-                }
+                calibrateFirstConnectedPcToCenter(*pMac);
                 delete pMac;
                 bootCalibTaskHandle = NULL;
                 vTaskDelete(NULL);
@@ -340,129 +391,55 @@ void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8
     }
 }
 
-// --- Unified PC Cursor Calibration & Edge Positioning Function ---
-void alignPcCursorToCoordinates(int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
-    if (monitorCount == 0 || monIndex < 0 || monIndex >= monitorCount) return;
+// --- Absolute HID Positioning Function ---
+void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel = "ABS POINTER") {
+    if (monitorCount == 0) return;
 
     MonitorConfig& targetMon = monitors[monIndex];
     String targetMac = targetMon.mac;
-    targetMac.toLowerCase();
-    targetMac.trim();
 
-    // 1. Calculate target PC's dead-end top-left origin (minPcX, minPcY) across all its displays
-    int minPcX = 99999;
-    int minPcY = 99999;
-    for (int i = 0; i < monitorCount; i++) {
-        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
-            if (monitors[i].x < minPcX) minPcX = monitors[i].x;
-            if (monitors[i].y < minPcY) minPcY = monitors[i].y;
-        }
-    }
-    if (minPcX == 99999) {
-        minPcX = targetMon.x;
-        minPcY = targetMon.y;
-    }
+    long monW = (targetMon.width > 0) ? targetMon.width : 1920;
+    long monH = (targetMon.height > 0) ? targetMon.height : 1080;
 
-    uint16_t targetConnHandle = getTargetConnHandle(targetMac);
-    if (targetConnHandle == BLE_HS_CONN_HANDLE_NONE) {
-        logPrint("[%s] PC %s is not connected. Aborting calibration.", contextLabel, targetMac.c_str());
-        return;
-    }
+    long relX = constrain(targetGlobalX - targetMon.x, 0, monW);
+    long relY = constrain(targetGlobalY - targetMon.y, 0, monH);
 
-    int16_t relX = (int16_t)(targetGlobalX - minPcX);
-    int16_t relY = (int16_t)(targetGlobalY - minPcY);
-    if (relX < 0) relX = 0;
-    if (relY < 0) relY = 0;
+    uint16_t absX = (uint16_t)round(((float)relX / (float)monW) * 32767.0f);
+    uint16_t absY = (uint16_t)round(((float)relY / (float)monH) * 32767.0f);
 
-    // Segment-by-segment HID delta integration across displays of target PC (O(N) segment math)
-    float sumScaledX = 0.0f;
-    for (int i = 0; i < monitorCount; i++) {
-        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
-            long segStart = max((long)minPcX, (long)monitors[i].x);
-            long segEnd = min(targetGlobalX, (long)(monitors[i].x + monitors[i].width));
-            if (segEnd > segStart) {
-                float sf = (monitors[i].scale > 0) ? (monitors[i].scale / 100.0f) : 1.0f;
-                sumScaledX += (float)(segEnd - segStart) / sf;
-            }
-        }
-    }
+    uint8_t absReport[7] = {
+        0x00,                               // Buttons
+        (uint8_t)(absX & 0xFF),             // X Low
+        (uint8_t)((absX >> 8) & 0xFF),      // X High
+        (uint8_t)(absY & 0xFF),             // Y Low
+        (uint8_t)((absY >> 8) & 0xFF),      // Y High
+        0x00,                               // Wheel
+        0x00                                // AC Pan
+    };
 
-    float sumScaledY = 0.0f;
-    for (int i = 0; i < monitorCount; i++) {
-        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
-            long segStart = max((long)minPcY, (long)monitors[i].y);
-            long segEnd = min(targetGlobalY, (long)(monitors[i].y + monitors[i].height));
-            if (segEnd > segStart) {
-                float sf = (monitors[i].scale > 0) ? (monitors[i].scale / 100.0f) : 1.0f;
-                sumScaledY += (float)(segEnd - segStart) / sf;
-            }
-        }
-    }
-
-    int16_t scaledRelX = (int16_t)round(sumScaledX);
-    int16_t scaledRelY = (int16_t)round(sumScaledY);
-
-    String monDisplayName = getMonDisplayName(monIndex);
-
-    logPrint("[%s] Aligning PC %s (Mon #%d %s Scale:%d%%) to (%ld, %ld) [Top-Left Origin: %d, %d | Rel: %d, %d | Multi-Mon Scaled HID Rel: %d, %d]...",
-             contextLabel, targetMac.c_str(), monIndex + 1, monDisplayName.c_str(), targetMon.scale,
-             targetGlobalX, targetGlobalY, minPcX, minPcY, relX, relY, scaledRelX, scaledRelY);
-
-    // Step A: Send HID packets to slam OS cursor all the way to target PC's Top-Left origin (minPcX, minPcY)
-    // 35 pulses of (-127, -127) = -4445 px, guaranteeing OS cursor is at top-left-most pixel of target PC's virtual desktop
-    uint8_t topLeftReport[5] = { 0, (uint8_t)(-127), (uint8_t)(-127), 0, 0 };
-    for (int p = 0; p < 35; p++) {
-        if (getTargetConnHandle(targetMac) == BLE_HS_CONN_HANDLE_NONE) return;
-        sendHidReport(inputChar, targetConnHandle, topLeftReport, sizeof(topLeftReport));
-        vTaskDelay(pdMS_TO_TICKS(6));
-    }
-
-    // Step B: Send HID packets to move from Top-Left origin to target coordinates (scaledRelX, scaledRelY)
-    int16_t remainingX = scaledRelX;
-    int16_t remainingY = scaledRelY;
-
-    while (remainingX > 0 || remainingY > 0) {
-        if (getTargetConnHandle(targetMac) == BLE_HS_CONN_HANDLE_NONE) return;
-        int8_t stepX = constrain(remainingX, 0, 127);
-        int8_t stepY = constrain(remainingY, 0, 127);
-
-        uint8_t stepReport[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
-        sendHidReport(inputChar, targetConnHandle, stepReport, sizeof(stepReport));
-
-        remainingX -= stepX;
-        remainingY -= stepY;
-        vTaskDelay(pdMS_TO_TICKS(6));
-    }
-
-    virtualX = targetGlobalX;
-    virtualY = targetGlobalY;
-    currentMonitorIndex = monIndex;
-    resetSubpixelAccumulators();
-
-    logPrint("[%s] SUCCESS! Positioned & calibrated PC %s at (%ld, %ld) on Monitor #%d (%s)",
-             contextLabel, targetMac.c_str(), virtualX, virtualY, currentMonitorIndex + 1, monDisplayName.c_str());
+    sendHidReport(absInputChar, connHandle, absReport, sizeof(absReport));
+    logPrint("[%s] Instantly positioned PC %s at (%ld, %ld) [Rel: %ld, %ld -> Norm: %u, %u] on Mon #%d (%s)",
+             contextLabel, targetMac.c_str(), virtualX, virtualY, relX, relY, absX, absY, currentMonitorIndex + 1, targetMon.name.c_str());
 }
 
 // --- Boot Center Calibration Wrapper ---
 void calibrateFirstConnectedPcToCenter(String targetMac) {
     if (monitorCount == 0) return;
-    targetMac.toLowerCase();
-    targetMac.trim();
+    uint16_t connHandle = getTargetConnHandle(targetMac);
+    if (connHandle == BLE_HS_CONN_HANDLE_NONE) return;
 
-    int targetMonIdx = -1;
+    int currentMonitorIndex = -1;
     for (int i = 0; i < monitorCount; i++) {
-        if (monitors[i].mac.equalsIgnoreCase(targetMac)) {
-            targetMonIdx = i;
+        if (monitors[i].mac.equals(targetMac) && monitors[i].isPrimary) {
+            currentMonitorIndex = i;
             break;
         }
     }
-    if (targetMonIdx == -1) targetMonIdx = 0;
-
-    MonitorConfig& mon = monitors[targetMonIdx];
-    long centerX = mon.x + (mon.width / 2);
-    long centerY = mon.y + (mon.height / 2);
-
-    alignPcCursorToCoordinates(targetMonIdx, centerX, centerY, "BOOT CALIBRATION");
+    if (currentMonitorIndex == -1) currentMonitorIndex = 0;
+    MonitorConfig& mon = monitors[currentMonitorIndex];
+    virtualX = mon.x + (mon.width / 2);
+    virtualY = mon.y + (mon.height / 2);
+    sendAbsoluteCoordinates(connHandle, currentMonitorIndex, virtualX, virtualY, "BOOT POSITION");
 }
 
 // --- BLE Host (Central) Functions ---
@@ -546,7 +523,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (%s)",
                 virtualX, virtualY, monitors[newMonitorIndex].id, monitors[newMonitorIndex].name.c_str());
         } else {
-            if (getTargetConnHandle(monitors[newMonitorIndex].mac) == BLE_HS_CONN_HANDLE_NONE) {
+            uint16_t targetConn = getTargetConnHandle(monitors[newMonitorIndex].mac);
+            if (targetConn == BLE_HS_CONN_HANDLE_NONE) {
                 monitorEdgeCalibration();
             } else {
                 monitorEdgeCalibration(1);
@@ -554,9 +532,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                 monitors[currentMonitorIndex].lastY = virtualY;
                 currentMonitorIndex = newMonitorIndex;
                 logPrint("[PC SWITCH] Cursor saved at (%ld, %ld)", virtualX, virtualY);
+                sendAbsoluteCoordinates(targetConn, newMonitorIndex, virtualX, virtualY, "KVM SWITCH");
             }
-            // Position target PC's OS cursor at exact entering edge coordinates ONLY when switching to a different PC!
-            //alignPcCursorToCoordinates(newMonitorIndex, virtualX, virtualY, "KVM SYNC EDGE");
         }
         resetSubpixelAccumulators();
     }
@@ -570,8 +547,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         (uint8_t)constrain(hScroll, -127, 127)
     };
 
-    uint16_t targetConnHandle = getTargetConnHandle(currentMon.mac);
-    sendHidReport(inputChar, targetConnHandle, report, sizeof(report));
+    uint16_t connHandle = getTargetConnHandle(currentMon.mac);
+    sendHidReport(inputChar, connHandle, report, sizeof(report));
 }
 
 // Callback when HID data is received from the mouse
@@ -1170,6 +1147,11 @@ void processCommand(String input) {
     logPrint("Flash target mouse MAC: %s", targetMouseMac.c_str());
     logPrint("%s", json.c_str());
     logPrint("--- [END NVS FLASH DUMP] ---");
+  } else if (input == "CLEAR_BONDS" || input == "CLEAR_BLE_BONDS") {
+    int count = NimBLEDevice::getNumBonds();
+    NimBLEDevice::deleteAllBonds();
+    logPrint("[BLE] Deleted %d bonded devices from NVS. Fresh pairing required for all PCs.", count);
+    sendConfigResponse("OK_CLEAR_BONDS " + String(count));
   }
 }
 
@@ -1207,10 +1189,19 @@ void setup() {
   loadConfiguration();
   
   logPrint("[BLE] Initializing NimBLE...");
+  uint8_t customMac[6];
+  esp_read_mac(customMac, ESP_MAC_BT);
+  customMac[5] += 1; // Increment last byte by 1 to present clean device identity to PCs
+  esp_base_mac_addr_set(customMac);
+  logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+           customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);
+
   NimBLEDevice::init(BLE_DEVICE_NAME);
   NimBLEDevice::setMTU(512);
   NimBLEDevice::setSecurityAuth(true, false, true); // Compatible Just Works pairing for macOS/Windows (bonding=true, mitm=false, sc=true)
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT); // Standard HID Mouse IO Capability
+  NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+  NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
   
   int numBonds = NimBLEDevice::getNumBonds();
   logPrint("[BLE NVS BONDS] Saved bonded devices count: %d", numBonds);
@@ -1223,7 +1214,8 @@ void setup() {
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
   hidDevice = new NimBLEHIDDevice(pServer);
-  inputChar = hidDevice->inputReport(1); // Report ID 1
+  inputChar = hidDevice->inputReport(1);    // Report ID 1: Relative Mouse
+  absInputChar = hidDevice->inputReport(2); // Report ID 2: Absolute Mouse / Pointer
   
   hidDevice->manufacturer()->setValue("Antigravity Labs");
   hidDevice->pnp(0x02, 0x046d, 0x0000, 0x0110);

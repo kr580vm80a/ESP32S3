@@ -41,6 +41,9 @@ NimBLEServer* pServer = nullptr;
 NimBLEHIDDevice* hidDevice = nullptr;
 NimBLECharacteristic* inputChar = nullptr;
 NimBLECharacteristic* absInputChar = nullptr;
+NimBLECharacteristic* keyboardInputChar = nullptr;
+NimBLECharacteristic* keyboardOutputChar = nullptr;
+NimBLECharacteristic* mediaInputChar = nullptr;
 
 // Active KVM Connections (Mac addresses of connected PCs)
 struct KVMClient {
@@ -72,11 +75,46 @@ void resetSubpixelAccumulators() {
 }
 
 const uint8_t hidReportMap[] = {
-    // --- REPORT ID 1: Standard Relative Mouse (for natural physical movement) ---
+    // --- REPORT ID 1: Standard HID Keyboard (6KRO) ---
+    0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
+    0x09, 0x06,        // Usage (Keyboard)
+    0xA1, 0x01,        // Collection (Application)
+    0x85, 0x01,        //   Report ID (1)
+    0x05, 0x07,        //   Usage Page (Keyboard/Keypad)
+    0x19, 0xE0,        //   Usage Minimum (Keyboard LeftControl)
+    0x29, 0xE7,        //   Usage Maximum (Keyboard Right GUI)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x25, 0x01,        //   Logical Maximum (1)
+    0x75, 0x01,        //   Report Size (1)
+    0x95, 0x08,        //   Report Count (8 bits for modifiers)
+    0x81, 0x02,        //   Input (Data,Var,Abs) - Modifiers
+    0x95, 0x01,        //   Report Count (1)
+    0x75, 0x08,        //   Report Size (8)
+    0x81, 0x01,        //   Input (Const,Array,Abs) - Reserved byte
+    0x95, 0x05,        //   Report Count (5)
+    0x75, 0x01,        //   Report Size (1)
+    0x05, 0x08,        //   Usage Page (LEDs)
+    0x19, 0x01,        //   Usage Minimum (Num Lock)
+    0x29, 0x05,        //   Usage Maximum (Kana)
+    0x91, 0x02,        //   Output (Data,Var,Abs) - LEDs
+    0x95, 0x01,        //   Report Count (1)
+    0x75, 0x03,        //   Report Size (3)
+    0x91, 0x01,        //   Output (Const,Array,Abs) - Padding
+    0x95, 0x06,        //   Report Count (6)
+    0x75, 0x08,        //   Report Size (8)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x25, 0x65,        //   Logical Maximum (101 keys)
+    0x05, 0x07,        //   Usage Page (Keyboard/Keypad)
+    0x19, 0x00,        //   Usage Minimum (Reserved)
+    0x29, 0x65,        //   Usage Maximum (Keyboard Application)
+    0x81, 0x00,        //   Input (Data,Array,Abs) - 6 keycodes
+    0xC0,              // End Collection
+
+    // --- REPORT ID 2: Standard Relative Mouse (for natural physical movement) ---
     0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
     0x09, 0x02,        // Usage (Mouse)
     0xA1, 0x01,        // Collection (Application)
-    0x85, 0x01,        //   Report ID (1)
+    0x85, 0x02,        //   Report ID (2)
     0x09, 0x01,        //   Usage (Pointer)
     0xA1, 0x00,        //   Collection (Physical)
     0x05, 0x09,        //     Usage Page (Button)
@@ -109,11 +147,11 @@ const uint8_t hidReportMap[] = {
     0xC0,              //   End Collection
     0xC0,              // End Collection
 
-    // --- REPORT ID 2: Absolute Mouse / Pointer (for instant 0ms cross-PC transitions) ---
+    // --- REPORT ID 3: Absolute Mouse / Pointer (for instant 0ms cross-PC transitions) ---
     0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
     0x09, 0x02,        // Usage (Mouse)
     0xA1, 0x01,        // Collection (Application)
-    0x85, 0x02,        //   Report ID (2)
+    0x85, 0x03,        //   Report ID (3)
     0x09, 0x01,        //   Usage (Pointer)
     0xA1, 0x00,        //   Collection (Physical)
     0x05, 0x09,        //     Usage Page (Button)
@@ -152,6 +190,20 @@ const uint8_t hidReportMap[] = {
     0x95, 0x01,        //     Report Count (1)
     0x81, 0x06,        //     Input (Data,Var,Rel)
     0xC0,              //   End Collection
+    0xC0,              // End Collection
+
+    // --- REPORT ID 4: Consumer Control (Media Keys) ---
+    0x05, 0x0C,        // Usage Page (Consumer)
+    0x09, 0x01,        // Usage (Consumer Control)
+    0xA1, 0x01,        // Collection (Application)
+    0x85, 0x04,        //   Report ID (4)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x26, 0xFF, 0x03,  //   Logical Maximum (1023)
+    0x19, 0x00,        //   Usage Minimum (Unassigned)
+    0x2A, 0xFF, 0x03,  //   Usage Maximum (1023)
+    0x75, 0x10,        //   Report Size (16)
+    0x95, 0x01,        //   Report Count (1)
+    0x81, 0x00,        //   Input (Data,Array,Abs)
     0xC0               // End Collection
 };
 
@@ -182,14 +234,52 @@ void logPrint(const char* format, ...) {
 static String targetMouseMac = "";
 static String targetMouseName = "";
 static bool isScanningForMice = false;
-static bool connected = false;
+static bool mouseConnected = false;
 static bool isConnectingToMouse = false;
 static NimBLEClient* pClient = nullptr;
 static NimBLEAdvertisedDevice* advDevice = nullptr;
-static bool doConnect = false;
+static bool doConnectMouse = false;
+
+// Keyboard Central Variables
+static String targetKeyboardMac = "";
+static String targetKeyboardName = "";
+static bool kbConnected = false;
+static bool isConnectingToKeyboard = false;
+static NimBLEClient* pKbClient = nullptr;
+static NimBLEAdvertisedDevice* advKbDevice = nullptr;
+static bool doConnectKeyboard = false;
 
 static NimBLEUUID hidServiceUUID("1812");
 static NimBLEUUID reportCharUUID("2a4d");
+
+class SecurityCallbacks : public NimBLESecurityCallbacks {
+    uint32_t onPassKeyRequest() {
+        logPrint("[BLE Security] =========================================");
+        logPrint("[BLE Security] >>> onPassKeyRequest: RETURNING 123456 <<<");
+        logPrint("[BLE Security] =========================================");
+        return 123456;
+    }
+    void onPassKeyNotify(uint32_t pass_key) {
+        logPrint("[BLE Security] =========================================");
+        logPrint("[BLE Security] >>> TYPE THIS PASSKEY ON KEYBOARD: %06lu <<<", (unsigned long)pass_key);
+        logPrint("[BLE Security] >>> AND PRESS ENTER ON MX KEYS S <<<");
+        logPrint("[BLE Security] =========================================");
+    }
+    bool onConfirmPIN(uint32_t pass_key) {
+        logPrint("[BLE Security] =========================================");
+        logPrint("[BLE Security] >>> onConfirmPIN: %06lu (auto-confirmed) <<<", (unsigned long)pass_key);
+        logPrint("[BLE Security] =========================================");
+        return true;
+    }
+    bool onSecurityRequest() {
+        logPrint("[BLE Security] onSecurityRequest -> Accepted");
+        return true;
+    }
+    void onAuthenticationComplete(ble_gap_conn_desc* desc) {
+        logPrint("[BLE Security] onAuthenticationComplete: enc=%d, auth=%d, bonded=%d",
+                 desc->sec_state.encrypted, desc->sec_state.authenticated, desc->sec_state.bonded);
+    }
+};
 
 void calibrateFirstConnectedPcToCenter(String targetMac);
 
@@ -221,10 +311,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                     break;
                 }
             }
-        }
-        // Explicitly request security/bonding if peer is not encrypted yet
-        if (!desc->sec_state.encrypted) {
-            NimBLEDevice::startSecurity(desc->conn_handle);
         }
 
         // Count active connections
@@ -383,7 +469,10 @@ void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8
         os_mbuf *om = ble_hs_mbuf_from_flat(report, length);
         if (om != NULL) {
             int rc = ble_gatts_notify_custom(connHandle, pChar->getHandle(), om);
-            if (rc != 0) os_mbuf_free_chain(om);
+            if (rc != 0) {
+                logPrint("[BLE HID NOTIFY ERR] conn: %d handle: 0x%04X rc: %d", connHandle, pChar->getHandle(), rc);
+                os_mbuf_free_chain(om);
+            }
         }
     } else {
         pChar->setValue(report, length);
@@ -398,14 +487,27 @@ void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGloba
     MonitorConfig& targetMon = monitors[monIndex];
     String targetMac = targetMon.mac;
 
-    long monW = (targetMon.width > 0) ? targetMon.width : 1920;
-    long monH = (targetMon.height > 0) ? targetMon.height : 1080;
+    // Calculate total bounding box of the target PC's multi-monitor desktop
+    long pcMinX = LONG_MAX, pcMinY = LONG_MAX;
+    long pcMaxX = LONG_MIN, pcMaxY = LONG_MIN;
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equals(targetMac)) {
+            if (monitors[i].x < pcMinX) pcMinX = monitors[i].x;
+            if (monitors[i].y < pcMinY) pcMinY = monitors[i].y;
+            if (monitors[i].x + monitors[i].width > pcMaxX) pcMaxX = monitors[i].x + monitors[i].width;
+            if (monitors[i].y + monitors[i].height > pcMaxY) pcMaxY = monitors[i].y + monitors[i].height;
+        }
+    }
+    long pcTotalW = pcMaxX - pcMinX;
+    long pcTotalH = pcMaxY - pcMinY;
+    if (pcTotalW <= 0) pcTotalW = (targetMon.width > 0) ? targetMon.width : 1920;
+    if (pcTotalH <= 0) pcTotalH = (targetMon.height > 0) ? targetMon.height : 1080;
 
-    long relX = constrain(targetGlobalX - targetMon.x, 0, monW);
-    long relY = constrain(targetGlobalY - targetMon.y, 0, monH);
+    long relX = constrain(targetGlobalX - pcMinX, 0, pcTotalW);
+    long relY = constrain(targetGlobalY - pcMinY, 0, pcTotalH);
 
-    uint16_t absX = (uint16_t)round(((float)relX / (float)monW) * 32767.0f);
-    uint16_t absY = (uint16_t)round(((float)relY / (float)monH) * 32767.0f);
+    uint16_t absX = (uint16_t)round(((float)relX / (float)pcTotalW) * 32767.0f);
+    uint16_t absY = (uint16_t)round(((float)relY / (float)pcTotalH) * 32767.0f);
 
     uint8_t absReport[7] = {
         0x00,                               // Buttons
@@ -418,8 +520,8 @@ void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGloba
     };
 
     sendHidReport(absInputChar, connHandle, absReport, sizeof(absReport));
-    logPrint("[%s] Instantly positioned PC %s at (%ld, %ld) [Rel: %ld, %ld -> Norm: %u, %u] on Mon #%d (%s)",
-             contextLabel, targetMac.c_str(), virtualX, virtualY, relX, relY, absX, absY, currentMonitorIndex + 1, targetMon.name.c_str());
+    logPrint("[%s] Instantly positioned PC %s at (%ld, %ld) [Rel: %ld, %ld in %ldx%ld -> Norm: %u, %u] on Mon #%d (%s)",
+             contextLabel, targetMac.c_str(), targetGlobalX, targetGlobalY, relX, relY, pcTotalW, pcTotalH, absX, absY, targetMon.id, targetMon.name.c_str());
 }
 
 // --- Boot Center Calibration Wrapper ---
@@ -430,7 +532,7 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
 
     int currentMonitorIndex = -1;
     for (int i = 0; i < monitorCount; i++) {
-        if (monitors[i].mac.equals(targetMac) && monitors[i].isPrimary) {
+        if (monitors[i].isPrimary && monitors[i].mac.equals(targetMac)) {
             currentMonitorIndex = i;
             break;
         }
@@ -528,6 +630,12 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                 monitorEdgeCalibration();
             } else {
                 monitorEdgeCalibration(1);
+                // Send safe key release to old PC so no keys remain stuck
+                uint16_t oldConn = getTargetConnHandle(currentMon.mac);
+                if (oldConn != BLE_HS_CONN_HANDLE_NONE && keyboardInputChar) {
+                    uint8_t keyRelease[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+                    sendHidReport(keyboardInputChar, oldConn, keyRelease, sizeof(keyRelease));
+                }
                 monitors[currentMonitorIndex].lastX = virtualX;
                 monitors[currentMonitorIndex].lastY = virtualY;
                 currentMonitorIndex = newMonitorIndex;
@@ -554,8 +662,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 // Callback when HID data is received from the mouse
 void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     if (!pData || length < 6) return;
-    // Logitech MX Master 3S HID report button mask can be in byte 0 or byte 1
-    uint8_t buttons = pData[0] | pData[1];
+    // Logitech MX Master 3S standard HID mouse buttons (Bits 0..4: Left, Right, Middle, Back, Forward)
+    uint8_t buttons = pData[0] & 0x1F;
     // 12-bit X extraction
     int16_t x = pData[2] | ((pData[3] & 0x0F) << 8);
     if (x & 0x800) x |= 0xF000; // Sign extend to 16-bit
@@ -571,9 +679,76 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
     updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
 }
 
+// Callback when HID data is received from the keyboard (Follow-the-Mouse)
+void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+    if (!pData || length == 0) return;
+
+    // Log the raw incoming keyboard packet
+    String hexDump = "";
+    for (size_t i = 0; i < length; i++) {
+        char buf[4];
+        snprintf(buf, sizeof(buf), "%02X ", pData[i]);
+        hexDump += buf;
+    }
+    logPrint("[KEYBOARD RX RAW] %s (len: %d)", hexDump.c_str(), length);
+
+    if (monitorCount == 0) return;
+
+    uint16_t targetConn = getTargetConnHandle(monitors[currentMonitorIndex].mac);
+    if (targetConn == BLE_HS_CONN_HANDLE_NONE) {
+        // Fallback to any active connected PC if current monitor target is not matched
+        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+            if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) {
+                targetConn = kvmClients[i].conn_id;
+                break;
+            }
+        }
+    }
+    if (targetConn == BLE_HS_CONN_HANDLE_NONE) return;
+
+    if (length == 7) {
+        // 7-byte report from Logitech MX Keys: [modifiers, key1, key2, key3, key4, key5, key6]
+        // Standard HID 6KRO report requires 8 bytes: [modifiers, reserved(0x00), key1, key2, key3, key4, key5, key6]
+        uint8_t rep8[8];
+        rep8[0] = pData[0]; // Modifiers (Shift, Ctrl, Alt, GUI)
+        rep8[1] = 0x00;     // Reserved
+        rep8[2] = pData[1]; // Key 1
+        rep8[3] = pData[2]; // Key 2
+        rep8[4] = pData[3]; // Key 3
+        rep8[5] = pData[4]; // Key 4
+        rep8[6] = pData[5]; // Key 5
+        rep8[7] = pData[6]; // Key 6
+        sendHidReport(keyboardInputChar, targetConn, rep8, 8);
+        logPrint("[KEYBOARD FWD] 7B->8B [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d)", rep8[0], rep8[2], targetConn, currentMonitorIndex + 1);
+    } else if (length == 8) {
+        // Standard 8-byte keyboard report: [mods, res, k1, k2, k3, k4, k5, k6]
+        sendHidReport(keyboardInputChar, targetConn, pData, length);
+        logPrint("[KEYBOARD FWD] 8B -> Conn %d (Mon #%d)", targetConn, currentMonitorIndex + 1);
+    } else if (length == 9) {
+        // 9-byte report with Report ID prepended: forward payload without Report ID
+        sendHidReport(keyboardInputChar, targetConn, &pData[1], 8);
+        logPrint("[KEYBOARD FWD] 9B (ID 0x%02X) -> Conn %d (Mon #%d)", pData[0], targetConn, currentMonitorIndex + 1);
+    } else if (length == 2) {
+        // Consumer Control report (Media keys)
+        sendHidReport(mediaInputChar, targetConn, pData, length);
+        logPrint("[MEDIA FWD] 2B -> Conn %d (Mon #%d)", targetConn, currentMonitorIndex + 1);
+    } else if (length == 3) {
+        // Consumer Control report with Report ID prepended
+        sendHidReport(mediaInputChar, targetConn, &pData[1], 2);
+        logPrint("[MEDIA FWD] 3B (ID 0x%02X) -> Conn %d (Mon #%d)", pData[0], targetConn, currentMonitorIndex + 1);
+    } else if (length == 19 || pData[0] == 0xFF) {
+        // Logitech HID++ vendor packet: ignore
+    } else {
+        sendHidReport(keyboardInputChar, targetConn, pData, min((size_t)8, length));
+        logPrint("[KEYBOARD FWD] %dB -> Conn %d", (int)length, targetConn);
+    }
+}
+
 bool connectToServer();
+bool connectToKeyboard();
 void sendConfigResponse(const String& response);
 void saveMouseToNvsLayout(String mac, String name);
+void saveKeyboardToNvsLayout(String mac, String name);
 String loadLayoutJsonFromNVS();
 static JsonDocument scannedMiceDoc;
 static TaskHandle_t reconnTaskHandle = NULL;
@@ -606,49 +781,250 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             return;
         }
 
-        String macPrefix = targetMouseMac.length() >= 14 ? targetMouseMac.substring(0, 14) : "";
+        bool isLogitechMfg = false;
+        if (advertisedDevice->haveManufacturerData()) {
+            std::string mfg = advertisedDevice->getManufacturerData();
+            if (mfg.length() >= 2) {
+                uint8_t b0 = (uint8_t)mfg[0];
+                uint8_t b1 = (uint8_t)mfg[1];
+                if ((b0 == 0x6D && b1 == 0x04) || (b0 == 0x04 && b1 == 0x6D)) {
+                    isLogitechMfg = true;
+                }
+            }
+        }
 
-        if (targetMouseMac.length() > 0 && (devMac == targetMouseMac || (macPrefix.length() > 0 && devMac.startsWith(macPrefix)) || devName.equalsIgnoreCase("MX Master 3S") || devName.indexOf("MX Master") != -1)) {
-            logPrint("[BLE Scan] TARGET LOCK MATCH! Connecting to %s (%s)", devName.c_str(), devMac.c_str());
-            NimBLEDevice::getScan()->stop();
+
+
+        // 1. Mouse Check
+        String mousePrefix = targetMouseMac.length() >= 14 ? targetMouseMac.substring(0, 14) : "";
+        String devNameLower = devName;
+        devNameLower.toLowerCase();
+
+        bool isKbMac = (targetKeyboardMac.length() > 0 && devMac == targetKeyboardMac) || devMac == "d7:ab:d0:37:09:a9";
+        bool mouseMatch = false;
+
+        if (!isKbMac) {
+            if (targetMouseMac.length() > 0 && (devMac == targetMouseMac || (mousePrefix.length() > 0 && devMac.startsWith(mousePrefix)))) {
+                mouseMatch = true;
+            } else if (devNameLower.indexOf("mx master") != -1 || devNameLower.indexOf("master 3s") != -1 || devNameLower.indexOf("master") != -1) {
+                mouseMatch = true;
+            } else if (advertisedDevice->getAppearance() == 0x03C2) {
+                mouseMatch = true;
+            } else if (isLogitechMfg && advertisedDevice->getAppearance() != 0x03C1 && devNameLower.indexOf("keys") == -1) {
+                mouseMatch = true;
+            }
+        }
+
+        if (!mouseConnected && !isConnectingToMouse && mouseMatch) {
+            logPrint("[BLE Scan] TARGET MOUSE MATCH! Connecting to %s (%s)", devName.c_str(), devMac.c_str());
+            if (targetMouseMac.length() == 0 || devMac != targetMouseMac) {
+                saveMouseToNvsLayout(devMac, devName.length() > 0 ? devName : "Logitech MX Master 3S");
+            }
             advDevice = new NimBLEAdvertisedDevice(*advertisedDevice);
-            doConnect = true;
+            doConnectMouse = true;
+        }
+
+        // 2. Keyboard Check (Logitech MX Keys S / any BLE Keyboard)
+        String kbPrefix = targetKeyboardMac.length() >= 14 ? targetKeyboardMac.substring(0, 14) : "";
+        bool kbMatch = false;
+        if (!mouseMatch && devMac != targetMouseMac) {
+            if (targetKeyboardMac.length() > 0 && (devMac == targetKeyboardMac || (kbPrefix.length() > 0 && devMac.startsWith(kbPrefix)))) {
+                kbMatch = true;
+            } else if (devNameLower.indexOf("mx keys") != -1 || devNameLower.indexOf("keys s") != -1 || devNameLower.indexOf("keys") != -1 || devNameLower.indexOf("keyboard") != -1) {
+                kbMatch = true;
+            } else if (advertisedDevice->getAppearance() == 0x03C1) {
+                kbMatch = true;
+            }
+        }
+
+        if (!kbConnected && !isConnectingToKeyboard && kbMatch) {
+            logPrint("[BLE Scan] TARGET KEYBOARD MATCH! Connecting to %s (%s)...", devName.c_str(), devMac.c_str());
+            if (targetKeyboardMac.length() == 0 || devMac != targetKeyboardMac) {
+                saveKeyboardToNvsLayout(devMac, devName.length() > 0 ? devName : "Logitech MX Keys S");
+            }
+            advKbDevice = new NimBLEAdvertisedDevice(*advertisedDevice);
+            doConnectKeyboard = true;
         }
     }
 };
 
-void startMouseReconnectTask() {
-    if (targetMouseMac.length() == 0 || isScanningForMice || connected) return;
-    if (NimBLEDevice::getScan()->isScanning()) return;
+// =========================================================================================
+// ULTRA-FAST HOST RECONNECTION & LINK-LAYER SUBSYSTEM (OS-Level Speed Architecture)
+// =========================================================================================
+TaskHandle_t hostScanTaskHandle = NULL;
 
-    logPrint("[BLE Host] Starting continuous background scan for mouse (%s)...", targetMouseMac.c_str());
-    NimBLEScan* pScan = NimBLEDevice::getScan();
-    if (pScan) {
-        pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), false);
-        pScan->setActiveScan(true);
-        pScan->setInterval(160);
-        pScan->setWindow(160);
-        pScan->setDuplicateFilter(false);
-        pScan->start(0, nullptr, false); // Non-blocking continuous background scan
-    }
+/**
+ * @brief Background daemon maintaining active reconnection with bonded HID peripherals.
+ * Implements 25ms high-duty-cycle channel hopping (Channels 37, 38, 39) to catch short
+ * advertisement bursts (<20ms) from Logitech Easy-Switch keyboards and mice.
+ * Uses FreeRTOS Task Notifications for 0ms instant wakeups upon peripheral disconnects.
+ */
+void startHostReconnectTask() {
+    if (hostScanTaskHandle != NULL) return; // Daemon already active
+    xTaskCreate([](void* param) {
+        logPrint("[BLE Host] Host Reconnect Daemon started (Instant Wakeup Mode).");
+        while (true) {
+            bool needMouse = !mouseConnected;
+            bool needKb = !kbConnected;
+
+            if (!needMouse && !needKb) {
+                // Both peripherals connected: Stop radio scanner to reserve 100% bandwidth for HID traffic.
+                // Sleeps efficiently until woken immediately (0ms) by onDisconnect() task notification.
+                NimBLEScan* pScan = NimBLEDevice::getScan();
+                if (pScan && pScan->isScanning()) {
+                    pScan->stop();
+                }
+                ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+                continue;
+            }
+
+            if (!isScanningForMice && !isConnectingToMouse && !isConnectingToKeyboard && !doConnectMouse && !doConnectKeyboard) {
+                NimBLEScan* pScan = NimBLEDevice::getScan();
+                if (pScan && !pScan->isScanning()) {
+                    pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), false);
+                    pScan->setActiveScan(true);
+                    pScan->setInterval(40);  // 25ms interval
+                    pScan->setWindow(40);    // 25ms window (100% continuous listening with rapid channel hops)
+                    pScan->setDuplicateFilter(false);
+                    pScan->start(0, false);  // Continuous non-blocking asynchronous scan
+                }
+            }
+
+            // Quick 20ms task yield before next evaluation cycle
+            vTaskDelay(pdMS_TO_TICKS(20));
+        }
+        hostScanTaskHandle = NULL;
+        vTaskDelete(NULL);
+    }, "hostScanDaemon", 4096, NULL, 1, &hostScanTaskHandle);
 }
 
-// Callback for BLE Connection Status
+// Callback for BLE Mouse Connection Status
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
         logPrint("[BLE Host] Connected to mouse!");
-        connected = true;
+        mouseConnected = true;
     }
     void onDisconnect(NimBLEClient* pClient) {
         logPrint("[BLE Host] Disconnected from mouse!");
-        connected = false;
-        xTaskCreate([](void* param) {
-            vTaskDelay(pdMS_TO_TICKS(500));
-            startMouseReconnectTask();
-            vTaskDelete(NULL);
-        }, "reconnTask", 3072, NULL, 1, NULL);
+        mouseConnected = false;
+        // Instantly wake up the reconnect daemon without waiting for periodic timer tick
+        if (hostScanTaskHandle != NULL) {
+            xTaskNotifyGive(hostScanTaskHandle);
+        }
     }
 };
+
+// Callback for BLE Keyboard Connection Status
+class KeyboardClientCallbacks : public NimBLEClientCallbacks {
+    void onConnect(NimBLEClient* pClient) {
+        logPrint("[BLE Host] Connected to Keyboard!");
+        kbConnected = true;
+    }
+    void onDisconnect(NimBLEClient* pClient) {
+        logPrint("[BLE Host] Disconnected from Keyboard!");
+        kbConnected = false;
+        // Instantly wake up the reconnect daemon without waiting for periodic timer tick
+        if (hostScanTaskHandle != NULL) {
+            xTaskNotifyGive(hostScanTaskHandle);
+        }
+    }
+};
+
+static bool kbGattInitialized = false;
+static bool mouseGattInitialized = false;
+
+/**
+ * @brief Establishes Direct Link-Layer connection to the target bonded keyboard.
+ * Replicates OS-level (Windows/macOS) connection speed by:
+ * 1. Initializing connection parameters directly at 7.5ms (Connection Interval = 6).
+ * 2. Avoiding manual scan stops that delay HCI packets.
+ * 3. Preserving RAM GATT cache (deleteAttributes = false).
+ * 4. Using asynchronous Write-Without-Response (response = false) for CCCD subscriptions.
+ */
+bool connectToKeyboard() {
+    if (isScanningForMice) return false;
+    if (targetKeyboardMac.length() == 0 && !advKbDevice) return false;
+
+    if (!pKbClient) {
+        pKbClient = NimBLEDevice::createClient();
+        pKbClient->setClientCallbacks(new KeyboardClientCallbacks());
+        pKbClient->setConnectTimeout(5);
+        pKbClient->setConnectionParams(6, 12, 0, 500); // 7.5ms - 15ms fastest initial connection interval
+    }
+
+    if (pKbClient->isConnected()) {
+        kbConnected = true;
+        return true;
+    }
+
+    isConnectingToKeyboard = true;
+
+    bool wasAdvertising = false;
+    if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
+        wasAdvertising = true;
+        NimBLEDevice::getAdvertising()->stop();
+    }
+
+    // Direct Link-Layer Connection (Connects on first radio burst in <50ms)
+    bool connRes = false;
+    if (advKbDevice) {
+        logPrint("[BLE Host] Direct Link-Layer Connecting to Keyboard: %s...", advKbDevice->getAddress().toString().c_str());
+        connRes = pKbClient->connect(advKbDevice, false);
+        delete advKbDevice;
+        advKbDevice = nullptr;
+    } else if (targetKeyboardMac.length() > 0) {
+        logPrint("[BLE Host] Direct Link-Layer Connecting to MAC: %s...", targetKeyboardMac.c_str());
+        connRes = pKbClient->connect(NimBLEAddress(targetKeyboardMac.c_str()), false);
+    }
+
+    isConnectingToKeyboard = false;
+
+    int activeCount = 0;
+    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active) activeCount++;
+    }
+    if (activeCount < MAX_KVM_CLIENTS && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+        NimBLEDevice::getAdvertising()->start();
+    }
+
+    if (!connRes) {
+        logPrint("[BLE Host] Keyboard connection attempt failed.");
+        return false;
+    }
+
+    logPrint("[BLE Host] Keyboard connected! Securing & initializing services...");
+    pKbClient->setConnectionParams(6, 12, 0, 500); // Enforce 7.5ms BLE stream latency
+    pKbClient->secureConnection();
+
+    // Fast RAM GATT lookup & async subscription
+    NimBLERemoteService* pService = pKbClient->getService(hidServiceUUID);
+    if (pService != nullptr) {
+        std::vector<NimBLERemoteCharacteristic*>* pChars = pService->getCharacteristics(false);
+        if (pChars == nullptr || pChars->empty()) {
+            pChars = pService->getCharacteristics(true);
+        }
+        int subCount = 0;
+        if (pChars != nullptr) {
+            for (auto &pChar : *pChars) {
+                if (pChar->canNotify()) {
+                    // Async subscribe (response=false) completes in 0ms without blocking FreeRTOS queue
+                    pChar->subscribe(true, keyboardNotifyCallback, false);
+                    subCount++;
+                }
+            }
+        }
+
+        kbConnected = true;
+        logPrint("[BLE Host] Keyboard FULLY CONNECTED & READY (%d active chars)!", subCount);
+        return true;
+    } else {
+        logPrint("[BLE Host] HID Service 0x1812 not found on Keyboard.");
+        pKbClient->disconnect();
+        return false;
+    }
+    kbConnected = true;
+    return true;
+}
 
 bool connectToServer() {
     if (isScanningForMice) return false;
@@ -657,10 +1033,11 @@ bool connectToServer() {
     if (!pClient) {
         pClient = NimBLEDevice::createClient();
         pClient->setClientCallbacks(new ClientCallbacks());
+        pClient->setConnectTimeout(5);
     }
 
     if (pClient->isConnected()) {
-        connected = true;
+        mouseConnected = true;
         return true;
     }
 
@@ -704,11 +1081,13 @@ bool connectToServer() {
 
     bool connRes = false;
     if (advDevice) {
-        logPrint("[BLE Host] Connecting directly to advertised device: %s...", advDevice->getAddress().toString().c_str());
-        connRes = pClient->connect(advDevice);
-    } else {
-        logPrint("[BLE Host] Mouse not advertising yet (retrying in background loop)...");
-        connRes = false;
+        logPrint("[BLE Host] Direct Link-Layer Connecting to Mouse: %s...", advDevice->getAddress().toString().c_str());
+        connRes = pClient->connect(advDevice, false);
+        delete advDevice;
+        advDevice = nullptr;
+    } else if (targetMouseMac.length() > 0) {
+        logPrint("[BLE Host] Direct Link-Layer Connecting to MAC: %s...", targetMouseMac.c_str());
+        connRes = pClient->connect(NimBLEAddress(targetMouseMac.c_str()), false);
     }
 
     isConnectingToMouse = false;
@@ -724,10 +1103,12 @@ bool connectToServer() {
 
     if (!connRes) {
         logPrint("[BLE Host] Connection attempt failed (mouse not advertising or out of range).");
+        if (!kbConnected || !mouseConnected) startHostReconnectTask();
         return false;
     }
 
     logPrint("[BLE Host] Connected! Securing connection (Pairing)...");
+    pClient->setConnectionParams(6, 12, 0, 500);
     if (!pClient->secureConnection()) {
         logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...");
         delay(100);
@@ -746,7 +1127,7 @@ bool connectToServer() {
         for (auto &pChar : *pChars) {
             if (pChar->getUUID() == reportCharUUID) {
                 if(pChar->canNotify()) {
-                    pChar->subscribe(true, notifyCallback);
+                    pChar->subscribe(true, notifyCallback, false);
                     logPrint("[BLE Host] Subscribed to HID report!");
                 }
             }
@@ -754,10 +1135,12 @@ bool connectToServer() {
     } else {
         pClient->disconnect();
         isConnectingToMouse = false;
+        if (!kbConnected || !mouseConnected) startHostReconnectTask();
         return false;
     }
-    connected = true;
+    mouseConnected = true;
     isConnectingToMouse = false;
+    if (!kbConnected) startHostReconnectTask();
     return true;
 }
 
@@ -810,11 +1193,19 @@ String loadLayoutJsonFromNVS() {
 
   targetMouseMac = "";
   targetMouseName = "";
+  targetKeyboardMac = "";
+  targetKeyboardName = "";
   if (json.length() > 2) {
     JsonDocument doc;
     if (!deserializeJson(doc, json) && doc.is<JsonObject>()) {
       targetMouseMac = doc["mouseMac"] | "";
       targetMouseName = doc["mouseName"] | "";
+      targetKeyboardMac = doc["keyboardMac"] | "";
+      targetKeyboardName = doc["keyboardName"] | "";
+      if (targetKeyboardMac.length() > 0 && targetKeyboardMac == targetMouseMac) {
+        targetKeyboardMac = "";
+        targetKeyboardName = "";
+      }
     }
   }
   return json;
@@ -834,18 +1225,14 @@ void initDefaultConfigDoc(JsonDocument& doc) {
 }
 
 void saveMouseToNvsLayout(String mac, String name) {
-  mac.toLowerCase();
-  mac.trim();
-  name.trim();
-  targetMouseMac = mac;
-  targetMouseName = name;
-
   String json = loadLayoutJsonFromNVS();
   JsonDocument doc;
   if (deserializeJson(doc, json) || !doc.is<JsonObject>()) {
     initDefaultConfigDoc(doc);
   }
 
+  targetMouseMac = mac;
+  targetMouseName = name;
   doc["mouseMac"] = targetMouseMac;
   doc["mouseName"] = targetMouseName;
 
@@ -861,6 +1248,33 @@ void saveMouseToNvsLayout(String mac, String name) {
     logPrint("[NVS] Persisted mouse (%s, '%s') in unified JSON layout (%u bytes)!", targetMouseMac.c_str(), targetMouseName.c_str(), bytesWritten);
   } else {
     logPrint("[NVS ERROR] Failed to save mouse to layout (putBytes returned 0)!");
+  }
+}
+
+void saveKeyboardToNvsLayout(String mac, String name) {
+  String json = loadLayoutJsonFromNVS();
+  JsonDocument doc;
+  if (deserializeJson(doc, json) || !doc.is<JsonObject>()) {
+    initDefaultConfigDoc(doc);
+  }
+
+  targetKeyboardMac = mac;
+  targetKeyboardName = name;
+  doc["keyboardMac"] = targetKeyboardMac;
+  doc["keyboardName"] = targetKeyboardName;
+
+  String unifiedJson;
+  serializeJson(doc, unifiedJson);
+
+  preferences.begin(NVS_NAMESPACE, false);
+  preferences.remove(NVS_KEY_LAYOUT);
+  size_t bytesWritten = preferences.putBytes(NVS_KEY_LAYOUT, unifiedJson.c_str(), unifiedJson.length() + 1);
+  preferences.end();
+
+  if (bytesWritten > 0) {
+    logPrint("[NVS] Persisted keyboard (%s, '%s') in unified JSON layout (%u bytes)!", targetKeyboardMac.c_str(), targetKeyboardName.c_str(), bytesWritten);
+  } else {
+    logPrint("[NVS ERROR] Failed to save keyboard to layout (putBytes returned 0)!");
   }
 }
 
@@ -902,7 +1316,8 @@ void loadConfiguration() {
           monitorCount++;
         }
       }
-      logPrint("Loaded %d monitors from NVS. Target mouse: %s (%s)", monitorCount, targetMouseMac.c_str(), targetMouseName.c_str());
+      logPrint("Loaded %d monitors from NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
+               monitorCount, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
 
       if (doc["clients"].is<JsonArray>()) {
         int clientCount = 0;
@@ -928,8 +1343,6 @@ void saveConfiguration(const String& jsonString) {
   if (!deserializeJson(doc, jsonString)) {
     String mac = doc["mouseMac"] | "";
     if (mac.length() > 0) {
-      mac.toLowerCase();
-      mac.trim();
       targetMouseMac = mac;
     } else if (targetMouseMac.length() > 0) {
       doc["mouseMac"] = targetMouseMac;
@@ -943,8 +1356,23 @@ void saveConfiguration(const String& jsonString) {
       doc["mouseName"] = targetMouseName;
     }
 
+    String kbMac = doc["keyboardMac"] | "";
+    if (kbMac.length() > 0) {
+      targetKeyboardMac = kbMac;
+    } else if (targetKeyboardMac.length() > 0) {
+      doc["keyboardMac"] = targetKeyboardMac;
+    }
+
+    String kbName = doc["keyboardName"] | "";
+    if (kbName.length() > 0) {
+      kbName.trim();
+      targetKeyboardName = kbName;
+    } else if (targetKeyboardName.length() > 0) {
+      doc["keyboardName"] = targetKeyboardName;
+    }
+
     serializeJson(doc, finalJson);
-    logPrint("[NVS] Persisted targetMouseMac '%s' and targetMouseName '%s' in unified JSON layout", targetMouseMac.c_str(), targetMouseName.c_str());
+    logPrint("[NVS] Persisted Mouse '%s' and Keyboard '%s' in unified JSON layout", targetMouseMac.c_str(), targetKeyboardMac.c_str());
   }
 
   preferences.begin(NVS_NAMESPACE, false);
@@ -1019,9 +1447,11 @@ void processCommand(String input) {
       initDefaultConfigDoc(doc);
     }
 
-    // Include bound mouse MAC & Name in the unified JSON payload for backup & restore
+    // Include bound mouse & keyboard in unified JSON payload
     doc["mouseMac"] = targetMouseMac;
     doc["mouseName"] = targetMouseName.length() > 0 ? targetMouseName : (targetMouseMac.length() > 0 ? "BLE Mouse" : "");
+    doc["keyboardMac"] = targetKeyboardMac;
+    doc["keyboardName"] = targetKeyboardName.length() > 0 ? targetKeyboardName : (targetKeyboardMac.length() > 0 ? "BLE Keyboard" : "");
 
     // Preserve stored clients and reset connected status prior to active connection sync
     JsonArray clientsArr;
@@ -1038,14 +1468,10 @@ void processCommand(String input) {
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
       if (kvmClients[i].active && kvmClients[i].mac.length() > 0) {
         String activeMac = kvmClients[i].mac;
-        activeMac.toLowerCase();
-        activeMac.trim();
 
         bool exists = false;
         for (JsonObject c : clientsArr) {
           String cMac = c["mac"] | "";
-          cMac.toLowerCase();
-          cMac.trim();
           if (cMac == activeMac) {
             c["connected"] = true;
             exists = true;
@@ -1065,21 +1491,17 @@ void processCommand(String input) {
     serializeJson(doc, unifiedJson);
 
     sendConfigResponse("CONFIG " + String(unifiedJson.length()) + " " + unifiedJson);
-  } else if (input == "SCAN_MICE") {
+  } else if (input == "SCAN_MICE" || input == "SCAN_KEYBOARDS" || input == "SCAN_DEVICES") {
     scannedMiceDoc.clear();
     scannedMiceDoc.to<JsonArray>();
 
     isScanningForMice = true;
 
-    // Cancel any background reconnect task and disconnect mouse to free radio
-    if (reconnTaskHandle != NULL) {
-      logPrint("[BLE Scan] Cancelling background mouseReconnectTask for discovery scan...");
-      vTaskDelete(reconnTaskHandle);
-      reconnTaskHandle = NULL;
-    }
     if (pClient && pClient->isConnected()) {
-      logPrint("[BLE Scan] Disconnecting from mouse before discovery scan...");
       pClient->disconnect();
+    }
+    if (pKbClient && pKbClient->isConnected()) {
+      pKbClient->disconnect();
     }
     delay(200);
 
@@ -1094,7 +1516,7 @@ void processCommand(String input) {
       pScan->setInterval(100);
       pScan->setWindow(99);
 
-      logPrint("[BLE Scan] Starting 5-second active discovery scan for mice...");
+      logPrint("[BLE Scan] Starting 5-second active discovery scan for devices...");
       pScan->start(5, false);
       pScan->clearResults();
     }
@@ -1118,33 +1540,53 @@ void processCommand(String input) {
     saveMouseToNvsLayout(mac, name);
     sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
 
-    if (reconnTaskHandle != NULL) {
-      vTaskDelete(reconnTaskHandle);
-      reconnTaskHandle = NULL;
-    }
     if (pClient && pClient->isConnected()) {
       pClient->disconnect();
     }
     if (targetMouseMac.length() > 0) {
-      doConnect = true;
+      doConnectMouse = true;
     }
   } else if (input == "UNBIND_MOUSE") {
     saveMouseToNvsLayout("", "");
-    if (reconnTaskHandle != NULL) {
-      vTaskDelete(reconnTaskHandle);
-      reconnTaskHandle = NULL;
-    }
     if (pClient && pClient->isConnected()) {
       pClient->disconnect();
     }
     sendConfigResponse("OK_UNBIND_MOUSE");
   } else if (input == "GET_TARGET_MOUSE") {
     sendConfigResponse("TARGET_MOUSE " + targetMouseMac);
+  } else if (input.startsWith("BIND_KEYBOARD ")) {
+    String param = input.substring(14);
+    param.trim();
+    String mac = param;
+    String name = "Logitech MX Keys S";
+    int spaceIdx = param.indexOf(' ');
+    if (spaceIdx != -1) {
+      mac = param.substring(0, spaceIdx);
+      name = param.substring(spaceIdx + 1);
+      name.trim();
+    }
+    saveKeyboardToNvsLayout(mac, name);
+    sendConfigResponse("OK_BIND_KEYBOARD " + targetKeyboardMac);
+
+    if (pKbClient && pKbClient->isConnected()) {
+      pKbClient->disconnect();
+    }
+    if (targetKeyboardMac.length() > 0) {
+      doConnectKeyboard = true;
+    }
+  } else if (input == "UNBIND_KEYBOARD") {
+    saveKeyboardToNvsLayout("", "");
+    if (pKbClient && pKbClient->isConnected()) {
+      pKbClient->disconnect();
+    }
+    sendConfigResponse("OK_UNBIND_KEYBOARD");
+  } else if (input == "GET_TARGET_KEYBOARD") {
+    sendConfigResponse("TARGET_KEYBOARD " + targetKeyboardMac);
   } else if (input == "DUMP_FLASH") {
     String json = loadLayoutJsonFromNVS();
     logPrint("--- [NVS FLASH DUMP] ---");
     logPrint("Flash layout string length: %d bytes", json.length());
-    logPrint("Flash target mouse MAC: %s", targetMouseMac.c_str());
+    logPrint("Flash Mouse: %s, Keyboard: %s", targetMouseMac.c_str(), targetKeyboardMac.c_str());
     logPrint("%s", json.c_str());
     logPrint("--- [END NVS FLASH DUMP] ---");
   } else if (input == "CLEAR_BONDS" || input == "CLEAR_BLE_BONDS") {
@@ -1178,116 +1620,126 @@ class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
 };
 
 void setup() {
-  Serial.setRxBufferSize(16384);
-  Serial.begin(115200);
+    Serial.setRxBufferSize(16384);
+    Serial.begin(115200);
 #if CONFIG_IDF_TARGET_ESP32S3
-  USBSerial.begin(115200);
+    USBSerial.begin(115200);
 #endif
-  delay(2000);
-  
-  logPrint("--- ESP32 KVM Switcher Started ---");
-  loadConfiguration();
-  
-  logPrint("[BLE] Initializing NimBLE...");
-  uint8_t customMac[6];
-  esp_read_mac(customMac, ESP_MAC_BT);
-  customMac[5] += 1; // Increment last byte by 1 to present clean device identity to PCs
-  esp_base_mac_addr_set(customMac);
-  logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
-           customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);
+    delay(2000);
+    
+    logPrint("--- ESP32 KVM Switcher Started ---");
+    loadConfiguration();
+    
+    logPrint("[BLE] Initializing NimBLE...");
+    uint8_t customMac[6];
+    esp_read_mac(customMac, ESP_MAC_BT);
+    customMac[5] += 7; // Increment to present fresh combo device identity to all PCs so OS binds clean Keyboard+Mouse driver
+    esp_base_mac_addr_set(customMac);
+    logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+             customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);
 
-  NimBLEDevice::init(BLE_DEVICE_NAME);
-  NimBLEDevice::setMTU(512);
-  NimBLEDevice::setSecurityAuth(true, false, true); // Compatible Just Works pairing for macOS/Windows (bonding=true, mitm=false, sc=true)
-  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT); // Standard HID Mouse IO Capability
-  NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-  NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-  
-  int numBonds = NimBLEDevice::getNumBonds();
-  logPrint("[BLE NVS BONDS] Saved bonded devices count: %d", numBonds);
-  for (int i = 0; i < numBonds; i++) {
-      NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(i);
-      logPrint("  -> Bonded Device #%d: MAC %s", i + 1, bondAddr.toString().c_str());
-  }
-  
-  // Setup BLE Server (Peripheral)
-  pServer = NimBLEDevice::createServer();
-  pServer->setCallbacks(new ServerCallbacks());
-  hidDevice = new NimBLEHIDDevice(pServer);
-  inputChar = hidDevice->inputReport(1);    // Report ID 1: Relative Mouse
-  absInputChar = hidDevice->inputReport(2); // Report ID 2: Absolute Mouse / Pointer
-  
-  hidDevice->manufacturer()->setValue("Antigravity Labs");
-  hidDevice->pnp(0x02, 0x046d, 0x0000, 0x0110);
-  hidDevice->hidInfo(0x00, 0x01);
-  
-  hidDevice->reportMap((uint8_t*)hidReportMap, sizeof(hidReportMap));
-  hidDevice->startServices();
-  
-  // Setup Custom Config Service ("ESP32 KVM Server")
-  NimBLEService* pConfigService = pServer->createService(CONFIG_SERVICE_UUID);
-  configTxChar = pConfigService->createCharacteristic(
-                    CONFIG_TX_UUID,
-                    NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
-                 );
-  configRxChar = pConfigService->createCharacteristic(
-                    CONFIG_RX_UUID,
-                    NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
-                 );
-  configRxChar->setCallbacks(new ConfigRxCallbacks());
-  pConfigService->start();
+    NimBLEDevice::init(BLE_DEVICE_NAME);
+    NimBLEDevice::setMTU(512);
+    NimBLEDevice::setSecurityAuth(true, false, true); // (bonding=true, mitm=false -> Just Works, sc=true)
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT); // Standard Combo IO Capability
+    NimBLEDevice::setSecurityCallbacks(new SecurityCallbacks());
+    NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+    NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+    
+    int numBonds = NimBLEDevice::getNumBonds();
+    logPrint("[BLE NVS BONDS] Saved bonded devices count: %d", numBonds);
+    for (int i = 0; i < numBonds; i++) {
+        NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(i);
+        logPrint("  -> Bonded Device #%d: MAC %s", i + 1, bondAddr.toString().c_str());
+    }
+    
+    // Setup BLE Server (Peripheral)
+    pServer = NimBLEDevice::createServer();
+    pServer->setCallbacks(new ServerCallbacks());
+    hidDevice = new NimBLEHIDDevice(pServer);
+    keyboardInputChar = hidDevice->inputReport(1); // Report ID 1: Standard Keyboard (6KRO)
+    keyboardOutputChar = hidDevice->outputReport(1); // Report ID 1: Keyboard LEDs (Output)
+    inputChar = hidDevice->inputReport(2);         // Report ID 2: Relative Mouse
+    absInputChar = hidDevice->inputReport(3);      // Report ID 3: Absolute Mouse / Pointer
+    mediaInputChar = hidDevice->inputReport(4);    // Report ID 4: Media / Consumer Keys
+    
+    hidDevice->manufacturer()->setValue("Logitech");
+    hidDevice->pnp(0x01, 0x046d, 0xc52b, 0x0100);
+    hidDevice->hidInfo(0x00, 0x01);
+    
+    hidDevice->reportMap((uint8_t*)hidReportMap, sizeof(hidReportMap));
+    hidDevice->startServices();
+    
+    // Setup Custom Config Service ("ESP32 KVM Server")
+    NimBLEService* pConfigService = pServer->createService(CONFIG_SERVICE_UUID);
+    configTxChar = pConfigService->createCharacteristic(
+                      CONFIG_TX_UUID,
+                      NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
+                   );
+    configRxChar = pConfigService->createCharacteristic(
+                      CONFIG_RX_UUID,
+                      NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
+                   );
+    configRxChar->setCallbacks(new ConfigRxCallbacks());
+    pConfigService->start();
 
-  NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
-  pAdvertising->setAppearance(0x03C2); // HID Mouse Appearance
-  pAdvertising->addServiceUUID(hidDevice->hidService()->getUUID());
-  pAdvertising->addServiceUUID(CONFIG_SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-  pAdvertising->start();
-  logPrint("[BLE Server] Advertising HID Mouse & ESP32 KVM Server Config Service...");
+    NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
+    pAdvertising->setAppearance(0x03C0); // HID Generic / Combo (Mouse + Keyboard)
+    pAdvertising->addServiceUUID(hidDevice->hidService()->getUUID());
+    pAdvertising->addServiceUUID(CONFIG_SERVICE_UUID);
+    pAdvertising->setScanResponse(true);
+    pAdvertising->start();
+    logPrint("[BLE Server] Advertising HID Combo (Mouse+Keyboard) & ESP32 KVM Server Config Service...");
 
-  // If targetMouseMac is bound, start persistent background reconnect task
-  if (targetMouseMac.length() > 0 && !connected) {
-    startMouseReconnectTask();
-  }
+    // If target devices are bound, start persistent background reconnect task
+    startHostReconnectTask();
 }
 
 void loop() {
-  if (doSaveConfig) {
-    executePendingSave();
-  }
-
-  if (!bleCmdQueue.empty()) {
-    String cmd = bleCmdQueue.front();
-    bleCmdQueue.erase(bleCmdQueue.begin());
-    logPrint("[BLE RX CMD]: %s", cmd.c_str());
-    processCommand(cmd);
-  }
-
-  if (doConnect) {
-    doConnect = false;
-    xTaskCreate([](void* param) {
-      connectToServer();
-      vTaskDelete(NULL);
-    }, "mouseConnTask", 4096, NULL, 1, NULL);
-  }
-
-  if (Serial.available()) {
-    String input = Serial.readStringUntil('\n');
-    input.trim();
-    if (input.length() > 0) {
-      logPrint("[UART RX CMD]: %s", input.c_str());
-      processCommand(input);
+    if (doSaveConfig) {
+        executePendingSave();
     }
-  }
+
+    if (!bleCmdQueue.empty()) {
+        String cmd = bleCmdQueue.front();
+        bleCmdQueue.erase(bleCmdQueue.begin());
+        logPrint("[BLE RX CMD]: %s", cmd.c_str());
+        processCommand(cmd);
+    }
+
+    if (doConnectMouse) {
+        doConnectMouse = false;
+        xTaskCreate([](void* param) {
+            connectToServer();
+            vTaskDelete(NULL);
+        }, "mouseConnTask", 4096, NULL, 5, NULL);
+    }
+
+    if (doConnectKeyboard) {
+        doConnectKeyboard = false;
+        xTaskCreate([](void* param) {
+            connectToKeyboard();
+            vTaskDelete(NULL);
+        }, "kbConnTask", 4096, NULL, 5, NULL);
+    }
+
+    if (Serial.available()) {
+        String input = Serial.readStringUntil('\n');
+        input.trim();
+        if (input.length() > 0) {
+            logPrint("[UART RX CMD]: %s", input.c_str());
+            processCommand(input);
+        }
+    }
 
 #if CONFIG_IDF_TARGET_ESP32S3
-  if (USBSerial.available()) {
-    String input = USBSerial.readStringUntil('\n');
-    input.trim();
-    if (input.length() > 0) {
-      logPrint("[USB CDC RX CMD]: %s", input.c_str());
-      processCommand(input);
+    if (USBSerial.available()) {
+        String input = USBSerial.readStringUntil('\n');
+        input.trim();
+        if (input.length() > 0) {
+            logPrint("[USB CDC RX CMD]: %s", input.c_str());
+            processCommand(input);
+        }
     }
-  }
 #endif
 }

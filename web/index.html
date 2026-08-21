@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 300;
+    const BUILD_VERSION = 301;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -889,6 +889,24 @@
       draw();
     }
 
+    function detectOSValue() {
+      const rawUA = navigator.userAgent || '';
+      const ua = rawUA.toUpperCase();
+      const platform = (navigator.platform || '').toUpperCase();
+      const isMac = platform.includes('MAC') || ua.includes('MAC');
+      const isWin = platform.includes('WIN') || ua.includes('WIN');
+      if (isWin) return 1; // 1 = WINDOWS
+      if (isMac) return 2; // 2 = MACOS
+      return 0;            // 0 = UNKNOWN
+    }
+
+    function getOSName(val) {
+      const num = Number(val);
+      if (num === 1) return 'WINDOWS';
+      if (num === 2) return 'MACOS';
+      return 'UNKNOWN';
+    }
+
     function cycleScreenScale(screen) {
       if (!screen) return;
       const cur = screen.scale || 100;
@@ -898,6 +916,27 @@
       else nextScale = 100;
       
       screen.scale = nextScale;
+      updateJSON();
+      draw();
+    }
+
+    function cycleScreenOS(screen) {
+      if (!screen) return;
+      const curOS = screen.os !== undefined ? Number(screen.os) : 1;
+      let nextOS = 1; // 1 = WINDOWS
+      if (curOS === 1) nextOS = 2;      // 2 = MACOS
+      else if (curOS === 2) nextOS = 0; // 0 = UNKNOWN
+      else nextOS = 1;                  // 1 = WINDOWS
+
+      if (screen.group) {
+        screens.forEach(s => {
+          if (s.group === screen.group) {
+            s.os = nextOS;
+          }
+        });
+      } else {
+        screen.os = nextOS;
+      }
       updateJSON();
       draw();
     }
@@ -1861,6 +1900,7 @@
               width: d.width,
               height: d.height,
               scale: detectedScale || 100,
+              os: detectOSValue(),
               layoutX: finalLayoutX,
               layoutY: finalLayoutY,
               x: 0,
@@ -2106,6 +2146,7 @@
         x: 0,
         y: 0,
         color: COLOR_MANUAL,
+        os: 1,
         isDetected: false,
         isLocked: false
       };
@@ -2383,17 +2424,37 @@
           s.btIconHitBox = null;
         }
 
-        // --- Scale Indicator Text (Bottom Left Corner) ---
-        const scaleVal = s.scale || 100;
-        const isNonDefaultScale = (scaleVal !== 100);
-        const badgeX = s.x + 14;
+        // --- OS & Scale Badges (Bottom Left Corner) ---
+        let currentBadgeX = s.x + 14;
         const badgeY = s.y + sh - 14;
 
-        s.scaleBadgeHitBox = { x: s.x + 10, y: s.y + sh - 26, w: 42, h: 18, screen: s };
+        if (isPrimaryScreen) {
+          const osVal = s.os !== undefined ? Number(s.os) : 1;
+          const osName = getOSName(osVal);
+          const osText = `OS: ${osName}`;
+          ctx.font = '600 11px "JetBrains Mono", monospace';
+          const osW = Math.ceil(ctx.measureText(osText).width);
+
+          s.osBadgeHitBox = { x: currentBadgeX - 4, y: s.y + sh - 26, w: osW + 8, h: 18, screen: s };
+
+          ctx.fillStyle = (osVal === 1) ? '#38bdf8' : ((osVal === 2) ? '#a855f7' : '#94a3b8');
+          ctx.fillText(osText, currentBadgeX, badgeY);
+
+          currentBadgeX += osW + 12;
+        } else {
+          s.osBadgeHitBox = null;
+        }
+
+        const scaleVal = s.scale || 100;
+        const isNonDefaultScale = (scaleVal !== 100);
+        const scaleText = `${scaleVal}%`;
+        ctx.font = '600 11px "JetBrains Mono", monospace';
+        const scaleW = Math.ceil(ctx.measureText(scaleText).width);
+
+        s.scaleBadgeHitBox = { x: currentBadgeX - 4, y: s.y + sh - 26, w: scaleW + 8, h: 18, screen: s };
 
         ctx.fillStyle = isNonDefaultScale ? '#ffffff' : '#64748b';
-        ctx.font = '600 11px "JetBrains Mono", monospace';
-        ctx.fillText(`${scaleVal}%`, badgeX, badgeY);
+        ctx.fillText(scaleText, currentBadgeX, badgeY);
 
 
         // --- Red Delete Button (Top Right Corner) ---
@@ -2497,6 +2558,7 @@
                 width: s.width,
                 height: s.height,
                 scale: s.scale || 100,
+                os: (s.os !== undefined ? Number(s.os) : 1),
                 isDetected: isDetected,
                 isPrimary: isPrimaryVal
               };
@@ -2620,6 +2682,16 @@
           }
         }
 
+        // Check Click on OS Indicator Badge (Bottom Left Corner)
+        if (s.osBadgeHitBox) {
+          const hb = s.osBadgeHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            e.stopPropagation();
+            cycleScreenOS(s);
+            return;
+          }
+        }
+
         // Check Click on Scale Indicator Badge (Bottom Left Corner)
         if (s.scaleBadgeHitBox) {
           const hb = s.scaleBadgeHitBox;
@@ -2718,6 +2790,7 @@
       let hoveringResize = false;
       let hoveringName = false;
       let hoveringBtIcon = false;
+      let hoveringOs = false;
       let hoveringScale = false;
       let hoveringScreen = false;
 
@@ -2730,6 +2803,12 @@
         if (!isDetected && s.resizeHandle && mx >= s.resizeHandle.x - 4 && mx <= s.resizeHandle.x + s.resizeHandle.w + 4 &&
             my >= s.resizeHandle.y - 4 && my <= s.resizeHandle.y + s.resizeHandle.h + 4) {
           hoveringResize = true;
+        }
+        if (s.osBadgeHitBox) {
+          const hb = s.osBadgeHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            hoveringOs = true;
+          }
         }
         if (s.scaleBadgeHitBox) {
           const hb = s.scaleBadgeHitBox;
@@ -2757,7 +2836,7 @@
         }
       });
 
-      if (hoveringDelete || hoveringName || hoveringBtIcon || hoveringScale) {
+      if (hoveringDelete || hoveringName || hoveringBtIcon || hoveringOs || hoveringScale) {
         canvas.style.cursor = 'pointer';
       } else if (hoveringResize || isResizing) {
         canvas.style.cursor = 'nwse-resize';
@@ -3175,6 +3254,7 @@
                 width: s.width || 1920,
                 height: s.height || 1080,
                 scale: s.scale || 100,
+                os: (s.os !== undefined ? Number(s.os) : 1),
                 color: s.color || getGroupColor(grp),
                 isDetected: isDet,
                 isLocked: isDet,

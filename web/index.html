@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 301;
+    const BUILD_VERSION = 302;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -894,17 +894,14 @@
       const ua = rawUA.toUpperCase();
       const platform = (navigator.platform || '').toUpperCase();
       const isMac = platform.includes('MAC') || ua.includes('MAC');
-      const isWin = platform.includes('WIN') || ua.includes('WIN');
-      if (isWin) return 1; // 1 = WINDOWS
-      if (isMac) return 2; // 2 = MACOS
-      return 0;            // 0 = UNKNOWN
+      if (isMac) return 1; // 1 = MACOS
+      return 0;            // 0 = WINDOWS
     }
 
     function getOSName(val) {
       const num = Number(val);
-      if (num === 1) return 'WINDOWS';
-      if (num === 2) return 'MACOS';
-      return 'UNKNOWN';
+      if (num === 1) return 'MACOS';
+      return 'WINDOWS';    // 0 = WINDOWS
     }
 
     function cycleScreenScale(screen) {
@@ -922,11 +919,8 @@
 
     function cycleScreenOS(screen) {
       if (!screen) return;
-      const curOS = screen.os !== undefined ? Number(screen.os) : 1;
-      let nextOS = 1; // 1 = WINDOWS
-      if (curOS === 1) nextOS = 2;      // 2 = MACOS
-      else if (curOS === 2) nextOS = 0; // 0 = UNKNOWN
-      else nextOS = 1;                  // 1 = WINDOWS
+      const curOS = screen.os !== undefined ? Number(screen.os) : 0;
+      const nextOS = (curOS === 0) ? 1 : 0; // 0 = WINDOWS <-> 1 = MACOS
 
       if (screen.group) {
         screens.forEach(s => {
@@ -2146,7 +2140,7 @@
         x: 0,
         y: 0,
         color: COLOR_MANUAL,
-        os: 1,
+        os: 0,
         isDetected: false,
         isLocked: false
       };
@@ -2429,7 +2423,7 @@
         const badgeY = s.y + sh - 14;
 
         if (isPrimaryScreen) {
-          const osVal = s.os !== undefined ? Number(s.os) : 1;
+          const osVal = s.os !== undefined ? Number(s.os) : 0;
           const osName = getOSName(osVal);
           const osText = `OS: ${osName}`;
           ctx.font = '600 11px "JetBrains Mono", monospace';
@@ -2437,7 +2431,7 @@
 
           s.osBadgeHitBox = { x: currentBadgeX - 4, y: s.y + sh - 26, w: osW + 8, h: 18, screen: s };
 
-          ctx.fillStyle = (osVal === 1) ? '#38bdf8' : ((osVal === 2) ? '#a855f7' : '#94a3b8');
+          ctx.fillStyle = (osVal === 1) ? '#a855f7' : '#38bdf8';
           ctx.fillText(osText, currentBadgeX, badgeY);
 
           currentBadgeX += osW + 12;
@@ -2558,7 +2552,7 @@
                 width: s.width,
                 height: s.height,
                 scale: s.scale || 100,
-                os: (s.os !== undefined ? Number(s.os) : 1),
+                os: (s.os !== undefined ? Number(s.os) : 0),
                 isDetected: isDetected,
                 isPrimary: isPrimaryVal
               };
@@ -3254,7 +3248,7 @@
                 width: s.width || 1920,
                 height: s.height || 1080,
                 scale: s.scale || 100,
-                os: (s.os !== undefined ? Number(s.os) : 1),
+                os: (s.os !== undefined ? Number(s.os) : 0),
                 color: s.color || getGroupColor(grp),
                 isDetected: isDet,
                 isLocked: isDet,

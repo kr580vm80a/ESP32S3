@@ -17,6 +17,10 @@ Preferences preferences;
 const char* NVS_NAMESPACE = "kvm_config";
 const char* NVS_KEY_LAYOUT = "layout";
 
+enum os {
+    OS_WINDOWS = 0,
+    OS_MAC = 1
+};
 // Structure to store monitor configuration
 struct MonitorConfig {
     int id = 1;
@@ -26,6 +30,7 @@ struct MonitorConfig {
     int width;
     int height;
     String mac;
+    int os = OS_WINDOWS;
     int scale = 100;
     bool isPrimary = false;
     int lastX = 0;
@@ -41,6 +46,7 @@ NimBLEServer* pServer = nullptr;
 NimBLEHIDDevice* hidDevice = nullptr;
 NimBLECharacteristic* inputChar = nullptr;
 NimBLECharacteristic* absInputChar = nullptr;
+NimBLECharacteristic* macAbsInputChar = nullptr;
 NimBLECharacteristic* keyboardInputChar = nullptr;
 NimBLECharacteristic* keyboardOutputChar = nullptr;
 NimBLECharacteristic* mediaInputChar = nullptr;
@@ -147,49 +153,44 @@ const uint8_t hidReportMap[] = {
     0xC0,              //   End Collection
     0xC0,              // End Collection
 
-    // --- REPORT ID 3: Absolute Mouse / Pointer (for instant 0ms cross-PC transitions) ---
+    // --- REPORT ID 3: Absolute Pointer (for Windows / Android multi-monitor transitions) ---
     0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
-    0x09, 0x02,        // Usage (Mouse)
+    0x09, 0x01,        // Usage (Pointer)
     0xA1, 0x01,        // Collection (Application)
     0x85, 0x03,        //   Report ID (3)
-    0x09, 0x01,        //   Usage (Pointer)
-    0xA1, 0x00,        //   Collection (Physical)
-    0x05, 0x09,        //     Usage Page (Button)
-    0x19, 0x01,        //     Usage Minimum (0x01)
-    0x29, 0x05,        //     Usage Maximum (0x05)
-    0x15, 0x00,        //     Logical Minimum (0)
-    0x25, 0x01,        //     Logical Maximum (1)
-    0x95, 0x05,        //     Report Count (5)
-    0x75, 0x01,        //     Report Size (1)
-    0x81, 0x02,        //     Input (Data,Var,Abs)
-    0x95, 0x01,        //     Report Count (1)
-    0x75, 0x03,        //     Report Size (3)
-    0x81, 0x03,        //     Input (Const,Var,Abs)
-    0x05, 0x01,        //     Usage Page (Generic Desktop Ctrls)
-    0x09, 0x30,        //     Usage (X)
-    0x09, 0x31,        //     Usage (Y)
-    0x16, 0x00, 0x00,  //     Logical Minimum (0)
-    0x26, 0xFF, 0x7F,  //     Logical Maximum (32767)
-    0x36, 0x00, 0x00,  //     Physical Minimum (0)
-    0x46, 0xFF, 0x7F,  //     Physical Maximum (32767)
-    0x75, 0x10,        //     Report Size (16 bits = 2 bytes per axis)
-    0x95, 0x02,        //     Report Count (2 = X, Y)
-    0x81, 0x02,        //     Input (Data,Var,Abs)
-    0x05, 0x01,        //     Usage Page (Generic Desktop Ctrls)
-    0x09, 0x38,        //     Usage (Wheel)
-    0x15, 0x81,        //     Logical Minimum (-127)
-    0x25, 0x7F,        //     Logical Maximum (127)
-    0x75, 0x08,        //     Report Size (8)
-    0x95, 0x01,        //     Report Count (1)
-    0x81, 0x06,        //     Input (Data,Var,Rel)
-    0x05, 0x0C,        //     Usage Page (Consumer)
-    0x0A, 0x38, 0x02,  //     Usage (AC Pan)
-    0x15, 0x81,        //     Logical Minimum (-127)
-    0x25, 0x7F,        //     Logical Maximum (127)
-    0x75, 0x08,        //     Report Size (8)
-    0x95, 0x01,        //     Report Count (1)
-    0x81, 0x06,        //     Input (Data,Var,Rel)
-    0xC0,              //   End Collection
+    0x05, 0x01,        //   Usage Page (Generic Desktop Ctrls)
+    0x09, 0x30,        //   Usage (X)
+    0x09, 0x31,        //   Usage (Y)
+    0x16, 0x00, 0x00,  //   Logical Minimum (0)
+    0x26, 0xFF, 0x7F,  //   Logical Maximum (32767)
+    0x75, 0x10,        //   Report Size (16)
+    0x95, 0x02,        //   Report Count (2: X, Y)
+    0x81, 0x02,        //   Input (Data,Var,Abs)
+    0xC0,              // End Collection
+
+    // --- REPORT ID 5: Absolute Digitizer Pen (for macOS / iPadOS primary screen transitions) ---
+    0x05, 0x0D,        // Usage Page (Digitizers)
+    0x09, 0x02,        // Usage (Pen)
+    0xA1, 0x01,        // Collection (Application)
+    0x85, 0x05,        //   Report ID (5)
+    0x09, 0x42,        //   Usage (Tip Switch)
+    0x09, 0x32,        //   Usage (In Range)
+    0x15, 0x00,        //   Logical Minimum (0)
+    0x25, 0x01,        //   Logical Maximum (1)
+    0x75, 0x01,        //   Report Size (1)
+    0x95, 0x02,        //   Report Count (2: Tip Switch, In Range)
+    0x81, 0x02,        //   Input (Data,Var,Abs)
+    0x75, 0x06,        //   Report Size (6)
+    0x95, 0x01,        //   Report Count (1: Padding)
+    0x81, 0x03,        //   Input (Const,Var,Abs)
+    0x05, 0x01,        //   Usage Page (Generic Desktop Ctrls)
+    0x09, 0x30,        //   Usage (X)
+    0x09, 0x31,        //   Usage (Y)
+    0x16, 0x00, 0x00,  //   Logical Minimum (0)
+    0x26, 0xFF, 0x7F,  //   Logical Maximum (32767)
+    0x75, 0x10,        //   Report Size (16)
+    0x95, 0x02,        //   Report Count (2: X, Y)
+    0x81, 0x02,        //   Input (Data,Var,Abs)
     0xC0,              // End Collection
 
     // --- REPORT ID 4: Consumer Control (Media Keys) ---
@@ -361,7 +362,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         }
         
         for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
-            if (kvmClients[i].conn_id == desc->conn_handle || (kvmClients[i].mac.length() > 0 && kvmClients[i].mac.equals(peerMac))) {
+            if (kvmClients[i].conn_id == desc->conn_handle || kvmClients[i].mac.equals(peerMac)) {
                 kvmClients[i].active = false;
                 break;
             }
@@ -481,7 +482,7 @@ void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8
 }
 
 // --- Absolute HID Positioning Function ---
-void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel = "ABS POINTER") {
+void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
     if (monitorCount == 0) return;
 
     MonitorConfig& targetMon = monitors[monIndex];
@@ -509,19 +510,28 @@ void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGloba
     uint16_t absX = (uint16_t)round(((float)relX / (float)pcTotalW) * 32767.0f);
     uint16_t absY = (uint16_t)round(((float)relY / (float)pcTotalH) * 32767.0f);
 
-    uint8_t absReport[7] = {
-        0x00,                               // Buttons
-        (uint8_t)(absX & 0xFF),             // X Low
-        (uint8_t)((absX >> 8) & 0xFF),      // X High
-        (uint8_t)(absY & 0xFF),             // Y Low
-        (uint8_t)((absY >> 8) & 0xFF),      // Y High
-        0x00,                               // Wheel
-        0x00                                // AC Pan
-    };
-
-    sendHidReport(absInputChar, connHandle, absReport, sizeof(absReport));
-    logPrint("[%s] Instantly positioned PC %s at (%ld, %ld) [Rel: %ld, %ld in %ldx%ld -> Norm: %u, %u] on Mon #%d (%s)",
-             contextLabel, targetMac.c_str(), targetGlobalX, targetGlobalY, relX, relY, pcTotalW, pcTotalH, absX, absY, targetMon.id, targetMon.name.c_str());
+    if (targetMon.os == OS_MAC) {
+        uint8_t absReport[5] = {
+            0x02,
+            (uint8_t)(absX & 0xFF),
+            (uint8_t)((absX >> 8) & 0xFF),
+            (uint8_t)(absY & 0xFF),
+            (uint8_t)((absY >> 8) & 0xFF)
+        };
+        sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
+        logPrint("[%s] Sent macOS digitizer position to PC %s at (%ld, %ld) [Norm: %u, %u] on Mon #%d (%s)",
+                 contextLabel, targetMac.c_str(), targetGlobalX, targetGlobalY, absX, absY, targetMon.id, targetMon.name.c_str());
+    } else {
+        uint8_t absReport[4] = {
+            (uint8_t)(absX & 0xFF),
+            (uint8_t)((absX >> 8) & 0xFF),
+            (uint8_t)(absY & 0xFF),
+            (uint8_t)((absY >> 8) & 0xFF)
+        };
+        sendHidReport(absInputChar, connHandle, absReport, sizeof(absReport));
+        logPrint("[%s] Sent Windows absolute position to PC %s at (%ld, %ld) [Norm: %u, %u] on Mon #%d (%s)",
+                 contextLabel, targetMac.c_str(), targetGlobalX, targetGlobalY, absX, absY, targetMon.id, targetMon.name.c_str());
+    }
 }
 
 // --- Boot Center Calibration Wrapper ---
@@ -1311,6 +1321,7 @@ void loadConfiguration() {
           monitors[monitorCount].width = repo["width"] | 1920;
           monitors[monitorCount].height = repo["height"] | 1080;
           monitors[monitorCount].mac = repo["mac"] | "";
+          monitors[monitorCount].os = repo["os"] | OS_WINDOWS;
           monitors[monitorCount].scale = repo["scale"] | 100;
           monitors[monitorCount].isPrimary = repo["isPrimary"] | false;
           monitorCount++;
@@ -1633,7 +1644,7 @@ void setup() {
     logPrint("[BLE] Initializing NimBLE...");
     uint8_t customMac[6];
     esp_read_mac(customMac, ESP_MAC_BT);
-    customMac[5] += 7; // Increment to present fresh combo device identity to all PCs so OS binds clean Keyboard+Mouse driver
+    customMac[5] += 15; // Increment to present fresh combo device identity to all PCs so OS binds clean Keyboard+Mouse driver
     esp_base_mac_addr_set(customMac);
     logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
              customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);
@@ -1661,6 +1672,7 @@ void setup() {
     keyboardOutputChar = hidDevice->outputReport(1); // Report ID 1: Keyboard LEDs (Output)
     inputChar = hidDevice->inputReport(2);         // Report ID 2: Relative Mouse
     absInputChar = hidDevice->inputReport(3);      // Report ID 3: Absolute Mouse / Pointer
+    macAbsInputChar = hidDevice->inputReport(5);   // Report ID 5: macOS / iPadOS Digitizer
     mediaInputChar = hidDevice->inputReport(4);    // Report ID 4: Media / Consumer Keys
     
     hidDevice->manufacturer()->setValue("Logitech");

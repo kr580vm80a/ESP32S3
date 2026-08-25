@@ -135,18 +135,23 @@ const uint8_t hidReportMap[] = {
     0x05, 0x01,        //     Usage Page (Generic Desktop Ctrls)
     0x09, 0x30,        //     Usage (X)
     0x09, 0x31,        //     Usage (Y)
+    0x16, 0x01, 0x80,  //     Logical Minimum (-32767)
+    0x26, 0xFF, 0x7F,  //     Logical Maximum (32767)
+    0x75, 0x10,        //     Report Size (16)
+    0x95, 0x02,        //     Report Count (2: X, Y)
+    0x81, 0x06,        //     Input (Data,Var,Rel)
     0x09, 0x38,        //     Usage (Wheel)
     0x15, 0x81,        //     Logical Minimum (-127)
     0x25, 0x7F,        //     Logical Maximum (127)
     0x75, 0x08,        //     Report Size (8)
-    0x95, 0x03,        //     Report Count (3)
+    0x95, 0x01,        //     Report Count (1: Wheel)
     0x81, 0x06,        //     Input (Data,Var,Rel)
     0x05, 0x0C,        //     Usage Page (Consumer)
     0x0A, 0x38, 0x02,  //     Usage (AC Pan)
     0x15, 0x81,        //     Logical Minimum (-127)
     0x25, 0x7F,        //     Logical Maximum (127)
     0x75, 0x08,        //     Report Size (8)
-    0x95, 0x01,        //     Report Count (1)
+    0x95, 0x01,        //     Report Count (1: AC Pan)
     0x81, 0x06,        //     Input (Data,Var,Rel)
     0xC0,              //   End Collection
     0xC0,              // End Collection
@@ -438,7 +443,7 @@ uint16_t getTargetConnHandle(const String& targetMac) {
 }
 
 // Send HID report to target connection handle or broadcast notify
-void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8_t* report, size_t length = 5) {
+void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8_t* report, size_t length = 7) {
     if (!pChar || !report || length == 0) return;
     if (connHandle != BLE_HS_CONN_HANDLE_NONE) {
         os_mbuf *om = ble_hs_mbuf_from_flat(report, length);
@@ -548,7 +553,15 @@ void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targ
     logPrint("Window jump position at (%ld, %ld)", jumpX, jumpY);
 
     if (stepX != 0 || stepY != 0) {
-        uint8_t report[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
+        uint8_t report[7] = {
+            0,
+            (uint8_t)(stepX & 0xFF),
+            (uint8_t)((stepX >> 8) & 0xFF),
+            (uint8_t)(stepY & 0xFF),
+            (uint8_t)((stepY >> 8) & 0xFF),
+            0,
+            0
+        };
         sendHidReport(inputChar, connHandle, report, sizeof(report));
         logPrint("Window step position at (%ld, %ld)", stepX, stepY);
     }
@@ -556,14 +569,16 @@ void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targ
     int32_t deltaX = targetGlobalX - jumpX;
     int32_t deltaY = targetGlobalY - jumpY;
     logPrint("Window move at (%ld, %ld)", deltaX, deltaY);
-    while (deltaX || deltaY) {
-        int16_t stepX = constrain(deltaX, -127, 127);
-        int16_t stepY = constrain(deltaY, -127, 127);
-        uint8_t report[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
-        sendHidReport(inputChar, connHandle, report, sizeof(report));
-        deltaX -= stepX;
-        deltaY -= stepY;
-    }
+    uint8_t report[7] = {
+        0,
+        (uint8_t)(deltaX & 0xFF),
+        (uint8_t)((deltaX >> 8) & 0xFF),
+        (uint8_t)(deltaY & 0xFF),
+        (uint8_t)((deltaY >> 8) & 0xFF),
+        0,
+        0
+    };
+    sendHidReport(inputChar, connHandle, report, sizeof(report));
 }
 
 // --- Absolute HID Positioning Function ---
@@ -582,17 +597,21 @@ void sendAbsoluteCoordinatesMacOs(uint16_t connHandle, int monIndex, long target
         }
     }
 
-    uint8_t anchorReport[5] = { 0, 0, 0, 0, 0 };
+    uint8_t anchorReport[7] = { 0, 0, 0, 0, 0, 0, 0 };
     if (targetMon.y >= maxOtherY && maxOtherY > minOtherY) {
         // Target is bottom monitor (Retina) -> send rapid burst DOWN to force focus to bottom screen
-        anchorReport[2] = 127; // dY = +127 (down)
-        for (int k = 0; k < 6; k++) {
+        int16_t dY = 500;
+        anchorReport[3] = (uint8_t)(dY & 0xFF);
+        anchorReport[4] = (uint8_t)((dY >> 8) & 0xFF);
+        for (int k = 0; k < 3; k++) {
             sendHidReport(inputChar, connHandle, anchorReport, sizeof(anchorReport));
         }
     } else if (targetMon.y <= minOtherY && maxOtherY > minOtherY) {
         // Target is top monitor (DELL) -> send rapid burst UP to force focus to top screen
-        anchorReport[2] = (uint8_t)(-127); // dY = -127 (up)
-        for (int k = 0; k < 6; k++) {
+        int16_t dY = -500;
+        anchorReport[3] = (uint8_t)(dY & 0xFF);
+        anchorReport[4] = (uint8_t)((dY >> 8) & 0xFF);
+        for (int k = 0; k < 3; k++) {
             sendHidReport(inputChar, connHandle, anchorReport, sizeof(anchorReport));
         }
     }
@@ -740,13 +759,15 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         resetSubpixelAccumulators();
     }
 
-    // Send Standard HID Report (5 bytes: Buttons, dX, dY, VScroll, HScroll)
-    uint8_t report[5] = { 
-        buttons, 
-        (uint8_t)constrain(sendDx, -127, 127),
-        (uint8_t)constrain(sendDy, -127, 127),
-        (uint8_t)constrain(scroll, -127, 127),
-        (uint8_t)constrain(hScroll, -127, 127)
+    // Send 16-bit Relative HID Mouse Report (7 bytes: Buttons, dX_low, dX_high, dY_low, dY_high, VScroll, HScroll)
+    uint8_t report[7] = { 
+        buttons,
+        (uint8_t)(sendDx & 0xFF),
+        (uint8_t)((sendDx >> 8) & 0xFF),
+        (uint8_t)(sendDy & 0xFF),
+        (uint8_t)((sendDy >> 8) & 0xFF),
+        (uint8_t)constrain(scroll, -127, 127), 
+        (uint8_t)constrain(hScroll, -127, 127) 
     };
     sendHidReport(inputChar, connHandle, report, sizeof(report));
 }
@@ -1726,7 +1747,7 @@ void setup() {
     logPrint("[BLE] Initializing NimBLE...");
     uint8_t customMac[6];
     esp_read_mac(customMac, ESP_MAC_BT);
-    customMac[5] += 21; // Increment to present fresh combo device identity to all PCs so OS binds clean Keyboard+Mouse driver
+    customMac[5] += 22; // Increment to present fresh combo device identity to all PCs so OS binds clean Keyboard+Mouse driver
     esp_base_mac_addr_set(customMac);
     logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
              customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);

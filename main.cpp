@@ -33,8 +33,6 @@ struct MonitorConfig {
     int os = OS_WINDOWS;
     int scale = 100;
     bool isPrimary = false;
-    int lastX = 0;
-    int lastY = 0;
 };
 
 #define MAX_MONITORS 10
@@ -168,19 +166,18 @@ const uint8_t hidReportMap[] = {
     0x81, 0x02,        //   Input (Data,Var,Abs)
     0xC0,              // End Collection
 
-    // --- REPORT ID 5: Absolute Digitizer Pen (for macOS / iPadOS primary screen transitions) ---
+    // --- REPORT ID 5: Absolute Digitizer Pen (for macOS / iPadOS transitions) ---
     0x05, 0x0D,        // Usage Page (Digitizers)
     0x09, 0x02,        // Usage (Pen)
     0xA1, 0x01,        // Collection (Application)
     0x85, 0x05,        //   Report ID (5)
-    0x09, 0x42,        //   Usage (Tip Switch)
     0x09, 0x32,        //   Usage (In Range)
     0x15, 0x00,        //   Logical Minimum (0)
     0x25, 0x01,        //   Logical Maximum (1)
     0x75, 0x01,        //   Report Size (1)
-    0x95, 0x02,        //   Report Count (2: Tip Switch, In Range)
+    0x95, 0x01,        //   Report Count (In Range)
     0x81, 0x02,        //   Input (Data,Var,Abs)
-    0x75, 0x06,        //   Report Size (6)
+    0x75, 0x07,        //   Report Size (7)
     0x95, 0x01,        //   Report Count (1: Padding)
     0x81, 0x03,        //   Input (Const,Var,Abs)
     0x05, 0x01,        //   Usage Page (Generic Desktop Ctrls)
@@ -188,6 +185,8 @@ const uint8_t hidReportMap[] = {
     0x09, 0x31,        //   Usage (Y)
     0x16, 0x00, 0x00,  //   Logical Minimum (0)
     0x26, 0xFF, 0x7F,  //   Logical Maximum (32767)
+    0x36, 0x00, 0x00,  //   Physical Minimum (0)
+    0x46, 0xFF, 0x7F,  //   Physical Maximum (32767)
     0x75, 0x10,        //   Report Size (16)
     0x95, 0x02,        //   Report Count (2: X, Y)
     0x81, 0x02,        //   Input (Data,Var,Abs)
@@ -379,32 +378,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
 
             if (fallbackMac.length() > 0) {
-                int targetMonIdx = -1;
-                for (int i = 0; i < monitorCount; i++) {
-                    if (monitors[i].isPrimary && monitors[i].mac.equals(fallbackMac)) {
-                        targetMonIdx = i;
-                        break;
-                    }
-                }
-
-                if (targetMonIdx != -1) {
-                    currentMonitorIndex = targetMonIdx;
-                    MonitorConfig& mon = monitors[targetMonIdx];
-                    if (mon.lastX >= mon.x && mon.lastX < mon.x + mon.width &&
-                        mon.lastY >= mon.y && mon.lastY < mon.y + mon.height) {
-                        virtualX = mon.lastX;
-                        virtualY = mon.lastY;
-                    } else {
-                        virtualX = mon.x + (mon.width / 2);
-                        virtualY = mon.y + (mon.height / 2);
-                    }
-                    mon.lastX = virtualX;
-                    mon.lastY = virtualY;
-                    resetSubpixelAccumulators();
-
-                    logPrint("[FAILOVER] Current PC %s disconnected! Switched control to active PC %s (Mon #%d: %s at %ld, %ld)",
-                             peerMac.c_str(), fallbackMac.c_str(), mon.id, mon.name.c_str(), virtualX, virtualY);
-                }
+                calibrateFirstConnectedPcToCenter(fallbackMac);
+                logPrint("[FAILOVER] Current PC %s disconnected! Switched control to active PC %s (Cursor at %ld, %ld)", peerMac.c_str(), fallbackMac.c_str(), virtualX, virtualY);
             } else {
                 logPrint("[FAILOVER] Current PC %s disconnected and no other active PC available.", peerMac.c_str());
             }
@@ -454,7 +429,6 @@ String getMonDisplayName(int idx) {
 }
 
 uint16_t getTargetConnHandle(const String& targetMac) {
-    // 1. Direct MAC address match
     for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
         if (kvmClients[i].active && kvmClients[i].mac.equals(targetMac)) {
             return kvmClients[i].conn_id;
@@ -481,47 +455,35 @@ void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8
     }
 }
 
-// --- Absolute HID Positioning Function ---
-void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
-    if (monitorCount == 0) return;
+void sendAbsPosWindows(uint16_t connHandle, uint16_t absX, uint16_t absY) {
+    uint8_t absReport[4] = {
+        (uint8_t)(absX & 0xFF),
+        (uint8_t)((absX >> 8) & 0xFF),
+        (uint8_t)(absY & 0xFF),
+        (uint8_t)((absY >> 8) & 0xFF)
+    };
+    sendHidReport(absInputChar, connHandle, absReport, sizeof(absReport));
+    logPrint("Sent Window position at (%ld, %ld), Virtual: (%ld, %ld)", absX, absY, virtualX, virtualY);
+}
 
-    MonitorConfig& targetMon = monitors[monIndex];
-    String targetMac = targetMon.mac;
-
-    // Calculate total bounding box of the target PC's multi-monitor desktop
-    long pcMinX = LONG_MAX, pcMinY = LONG_MAX;
-    long pcMaxX = LONG_MIN, pcMaxY = LONG_MIN;
+MonitorConfig& primaryMonitor(const String& targetMac) {
+    int primaryIndex = 0;
     for (int i = 0; i < monitorCount; i++) {
-        if (monitors[i].mac.equals(targetMac)) {
-            if (monitors[i].x < pcMinX) pcMinX = monitors[i].x;
-            if (monitors[i].y < pcMinY) pcMinY = monitors[i].y;
-            if (monitors[i].x + monitors[i].width > pcMaxX) pcMaxX = monitors[i].x + monitors[i].width;
-            if (monitors[i].y + monitors[i].height > pcMaxY) pcMaxY = monitors[i].y + monitors[i].height;
+        if (monitors[i].isPrimary && monitors[i].mac.equals(targetMac)) {
+            primaryIndex = i;
+            break;
         }
     }
-    long pcTotalW = pcMaxX - pcMinX;
-    long pcTotalH = pcMaxY - pcMinY;
-    if (pcTotalW <= 0) pcTotalW = (targetMon.width > 0) ? targetMon.width : 1920;
-    if (pcTotalH <= 0) pcTotalH = (targetMon.height > 0) ? targetMon.height : 1080;
+    return monitors[primaryIndex];
+}
 
-    long relX = constrain(targetGlobalX - pcMinX, 0, pcTotalW);
-    long relY = constrain(targetGlobalY - pcMinY, 0, pcTotalH);
-
-    uint16_t absX = (uint16_t)round(((float)relX / (float)pcTotalW) * 32767.0f);
-    uint16_t absY = (uint16_t)round(((float)relY / (float)pcTotalH) * 32767.0f);
-
-    if (targetMon.os == OS_MAC) {
-        uint8_t absReport[5] = {
-            0x02,
-            (uint8_t)(absX & 0xFF),
-            (uint8_t)((absX >> 8) & 0xFF),
-            (uint8_t)(absY & 0xFF),
-            (uint8_t)((absY >> 8) & 0xFF)
-        };
-        sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
-        logPrint("[%s] Sent macOS digitizer position to PC %s at (%ld, %ld) [Norm: %u, %u] on Mon #%d (%s)",
-                 contextLabel, targetMac.c_str(), targetGlobalX, targetGlobalY, absX, absY, targetMon.id, targetMon.name.c_str());
-    } else {
+void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
+    MonitorConfig& targetMon = monitors[monIndex];
+    if (targetMon.isPrimary) {
+        long relX = constrain(targetGlobalX - targetMon.x, 0, targetMon.width);
+        long relY = constrain(targetGlobalY - targetMon.y, 0, targetMon.height);
+        uint16_t absX = (uint16_t)round(((float)relX / (float)targetMon.width) * 32767.0f);
+        uint16_t absY = (uint16_t)round(((float)relY / (float)targetMon.height) * 32767.0f);
         uint8_t absReport[4] = {
             (uint8_t)(absX & 0xFF),
             (uint8_t)((absX >> 8) & 0xFF),
@@ -529,8 +491,133 @@ void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGloba
             (uint8_t)((absY >> 8) & 0xFF)
         };
         sendHidReport(absInputChar, connHandle, absReport, sizeof(absReport));
-        logPrint("[%s] Sent Windows absolute position to PC %s at (%ld, %ld) [Norm: %u, %u] on Mon #%d (%s)",
-                 contextLabel, targetMac.c_str(), targetGlobalX, targetGlobalY, absX, absY, targetMon.id, targetMon.name.c_str());
+        logPrint("[%s] Sent Windows position to PC %s at (%ld, %ld) [Rel: %ld, %ld -> Norm: %u, %u] on Mon #%d (%s)",
+                contextLabel, targetMon.mac.c_str(), targetGlobalX, targetGlobalY, relX, relY, absX, absY, targetMon.id, targetMon.name.c_str());
+        return;
+    }
+    MonitorConfig& primaryMon = primaryMonitor(targetMon.mac);
+    int shift = 20;
+    int jumpX = 0;
+    int jumpY = 0;
+    int stepX = 0;
+    int stepY = 0;
+    if (targetGlobalY < primaryMon.y - 1 - shift) {
+        jumpY = primaryMon.y;
+        if (targetGlobalX < (primaryMon.x + shift)) {
+            // use top left corner
+            jumpX = primaryMon.x + shift;
+            stepY = -1;
+        } else if (targetGlobalX > (primaryMon.x + primaryMon.width - 1 - shift)) {
+            // use top right corner
+            jumpX = primaryMon.x + primaryMon.width - 1 - shift;
+            stepY = -1;
+        } else {
+            // use top middle
+            jumpX = targetGlobalX;
+            jumpY = primaryMon.y;
+        }
+    } else if (targetGlobalY > (primaryMon.y + primaryMon.height + shift)) {
+        jumpY = primaryMon.y + primaryMon.height - 1;
+        if (targetGlobalX < (primaryMon.x + shift)) {
+            // use bottom left corner
+            jumpX = primaryMon.x + shift;
+            stepY = 1;
+        } else if (targetGlobalX > (primaryMon.x + primaryMon.width - 1 - shift)) {
+            // use bottom right corner
+            jumpX = primaryMon.x + primaryMon.width - 1 - shift;
+            stepY = 1;
+        } else {
+            // use bottom middle
+            jumpX = targetGlobalX;
+            jumpY = primaryMon.y + primaryMon.height - 1;
+        }
+    } else {
+        if (targetGlobalX < primaryMon.x) {
+            jumpX = primaryMon.x;
+            stepX = -1;
+        } else {
+            jumpX = primaryMon.x + primaryMon.width - 1;
+            stepX = 1;
+        }
+        jumpY = primaryMon.y + (primaryMon.height / 2);
+    }
+
+    uint16_t absX = (uint16_t)round(((float)(jumpX - primaryMon.x) / (float)primaryMon.width) * 32767.0f);
+    uint16_t absY = (uint16_t)round(((float)(jumpY - primaryMon.y) / (float)primaryMon.height) * 32767.0f);
+    sendAbsPosWindows(connHandle, absX, absY);
+    logPrint("Window jump position at (%ld, %ld)", jumpX, jumpY);
+
+    if (stepX != 0 || stepY != 0) {
+        uint8_t report[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
+        sendHidReport(inputChar, connHandle, report, sizeof(report));
+        logPrint("Window step position at (%ld, %ld)", stepX, stepY);
+    }
+
+    int32_t deltaX = targetGlobalX - jumpX;
+    int32_t deltaY = targetGlobalY - jumpY;
+    logPrint("Window move at (%ld, %ld)", deltaX, deltaY);
+    while (deltaX || deltaY) {
+        int16_t stepX = constrain(deltaX, -127, 127);
+        int16_t stepY = constrain(deltaY, -127, 127);
+        uint8_t report[5] = { 0, (uint8_t)stepX, (uint8_t)stepY, 0, 0 };
+        sendHidReport(inputChar, connHandle, report, sizeof(report));
+        deltaX -= stepX;
+        deltaY -= stepY;
+    }
+}
+
+// --- Absolute HID Positioning Function ---
+void sendAbsoluteCoordinatesMacOs(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
+    MonitorConfig& targetMon = monitors[monIndex];
+    long relX = constrain(targetGlobalX - targetMon.x, 0, targetMon.width);
+    long relY = constrain(targetGlobalY - targetMon.y, 0, targetMon.height);
+    uint16_t absX = (uint16_t)round(((float)relX / (float)targetMon.width) * 32767.0f);
+    uint16_t absY = (uint16_t)round(((float)relY / (float)targetMon.height) * 32767.0f);
+    long maxOtherY = targetMon.y;
+    long minOtherY = targetMon.y;
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equals(targetMon.mac)) {
+            if (monitors[i].y > maxOtherY) maxOtherY = monitors[i].y;
+            if (monitors[i].y < minOtherY) minOtherY = monitors[i].y;
+        }
+    }
+
+    uint8_t anchorReport[5] = { 0, 0, 0, 0, 0 };
+    if (targetMon.y >= maxOtherY && maxOtherY > minOtherY) {
+        // Target is bottom monitor (Retina) -> send rapid burst DOWN to force focus to bottom screen
+        anchorReport[2] = 127; // dY = +127 (down)
+        for (int k = 0; k < 6; k++) {
+            sendHidReport(inputChar, connHandle, anchorReport, sizeof(anchorReport));
+        }
+    } else if (targetMon.y <= minOtherY && maxOtherY > minOtherY) {
+        // Target is top monitor (DELL) -> send rapid burst UP to force focus to top screen
+        anchorReport[2] = (uint8_t)(-127); // dY = -127 (up)
+        for (int k = 0; k < 6; k++) {
+            sendHidReport(inputChar, connHandle, anchorReport, sizeof(anchorReport));
+        }
+    }
+
+    uint8_t absReport[5] = {
+        0x01,                               // In Range = ON
+        (uint8_t)(absX & 0xFF),
+        (uint8_t)((absX >> 8) & 0xFF),
+        (uint8_t)(absY & 0xFF),
+        (uint8_t)((absY >> 8) & 0xFF)
+    };
+    sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
+    absReport[0] = 0x00;                    // In Range = OFF (release hover)
+    sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
+    logPrint("[%s] Sent macOS digitizer position to PC %s at (%ld, %ld) [Rel: %ld, %ld -> Norm: %u, %u] on Mon #%d (%s)",
+                contextLabel, targetMon.mac.c_str(), targetGlobalX, targetGlobalY, relX, relY, absX, absY, targetMon.id, targetMon.name.c_str());
+}
+
+// --- Absolute HID Positioning Function ---
+void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
+    if (monitorCount == 0) return;
+    if (monitors[monIndex].os == OS_MAC) {
+        sendAbsoluteCoordinatesMacOs(connHandle, monIndex, targetGlobalX, targetGlobalY, contextLabel);
+    } else {
+        sendAbsoluteCoordinatesWindows(connHandle, monIndex, targetGlobalX, targetGlobalY, contextLabel);
     }
 }
 
@@ -540,14 +627,13 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
     uint16_t connHandle = getTargetConnHandle(targetMac);
     if (connHandle == BLE_HS_CONN_HANDLE_NONE) return;
 
-    int currentMonitorIndex = -1;
+    currentMonitorIndex = 0;
     for (int i = 0; i < monitorCount; i++) {
         if (monitors[i].isPrimary && monitors[i].mac.equals(targetMac)) {
             currentMonitorIndex = i;
             break;
         }
     }
-    if (currentMonitorIndex == -1) currentMonitorIndex = 0;
     MonitorConfig& mon = monitors[currentMonitorIndex];
     virtualX = mon.x + (mon.width / 2);
     virtualY = mon.y + (mon.height / 2);
@@ -560,6 +646,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     if (monitorCount == 0) return;
 
     MonitorConfig& currentMon = monitors[currentMonitorIndex];
+    uint16_t connHandle = getTargetConnHandle(currentMon.mac);
     int16_t sendDx = dx;
     int16_t sendDy = dy;
 
@@ -641,16 +728,13 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             } else {
                 monitorEdgeCalibration(1);
                 // Send safe key release to old PC so no keys remain stuck
-                uint16_t oldConn = getTargetConnHandle(currentMon.mac);
-                if (oldConn != BLE_HS_CONN_HANDLE_NONE && keyboardInputChar) {
+                if (keyboardInputChar) {
                     uint8_t keyRelease[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-                    sendHidReport(keyboardInputChar, oldConn, keyRelease, sizeof(keyRelease));
+                    sendHidReport(keyboardInputChar, connHandle, keyRelease, sizeof(keyRelease));
                 }
-                monitors[currentMonitorIndex].lastX = virtualX;
-                monitors[currentMonitorIndex].lastY = virtualY;
                 currentMonitorIndex = newMonitorIndex;
                 logPrint("[PC SWITCH] Cursor saved at (%ld, %ld)", virtualX, virtualY);
-                sendAbsoluteCoordinates(targetConn, newMonitorIndex, virtualX, virtualY, "KVM SWITCH");
+                sendAbsoluteCoordinates(targetConn, newMonitorIndex, virtualX, virtualY, "PC SWITCH");
             }
         }
         resetSubpixelAccumulators();
@@ -664,8 +748,6 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
         (uint8_t)constrain(scroll, -127, 127),
         (uint8_t)constrain(hScroll, -127, 127)
     };
-
-    uint16_t connHandle = getTargetConnHandle(currentMon.mac);
     sendHidReport(inputChar, connHandle, report, sizeof(report));
 }
 
@@ -1644,7 +1726,7 @@ void setup() {
     logPrint("[BLE] Initializing NimBLE...");
     uint8_t customMac[6];
     esp_read_mac(customMac, ESP_MAC_BT);
-    customMac[5] += 15; // Increment to present fresh combo device identity to all PCs so OS binds clean Keyboard+Mouse driver
+    customMac[5] += 21; // Increment to present fresh combo device identity to all PCs so OS binds clean Keyboard+Mouse driver
     esp_base_mac_addr_set(customMac);
     logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
              customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);

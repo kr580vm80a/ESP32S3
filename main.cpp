@@ -56,8 +56,9 @@ struct KVMClient {
   String name;
   bool active;
 };
-#define MAX_KVM_CLIENTS 2
-KVMClient kvmClients[MAX_KVM_CLIENTS];
+#define MAX_SUPPORTED_KVM_CLIENTS 10
+KVMClient kvmClients[MAX_SUPPORTED_KVM_CLIENTS];
+int maxKvmClients = 2; // Dynamic variable based on number of PCs in current configuration
 static TaskHandle_t bootCalibTaskHandle = NULL;
 uint16_t getTargetConnHandle(const String& targetMac);
 
@@ -298,7 +299,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         
         // Save connection
         bool updated = false;
-        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        for (int i = 0; i < maxKvmClients; i++) {
             if (kvmClients[i].mac.equals(peerMac)) {
                 kvmClients[i].conn_id = desc->conn_handle;
                 kvmClients[i].active = true;
@@ -307,7 +308,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
         }
         if (!updated) {
-            for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+            for (int i = 0; i < maxKvmClients; i++) {
                 if (!kvmClients[i].active) {
                     kvmClients[i].conn_id = desc->conn_handle;
                     kvmClients[i].mac = peerMac;
@@ -320,7 +321,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
         // Count active connections
         int activeCount = 0;
-        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        for (int i = 0; i < maxKvmClients; i++) {
             if (kvmClients[i].active) activeCount++;
         }
 
@@ -341,8 +342,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }, "bootCalibTask", 3072, new String(firstMac), 1, &bootCalibTaskHandle);
         }
 
-        // Resume advertising so 2nd PC can discover and connect
-        if (activeCount < MAX_KVM_CLIENTS) {
+        // Resume advertising so additional PCs can discover and connect
+        if (activeCount < maxKvmClients) {
             xTaskCreate([](void* param) {
                 vTaskDelay(pdMS_TO_TICKS(1500));
                 if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
@@ -365,7 +366,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             bootCalibTaskHandle = NULL;
         }
         
-        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        for (int i = 0; i < maxKvmClients; i++) {
             if (kvmClients[i].conn_id == desc->conn_handle || kvmClients[i].mac.equals(peerMac)) {
                 kvmClients[i].active = false;
                 break;
@@ -375,7 +376,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         // If the disconnected PC was the current active PC, failover to another connected PC!
         if (monitorCount > 0 && monitors[currentMonitorIndex].mac.equals(peerMac)) {
             String fallbackMac = "";
-            for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+            for (int i = 0; i < maxKvmClients; i++) {
                 if (kvmClients[i].active && kvmClients[i].mac.length() > 0 && !kvmClients[i].mac.equals(peerMac)) {
                     fallbackMac = kvmClients[i].mac;
                     break;
@@ -434,7 +435,7 @@ String getMonDisplayName(int idx) {
 }
 
 uint16_t getTargetConnHandle(const String& targetMac) {
-    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+    for (int i = 0; i < maxKvmClients; i++) {
         if (kvmClients[i].active && kvmClients[i].mac.equals(targetMac)) {
             return kvmClients[i].conn_id;
         }
@@ -810,7 +811,7 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
     uint16_t targetConn = getTargetConnHandle(monitors[currentMonitorIndex].mac);
     if (targetConn == BLE_HS_CONN_HANDLE_NONE) {
         // Fallback to any active connected PC if current monitor target is not matched
-        for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+        for (int i = 0; i < maxKvmClients; i++) {
             if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) {
                 targetConn = kvmClients[i].conn_id;
                 break;
@@ -1093,10 +1094,10 @@ bool connectToKeyboard() {
     isConnectingToKeyboard = false;
 
     int activeCount = 0;
-    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+    for (int i = 0; i < maxKvmClients; i++) {
         if (kvmClients[i].active) activeCount++;
     }
-    if (activeCount < MAX_KVM_CLIENTS && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+    if (activeCount < maxKvmClients && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
         NimBLEDevice::getAdvertising()->start();
     }
 
@@ -1206,10 +1207,10 @@ bool connectToServer() {
     isConnectingToMouse = false;
 
     int activeCount = 0;
-    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+    for (int i = 0; i < maxKvmClients; i++) {
         if (kvmClients[i].active) activeCount++;
     }
-    if (activeCount < MAX_KVM_CLIENTS && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
+    if (activeCount < maxKvmClients && NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
         logPrint("[BLE Server] Resuming advertising for additional PC...");
         NimBLEDevice::getAdvertising()->start();
     }
@@ -1430,22 +1431,80 @@ void loadConfiguration() {
           monitorCount++;
         }
       }
-      logPrint("Loaded %d monitors from NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
-               monitorCount, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
+      // Calculate distinct PCs from the loaded layout screens
+      int pcCount = 0;
+      String uniquePcMacs[MAX_SUPPORTED_KVM_CLIENTS];
+      for (int i = 0; i < monitorCount; i++) {
+        String mMac = monitors[i].mac;
+        mMac.toLowerCase();
+        mMac.trim();
+        if (mMac.length() > 0) {
+          bool found = false;
+          for (int p = 0; p < pcCount; p++) {
+            if (uniquePcMacs[p].equalsIgnoreCase(mMac)) {
+              found = true;
+              break;
+            }
+          }
+          if (!found && pcCount < MAX_SUPPORTED_KVM_CLIENTS) {
+            uniquePcMacs[pcCount++] = mMac;
+          }
+        }
+      }
 
+      // Also include doc["clients"] if present
+      if (doc["clients"].is<JsonArray>()) {
+        for (JsonObject client : doc["clients"].as<JsonArray>()) {
+          String cMac = client["mac"] | "";
+          cMac.toLowerCase();
+          cMac.trim();
+          if (cMac.length() > 0) {
+            bool found = false;
+            for (int p = 0; p < pcCount; p++) {
+              if (uniquePcMacs[p].equalsIgnoreCase(cMac)) {
+                found = true;
+                break;
+              }
+            }
+            if (!found && pcCount < MAX_SUPPORTED_KVM_CLIENTS) {
+              uniquePcMacs[pcCount++] = cMac;
+            }
+          }
+        }
+      }
+
+      // Dynamically update maxKvmClients based on current configuration
+      maxKvmClients = (pcCount > 0) ? pcCount : 2;
+
+      // Populate / update kvmClients array while preserving existing active connection handles
       if (doc["clients"].is<JsonArray>()) {
         int clientCount = 0;
         for (JsonObject client : doc["clients"].as<JsonArray>()) {
-          if (clientCount >= MAX_KVM_CLIENTS) break;
+          if (clientCount >= maxKvmClients) break;
           String mac = client["mac"] | "";
+          mac.toLowerCase();
+          mac.trim();
           if (mac.length() > 0) {
+            bool alreadyConnected = false;
+            uint16_t existingConn = BLE_HS_CONN_HANDLE_NONE;
+            for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+              if (kvmClients[k].mac.equalsIgnoreCase(mac) && kvmClients[k].active) {
+                alreadyConnected = true;
+                existingConn = kvmClients[k].conn_id;
+                break;
+              }
+            }
             kvmClients[clientCount].mac = mac;
             kvmClients[clientCount].name = client["name"] | "Unknown PC";
-            kvmClients[clientCount].active = false;
+            kvmClients[clientCount].conn_id = existingConn;
+            kvmClients[clientCount].active = alreadyConnected;
             clientCount++;
           }
         }
       }
+
+      logPrint("Loaded %d monitors, %d KVM PC clients (maxKvmClients = %d) from NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
+               monitorCount, pcCount, maxKvmClients, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
     }
   }
 }
@@ -1579,7 +1638,7 @@ void processCommand(String input) {
     }
 
     // Dynamic merge of active connected BLE clients into unified JSON
-    for (int i = 0; i < MAX_KVM_CLIENTS; i++) {
+    for (int i = 0; i < maxKvmClients; i++) {
       if (kvmClients[i].active && kvmClients[i].mac.length() > 0) {
         String activeMac = kvmClients[i].mac;
 

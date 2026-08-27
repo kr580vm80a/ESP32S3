@@ -380,14 +380,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         peerMac.trim();
         logPrint("[BLE Server] PC Connected! MAC: %s (conn_handle: %d | itvl: %d | latency: %d | timeout: %d)",
                   peerMac.c_str(), desc->conn_handle, desc->conn_itvl, desc->conn_latency, desc->supervision_timeout);
-        
-        // If this PC is NOT in the active layout and Config Mode is NOT active:
-        // Reject it to keep the radio channel free for active layout PCs!
-        if (getActiveLayoutPcCount() > 0 && !isMacInActiveLayout(peerMac) && !isConfigModeActive()) {
-            logPrint("[BLE Server] Rejected unconfigured PC %s (Not in active layout and Config Mode is inactive)", peerMac.c_str());
-            pServer->disconnect(desc->conn_handle);
-            return;
-        }
 
         // Save connection
         bool updated = false;
@@ -1441,17 +1433,15 @@ void sendConfigResponse(const String& response) {
 #endif
   if (configTxChar) {
     size_t len = fullResp.length();
-    uint16_t mtu = NimBLEDevice::getMTU();
-    size_t chunkSize = (mtu > 28) ? (mtu - 5) : 240;
-    if (chunkSize > 480) chunkSize = 480;
+    size_t chunkSize = 240; // Safe chunk size to avoid exhausting BLE packet memory
 
-    logPrint("[BLE TX] Sending %d bytes in %d-byte MTU chunks...", (int)len, (int)chunkSize);
+    logPrint("[BLE TX] Sending %d bytes in %d-byte chunks...", (int)len, (int)chunkSize);
 
     for (size_t i = 0; i < len; i += chunkSize) {
       String chunk = fullResp.substring(i, min(i + chunkSize, len));
       configTxChar->setValue((const uint8_t*)chunk.c_str(), chunk.length());
       configTxChar->notify();
-      delay(30);
+      vTaskDelay(pdMS_TO_TICKS(35)); // Yield CPU to IDLE task and let NimBLE host flush HCI buffers
     }
   }
 }
@@ -2034,15 +2024,13 @@ void setup() {
     esp_read_mac(customMac, ESP_MAC_BT);
     customMac[5] += 27; // Increment to present fresh identity to PCs so OS prompts for 6-digit PIN entry
     esp_base_mac_addr_set(customMac);
-    logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X (PC Pairing PIN: %06lu)",
-             customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5],
-             (unsigned long)BLE_PAIRING_PIN);
+    logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+             customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);
 
     NimBLEDevice::init(BLE_DEVICE_NAME);
     NimBLEDevice::setMTU(512);
-    NimBLEDevice::setSecurityAuth(true, true, true); // (bonding=true, mitm=true -> Enforces 6-digit PIN passkey, sc=true)
-    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY); // Display Only: Tells PC that ESP32 has display, prompting user for PIN
-    NimBLEDevice::setSecurityPasskey(BLE_PAIRING_PIN);
+    NimBLEDevice::setSecurityAuth(true, false, true); // (bonding=true, mitm=false -> Just Works, sc=true)
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT); // Standard Combo IO Capability
     NimBLEDevice::setSecurityCallbacks(new SecurityCallbacks());
     NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);

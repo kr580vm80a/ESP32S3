@@ -375,9 +375,9 @@
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"></path></svg>
       </button>
 
-      <!-- Material Icon Button: Scan BLE Mouse (Disabled when disconnected) -->
-      <button class="icon-btn" id="btnScanBleMouse" disabled onclick="toggleBleMouseModal(event)" title="Scan & Bind BLE Mouse" style="opacity: 0.4; cursor: not-allowed;">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v10a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z"></path><line x1="12" y1="6" x2="12" y2="10"></line></svg>
+      <!-- Material Icon Button: Scan BLE Peripherals (Disabled when disconnected) -->
+      <button class="icon-btn" id="btnScanBleMouse" disabled onclick="toggleBleMouseModal(event)" title="Scan & Bind Peripherals (Mouse / Keyboard)" style="opacity: 0.4; cursor: not-allowed;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="12" height="12" rx="2"></rect><path d="M5 9.5h.01M8.5 9.5h.01M5 14.5h5"></path><rect x="17" y="6" width="5" height="12" rx="2.5"></rect><line x1="19.5" y1="6" x2="19.5" y2="10"></line></svg>
       </button>
 
       <!-- Load Configuration from ESP32 Button (Disabled when disconnected) -->
@@ -485,12 +485,31 @@
     </div>
   </div>
 
-  <!-- Mouse Information Bar (Under Toolbar with clean spacing) -->
-  <div class="mouse-info-bar" id="mouseInfoBar" style="display: flex; align-items: center; gap: 6px; background: rgba(15, 23, 42, 0.85); border-bottom: 1px solid var(--border-color); padding: 5px 14px; font-size: 11px; flex-shrink: 0; margin-bottom: 4px; z-index: 90;">
-    <span style="font-weight: 700; color: var(--primary);">Mouse:</span>
-    <span id="mouseInfoText" style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">
-      <span style="color: #64748b;">Not Bound</span>
-    </span>
+  <!-- Peripheral Information Bar (Under Toolbar with clean spacing) -->
+  <div class="mouse-info-bar" id="mouseInfoBar" style="display: flex; align-items: center; justify-content: flex-start; gap: 16px; background: rgba(15, 23, 42, 0.85); border-bottom: 1px solid var(--border-color); padding: 5px 14px; font-size: 11px; flex-shrink: 0; margin-bottom: 4px; z-index: 90; flex-wrap: wrap;">
+    <!-- Mouse Info -->
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <span style="font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 4px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v10a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z"></path><line x1="12" y1="6" x2="12" y2="10"></line></svg>
+        Mouse:
+      </span>
+      <span id="mouseInfoText" style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">
+        <span style="color: #64748b;">Not Bound</span>
+      </span>
+    </div>
+    
+    <div style="width: 1px; height: 12px; background: var(--border-color);"></div>
+
+    <!-- Keyboard Info -->
+    <div style="display: flex; align-items: center; gap: 6px;">
+      <span style="font-weight: 700; color: #c084fc; display: flex; align-items: center; gap: 4px;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="6" y1="8" x2="6.01" y2="8"></line><line x1="10" y1="8" x2="10.01" y2="8"></line><line x1="14" y1="8" x2="14.01" y2="8"></line><line x1="18" y1="8" x2="18.01" y2="8"></line><line x1="6" y1="12" x2="6.01" y2="12"></line><line x1="18" y1="12" x2="18.01" y2="12"></line><line x1="10" y1="16" x2="14" y2="16"></line></svg>
+        Keyboard:
+      </span>
+      <span id="keyboardInfoText" style="font-family: 'JetBrains Mono', monospace; font-weight: 500;">
+        <span style="color: #64748b;">Not Bound</span>
+      </span>
+    </div>
   </div>
 
   <!-- Full Bleed Edge-to-Edge Layout Canvas Field -->
@@ -523,10 +542,10 @@
     </div>
   </div>
 
-  <!-- Floating BLE Mouse Scanner Modal (Direct Child of Body) -->
-  <div id="bleMouseModal" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 340px; max-height: 360px; overflow: hidden; z-index: 100000; padding: 8px;">
+  <!-- Floating BLE Peripheral Scanner Modal (Direct Child of Body) -->
+  <div id="bleMouseModal" onclick="event.stopPropagation()" style="display: none; position: fixed; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.4); box-shadow: 0 20px 40px rgba(0,0,0,0.8); border-radius: 10px; width: 380px; max-height: 420px; overflow: hidden; z-index: 100000; padding: 8px;">
     <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
-      <span>Scan BLE Mice</span>
+      <span>Scan & Bind Peripherals (Mouse / Keyboard)</span>
       <div style="display: flex; align-items: center; gap: 4px;">
         <button class="icon-btn" onclick="startBleMouseScan()" title="Rescan" style="width: 22px; height: 22px; color: #38bdf8;">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
@@ -535,15 +554,77 @@
       </div>
     </div>
     
-    <div id="boundMouseStatus" style="display: none; font-size: 10px; padding: 6px 8px; margin-bottom: 6px; background: rgba(52, 211, 153, 0.12); border: 1px solid rgba(52, 211, 153, 0.3); border-radius: 6px; color: #34d399; justify-content: space-between; align-items: center;">
-      <span id="boundMouseLabel" style="font-family: 'JetBrains Mono', monospace;">Bound: 00:00:00:00:00:00</span>
-      <button class="icon-btn icon-btn-danger" onclick="unbindTargetMouse()" title="Unlock / Unbind" style="width: 20px; height: 20px; color: #ef4444;">✕</button>
+    <!-- Bound Mouse Row -->
+    <div id="boundMouseStatus" style="display: flex; font-size: 10px; padding: 5px 8px; margin-bottom: 4px; background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 6px; color: #38bdf8; justify-content: space-between; align-items: center;">
+      <span id="boundMouseLabel" style="font-family: 'JetBrains Mono', monospace;">Mouse: Not Bound</span>
+      <button class="icon-btn icon-btn-danger" id="btnUnbindMouseBtn" onclick="unbindTargetMouse()" title="Unbind Mouse" style="width: 18px; height: 18px; color: #ef4444; display: none;">✕</button>
+    </div>
+
+    <!-- Bound Keyboard Row -->
+    <div id="boundKeyboardStatus" style="display: flex; font-size: 10px; padding: 5px 8px; margin-bottom: 6px; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px; color: #c084fc; justify-content: space-between; align-items: center;">
+      <span id="boundKeyboardLabel" style="font-family: 'JetBrains Mono', monospace;">Keyboard: Not Bound</span>
+      <button class="icon-btn icon-btn-danger" id="btnUnbindKeyboardBtn" onclick="unbindTargetKeyboard()" title="Unbind Keyboard" style="width: 18px; height: 18px; color: #ef4444; display: none;">✕</button>
     </div>
 
     <div id="bleMouseList" class="preset-list" style="max-height: 260px; overflow-y: auto;"></div>
   </div>
 
+  <!-- Floating ESP32 Password / Authentication Modal -->
+  <div id="esp32AuthModal" onclick="event.stopPropagation()" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(15, 23, 42, 0.98); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(56, 189, 248, 0.5); box-shadow: 0 25px 50px rgba(0,0,0,0.9); border-radius: 12px; width: 340px; z-index: 100002; padding: 16px;">
+    <div style="font-size: 13px; font-weight: 700; color: var(--primary); margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
+      <span style="display: flex; align-items: center; gap: 6px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        ESP32 BLE Authentication
+      </span>
+      <button class="icon-btn" onclick="cancelAuthModal()" title="Close" style="width: 22px; height: 22px; color: #94a3b8;">✕</button>
+    </div>
+    <div style="font-size: 11px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4;">
+      Enter the access password for secure session authentication (SHA-256):
+    </div>
+    <div style="position: relative; margin-bottom: 12px;">
+      <input type="password" id="authPasswordInput" placeholder="Enter password..." style="width: 100%; background: #0b1329; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 32px 8px 10px; color: #fff; font-size: 13px; outline: none; box-sizing: border-box;" onkeydown="if(event.key==='Enter') submitAuthPassword()">
+      <button class="icon-btn" id="btnToggleAuthPwd" onclick="toggleAuthPasswordVisibility()" title="Show/Hide password" style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 24px; height: 24px; color: #94a3b8;">
+        <svg id="eyeIcon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+      </button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 14px;">
+      <input type="checkbox" id="rememberPasswordCheck" checked style="accent-color: var(--primary); cursor: pointer;">
+      <label for="rememberPasswordCheck" style="font-size: 11px; color: #cbd5e1; cursor: pointer;">Remember password in this browser</label>
+    </div>
+    <div style="display: flex; justify-content: flex-end; gap: 8px;">
+      <button class="btn btn-secondary" onclick="cancelAuthModal()" style="font-size: 11px; padding: 6px 12px;">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAuthPassword()" style="font-size: 11px; padding: 6px 14px;">Connect</button>
+    </div>
+  </div>
+  <div id="authModalBackdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 100001;" onclick="cancelAuthModal()"></div>
+
   <script>
+    // --- Toast Notifications (Positioned under Top Toolbar Buttons, Auto-disappearing) ---
+    function showToast(msg, type = 'info', durationMs = 3000) {
+      let container = document.getElementById('toastContainer');
+      if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = 'position: fixed; top: 48px; left: 12px; z-index: 999999; display: flex; flex-direction: column; gap: 8px; pointer-events: none;';
+        document.body.appendChild(container);
+      }
+      const toast = document.createElement('div');
+      const borderCol = type === 'success' ? '#22c55e' : (type === 'error' ? '#ef4444' : '#38bdf8');
+      toast.style.cssText = `background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid ${borderCol}; color: #f8fafc; padding: 9px 15px; border-radius: 8px; font-size: 12px; font-weight: 500; box-shadow: 0 10px 25px rgba(0,0,0,0.6); pointer-events: auto; opacity: 0; transform: translateY(-8px); transition: all 0.25s ease; cursor: pointer; display: flex; align-items: center; gap: 8px; line-height: 1.4;`;
+      toast.innerHTML = msg.replace(/\n/g, '<br>');
+      toast.onclick = () => toast.remove();
+      container.appendChild(toast);
+      requestAnimationFrame(() => {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateY(0)';
+      });
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-8px)';
+        setTimeout(() => toast.remove(), 250);
+      }, durationMs);
+    }
+
     // --- KVM Clients Registry ---
     let kvmClients = [];
 
@@ -763,7 +844,7 @@
       const newName = nameInput.value.trim();
 
       if (!newMac) {
-        alert('⚠️ Please enter a MAC address!');
+        showToast('⚠️ Please enter a MAC address!', 'error', 3000);
         macInput.focus();
         return;
       }
@@ -935,13 +1016,16 @@
       draw();
     }
 
-    // --- BLE Mouse Scanner & Target Lock ---
+    // --- BLE Peripherals (Mouse & Keyboard) Scanner & Target Lock ---
     let boundTargetMouseMac = '';
+    let boundTargetMouseName = '';
+    let boundTargetKeyboardMac = '';
+    let boundTargetKeyboardName = '';
 
     async function toggleBleMouseModal(e) {
       if (e) e.stopPropagation();
       if (activeConnectionType === 'none') {
-        alert('⚠️ Будь ласка, спочатку підключіться до ESP32 через USB або Bluetooth!');
+        showToast('⚠️ Please connect to ESP32 via USB or Bluetooth first!', 'error', 3500);
         return;
       }
       const modal = document.getElementById('bleMouseModal');
@@ -958,7 +1042,7 @@
         }
         modal.style.display = 'block';
         await sendESP32Command('GET_TARGET_MOUSE\n');
-        startBleMouseScan();
+        await sendESP32Command('GET_TARGET_KEYBOARD\n');
       }
     }
 
@@ -973,11 +1057,11 @@
         container.innerHTML = `
           <div style="font-size: 11px; color: var(--primary); padding: 12px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;"><path d="M21 12a9 9 0 1 1-6.21-8.58"></path></svg>
-            Scanning nearby Bluetooth mice (5s)...
+            Scanning nearby Bluetooth devices (5s)...
           </div>
         `;
       }
-      sendESP32Command('SCAN_MICE\n');
+      sendESP32Command('SCAN_DEVICES\n');
     }
 
     function renderScannedMiceList(jsonStr) {
@@ -985,43 +1069,91 @@
       if (!container) return;
 
       try {
-        const mice = JSON.parse(jsonStr);
-        if (!Array.isArray(mice) || mice.length === 0) {
-          container.innerHTML = `<div style="font-size: 11px; color: var(--text-muted); padding: 10px; text-align: center;">No Bluetooth mice found nearby.<br><span style="font-size: 10px; color: #64748b;">Make sure your mouse is turned on & advertising.</span></div>`;
+        const devices = JSON.parse(jsonStr);
+        if (!Array.isArray(devices) || devices.length === 0) {
+          container.innerHTML = `
+            <div style="font-size: 11px; color: var(--text-muted); padding: 14px 10px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 4px;">
+              <span style="color: #94a3b8; font-weight: 600;">No devices found</span>
+              <span style="font-size: 10px; color: #64748b;">Ensure the device is powered on and in pairing mode.</span>
+            </div>
+          `;
           return;
         }
 
-        container.innerHTML = mice.map(m => {
-          const isBound = boundTargetMouseMac && m.mac === boundTargetMouseMac;
+        // Filter out devices that are ALREADY bound at the top
+        const newDevices = devices.filter(m => {
+          const isMouseBound = boundTargetMouseMac && m.mac.toLowerCase() === boundTargetMouseMac.toLowerCase();
+          const isKbBound = boundTargetKeyboardMac && m.mac.toLowerCase() === boundTargetKeyboardMac.toLowerCase();
+          return !isMouseBound && !isKbBound;
+        });
+
+        if (newDevices.length === 0) {
+          container.innerHTML = `
+            <div style="font-size: 11px; color: var(--text-muted); padding: 14px 10px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 4px;">
+              <span style="color: #38bdf8; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                No new devices found
+              </span>
+              <span style="font-size: 10px; color: #64748b;">All discovered devices are already locked above.</span>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = newDevices.map(m => {
           const rssiText = m.rssi ? `${m.rssi} dBm` : '';
+          const devEscapedName = (m.name || 'Bluetooth Device').replace(/'/g, "\\'");
+          const devType = m.type || 'unknown';
+
+          let typeIconSvg = '';
+          if (devType === 'mouse') {
+            typeIconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Mouse"><path d="M12 2a5 5 0 0 0-5 5v10a5 5 0 0 0 10 0V7a5 5 0 0 0-5-5z"></path><line x1="12" y1="6" x2="12" y2="10"></line></svg>`;
+          } else if (devType === 'keyboard') {
+            typeIconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#c084fc" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="Keyboard"><rect x="2" y="4" width="20" height="16" rx="2"></rect><line x1="6" y1="8" x2="6.01" y2="8"></line><line x1="10" y1="8" x2="10.01" y2="8"></line><line x1="14" y1="8" x2="14.01" y2="8"></line><line x1="18" y1="8" x2="18.01" y2="8"></line><line x1="6" y1="12" x2="6.01" y2="12"></line><line x1="18" y1="12" x2="18.01" y2="12"></line><line x1="10" y1="16" x2="14" y2="16"></line></svg>`;
+          } else {
+            typeIconSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="HID Device"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>`;
+          }
+
+          const mouseBtnStyle = (devType === 'mouse')
+            ? 'font-size: 10px; font-weight: 700; padding: 3px 8px; height: 24px; box-shadow: 0 0 8px rgba(56, 189, 248, 0.35);'
+            : (devType === 'keyboard' 
+                ? 'font-size: 9px; padding: 2px 6px; height: 22px; background: transparent; border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; opacity: 0.75;'
+                : 'font-size: 9px; padding: 2px 6px; height: 22px;');
+
+          const kbBtnStyle = (devType === 'keyboard')
+            ? 'font-size: 10px; font-weight: 700; padding: 3px 8px; height: 24px; background: #9333ea; border: 1px solid #c084fc; color: #ffffff; box-shadow: 0 0 8px rgba(168, 85, 247, 0.35);'
+            : (devType === 'mouse' 
+                ? 'font-size: 9px; padding: 2px 6px; height: 22px; background: transparent; border: 1px solid rgba(168, 85, 247, 0.3); color: #c084fc; opacity: 0.75;'
+                : 'font-size: 9px; padding: 2px 6px; height: 22px; background: rgba(168, 85, 247, 0.2); border: 1px solid rgba(168, 85, 247, 0.4); color: #c084fc;');
 
           return `
-            <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 8px; ${isBound ? 'background: rgba(52, 211, 153, 0.15); border: 1px solid #34d399;' : ''}">
-              <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden; flex: 1;">
-                <div style="font-size: 11px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                  ${m.name || 'Bluetooth Mouse'}
+            <div class="preset-item" style="display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 9px;">
+              <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; flex: 1;">
+                <div style="display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: rgba(15, 23, 42, 0.6); border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); flex-shrink: 0;">
+                  ${typeIconSvg}
                 </div>
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--primary);">${m.mac}</span>
-                  <span style="font-size: 9px; color: #64748b;">${rssiText}</span>
+                <div style="display: flex; flex-direction: column; gap: 2px; overflow: hidden; flex: 1;">
+                  <div style="font-size: 11px; font-weight: 600; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                    ${m.name || 'Bluetooth Device'}
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <span style="font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--primary);">${m.mac}</span>
+                    <span style="font-size: 9px; color: #64748b;">${rssiText}</span>
+                  </div>
                 </div>
               </div>
-              <div>
-                ${isBound ? 
-                  '<span style="font-size: 10px; font-weight: 700; color: #34d399; padding: 2px 6px; background: rgba(52, 211, 153, 0.2); border-radius: 4px;">✓ Bound</span>' : 
-                  `<button class="btn btn-primary" onclick="bindTargetMouse('${m.mac}', '${(m.name || 'BLE Mouse').replace(/'/g, "\\'")}')" style="font-size: 10px; padding: 3px 8px; height: 24px;">Bind & Lock</button>`
-                }
+              <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                <button class="btn ${devType === 'mouse' ? 'btn-primary' : ''}" onclick="bindTargetMouse('${m.mac}', '${devEscapedName}')" style="${mouseBtnStyle}">Bind Mouse</button>
+                <button class="btn" onclick="bindTargetKeyboard('${m.mac}', '${devEscapedName}')" style="${kbBtnStyle}">Bind KB</button>
               </div>
             </div>
           `;
         }).join('');
       } catch(e) {
-        console.warn('Failed to parse MICE json:', e);
+        console.warn('Failed to parse devices json:', e);
         container.innerHTML = `<div style="font-size: 11px; color: #ef4444; padding: 8px;">Failed to parse scan response.</div>`;
       }
     }
-
-    let boundTargetMouseName = '';
 
     function bindTargetMouse(mac, name) {
       if (!mac) return;
@@ -1029,11 +1161,28 @@
       sendESP32Command(`BIND_MOUSE ${mac} ${mName}\n`);
       setBoundMouseStatus(mac, mName);
       closeBleMouseModal();
+      showToast(`✓ Locked Mouse: ${mName} (${mac})`, 'success', 2500);
     }
 
     function unbindTargetMouse() {
       sendESP32Command(`UNBIND_MOUSE\n`);
       setBoundMouseStatus('', '');
+      showToast('Mouse lock cleared.', 'info', 2000);
+    }
+
+    function bindTargetKeyboard(mac, name) {
+      if (!mac) return;
+      const kName = name || 'BLE Keyboard';
+      sendESP32Command(`BIND_KEYBOARD ${mac} ${kName}\n`);
+      setBoundKeyboardStatus(mac, kName);
+      closeBleMouseModal();
+      showToast(`✓ Locked Keyboard: ${kName} (${mac})`, 'success', 2500);
+    }
+
+    function unbindTargetKeyboard() {
+      sendESP32Command(`UNBIND_KEYBOARD\n`);
+      setBoundKeyboardStatus('', '');
+      showToast('Keyboard lock cleared.', 'info', 2000);
     }
 
     function setBoundMouseStatus(mac, name) {
@@ -1054,16 +1203,48 @@
         }
       }
 
-      const statusDiv = document.getElementById('boundMouseStatus');
       const label = document.getElementById('boundMouseLabel');
-
-      if (statusDiv && label) {
+      const unbindBtn = document.getElementById('btnUnbindMouseBtn');
+      if (label) {
         if (boundTargetMouseMac) {
           const displayName = boundTargetMouseName || 'BLE Mouse';
-          label.textContent = `Active: ${displayName} (${boundTargetMouseMac})`;
-          statusDiv.style.display = 'flex';
+          label.textContent = `Mouse: ${displayName} (${boundTargetMouseMac})`;
+          if (unbindBtn) unbindBtn.style.display = 'inline-flex';
         } else {
-          statusDiv.style.display = 'none';
+          label.textContent = `Mouse: Not Bound`;
+          if (unbindBtn) unbindBtn.style.display = 'none';
+        }
+      }
+    }
+
+    function setBoundKeyboardStatus(mac, name) {
+      boundTargetKeyboardMac = mac ? mac : '';
+      if (name && name.trim().length > 0) {
+        boundTargetKeyboardName = name.trim();
+      } else if (!boundTargetKeyboardMac) {
+        boundTargetKeyboardName = '';
+      }
+
+      const infoEl = document.getElementById('keyboardInfoText');
+      if (infoEl) {
+        if (boundTargetKeyboardMac) {
+          const displayName = boundTargetKeyboardName || 'BLE Keyboard';
+          infoEl.innerHTML = `<b style="color: #f8fafc;">${displayName}</b> <span style="color: #94a3b8;">(${boundTargetKeyboardMac})</span>`;
+        } else {
+          infoEl.innerHTML = `<span style="color: #64748b;">Not Bound</span>`;
+        }
+      }
+
+      const label = document.getElementById('boundKeyboardLabel');
+      const unbindBtn = document.getElementById('btnUnbindKeyboardBtn');
+      if (label) {
+        if (boundTargetKeyboardMac) {
+          const displayName = boundTargetKeyboardName || 'BLE Keyboard';
+          label.textContent = `Keyboard: ${displayName} (${boundTargetKeyboardMac})`;
+          if (unbindBtn) unbindBtn.style.display = 'inline-flex';
+        } else {
+          label.textContent = `Keyboard: Not Bound`;
+          if (unbindBtn) unbindBtn.style.display = 'none';
         }
       }
     }
@@ -1444,6 +1625,11 @@
         const parsed = JSON.parse(jsonText);
         if (boundTargetMouseMac) {
           parsed.mouseMac = boundTargetMouseMac;
+          parsed.mouseName = boundTargetMouseName || 'BLE Mouse';
+        }
+        if (boundTargetKeyboardMac) {
+          parsed.keyboardMac = boundTargetKeyboardMac;
+          parsed.keyboardName = boundTargetKeyboardName || 'BLE Keyboard';
         }
         minifiedJson = JSON.stringify(parsed);
       } catch(e) {}
@@ -1455,22 +1641,22 @@
         try {
           await sendESP32Command(`SAVE_CONFIG ${minifiedJson.length} ${minifiedJson}\n`);
           console.log('[SAVE CONFIG SUCCESS] Config sent over BLE!');
-          alert('✅ Дані успішно збережено в Flash-пам\'ять ESP32 через Bluetooth!');
+          showToast('✅ Configuration saved to ESP32 Flash memory over Bluetooth!', 'success', 3500);
         } catch (e) {
           console.error('[SAVE CONFIG ERROR BLE]:', e);
-          alert('❌ Помилка передачі по Bluetooth: ' + e.message);
+          showToast('❌ Bluetooth transmission error: ' + e.message, 'error', 4000);
         }
       } else if (activeConnectionType === 'usb' && window.esp32SerialPort && window.esp32SerialPort.writable) {
         try {
           await sendESP32Command(`SAVE_CONFIG ${minifiedJson.length} ${minifiedJson}\n`);
           console.log('[SAVE CONFIG SUCCESS] Config sent over USB Serial!');
-          alert('✅ Дані успішно збережено в Flash-пам\'ять ESP32 через USB!');
+          showToast('✅ Configuration saved to ESP32 Flash memory over USB!', 'success', 3500);
         } catch (e) {
           console.error('[SAVE CONFIG ERROR USB]:', e);
-          alert('❌ Помилка передачі даних на ESP32: ' + e.message);
+          showToast('❌ Data transmission error to ESP32: ' + e.message, 'error', 4000);
         }
       } else {
-        alert('⚠️ ESP32 не підключено! Спочатку підключіться через USB або Bluetooth.');
+        showToast('⚠️ ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
       }
     }
 
@@ -1550,7 +1736,7 @@
     function addBlankLayout() {
       const nextId = (layoutsData.layouts.length > 0) ? Math.max(...layoutsData.layouts.map(l => Number(l.id) || 0)) + 1 : 1;
       const count = layoutsData.layouts.length + 1;
-      const name = prompt('Введіть назву нової конфігурації (Layout):', `Layout ${count}`);
+      const name = prompt('Enter a name for the new layout:', `Layout ${count}`);
       if (name === null) return;
       const cleanName = name.trim() || `Layout ${count}`;
       const newLayout = {
@@ -1642,11 +1828,11 @@
 
     function deleteCurrentLayout() {
       if (layoutsData.layouts.length <= 1) {
-        alert('Неможливо видалити єдину конфігурацію!');
+        showToast('⚠️ Cannot delete the only layout!', 'error', 3000);
         return;
       }
       const active = getActiveLayout();
-      if (!confirm(`Ви дійсно бажаєте видалити конфігурацію "${active.name}"?`)) return;
+      if (!confirm(`Are you sure you want to delete layout "${active.name}"?`)) return;
 
       layoutsData.layouts = layoutsData.layouts.filter(l => Number(l.id) !== Number(active.id));
       layoutsData.activeLayoutId = Number(layoutsData.layouts[0].id) || 1;
@@ -2111,6 +2297,14 @@
           btMenu.style.display = 'none';
         }
       }
+
+      const mouseModal = document.getElementById('bleMouseModal');
+      const mouseBtn = document.getElementById('btnScanBleMouse');
+      if (mouseModal && mouseModal.style.display === 'block') {
+        if (e.target.isConnected && !mouseModal.contains(e.target) && !mouseBtn.contains(e.target)) {
+          mouseModal.style.display = 'none';
+        }
+      }
     });
 
     function addScreen(name, width, height) {
@@ -2565,6 +2759,10 @@
       if (boundTargetMouseMac) {
         config.mouseMac = boundTargetMouseMac;
         config.mouseName = boundTargetMouseName || 'BLE Mouse';
+      }
+      if (boundTargetKeyboardMac) {
+        config.keyboardMac = boundTargetKeyboardMac;
+        config.keyboardName = boundTargetKeyboardName || 'BLE Keyboard';
       }
 
       currentConfigJSON = JSON.stringify(config, null, 2);
@@ -3089,7 +3287,7 @@
     // Load configuration from ESP32 Button handler
     document.getElementById('btnLoadESP32').addEventListener('click', async () => {
       if (activeConnectionType === 'none') {
-        alert('⚠️ ESP32 не підключено! Спочатку підключіться через USB або Bluetooth.');
+        showToast('⚠️ ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
         return;
       }
       console.log(`[LOAD CONFIG LOG] Requesting unified GET_CONFIG over ${activeConnectionType.toUpperCase()}...`);
@@ -3113,12 +3311,12 @@
     // Dump Flash Diagnostic Button handler
     document.getElementById('btnDumpFlash').addEventListener('click', async () => {
       if (activeConnectionType === 'none') {
-        alert('⚠️ ESP32 не підключено! Спочатку підключіться через USB або Bluetooth.');
+        showToast('⚠️ ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
         return;
       }
       console.log(`[DUMP FLASH LOG] Requesting DUMP_FLASH over ${activeConnectionType.toUpperCase()}...`);
       await sendESP32Command('DUMP_FLASH\n');
-      alert('🔍 Запит DUMP_FLASH відправлено! Відкрийте консоль браузера (F12) або термінал Serial Monitor, щоб переглянути вміст Flash NVS.');
+      showToast('🔍 DUMP_FLASH request sent! Open browser console (F12) or Serial Monitor to view Flash NVS contents.', 'info', 4000);
     });
 
     // Backup Layout JSON to local device file (Using native Save File Picker with kvm_config.json)
@@ -3131,6 +3329,9 @@
         backupObj = { activeLayoutId: layoutsData.activeLayoutId, layouts: [] };
       }
       backupObj.mouseMac = boundTargetMouseMac;
+      backupObj.mouseName = boundTargetMouseName;
+      backupObj.keyboardMac = boundTargetKeyboardMac;
+      backupObj.keyboardName = boundTargetKeyboardName;
       const jsonStr = JSON.stringify(backupObj, null, 2);
       const fileName = 'kvm_config.json';
 
@@ -3181,7 +3382,7 @@
       reader.onload = (event) => {
         const content = event.target.result;
         parseESP32ConfigResponse(content);
-        alert(`✅ Configuration restored from ${file.name}!`);
+        showToast(`✅ Configuration restored from ${file.name}!`, 'success', 3500);
       };
       reader.readAsText(file);
       e.target.value = '';
@@ -3264,6 +3465,9 @@
 
         if (doc.mouseMac || doc.boundMouseMac) {
           setBoundMouseStatus(doc.mouseMac || doc.boundMouseMac, doc.mouseName || doc.boundMouseName || '');
+        }
+        if (doc.keyboardMac || doc.boundKeyboardMac) {
+          setBoundKeyboardStatus(doc.keyboardMac || doc.boundKeyboardMac, doc.keyboardName || doc.boundKeyboardName || '');
         }
 
         syncScreensReference();
@@ -3354,7 +3558,7 @@
         parseESP32ConfigResponse(jsonStr, expectedLen);
       } else if (line.startsWith('MICE ')) {
         const jsonStr = line.substring(5);
-        console.log(`[${source} MICE LOG] Received scanned mice from ESP32:`, jsonStr);
+        console.log(`[${source} MICE LOG] Received scanned devices from ESP32:`, jsonStr);
         renderScannedMiceList(jsonStr);
       } else if (line.startsWith('OK_BIND_MOUSE ')) {
         const payload = line.substring(14).trim();
@@ -3372,9 +3576,133 @@
         const mac = spaceIdx !== -1 ? payload.substring(0, spaceIdx) : payload;
         const name = spaceIdx !== -1 ? payload.substring(spaceIdx + 1) : (boundTargetMouseName || 'BLE Mouse');
         setBoundMouseStatus(mac, name);
+      } else if (line.startsWith('OK_BIND_KEYBOARD ')) {
+        const payload = line.substring(17).trim();
+        const spaceIdx = payload.indexOf(' ');
+        const mac = spaceIdx !== -1 ? payload.substring(0, spaceIdx) : payload;
+        const name = spaceIdx !== -1 ? payload.substring(spaceIdx + 1) : (boundTargetKeyboardName || 'BLE Keyboard');
+        console.log(`[${source} BIND KEYBOARD] Target locked to ${name} (${mac})`);
+        setBoundKeyboardStatus(mac, name);
+      } else if (line.startsWith('OK_UNBIND_KEYBOARD')) {
+        console.log(`[${source} UNBIND KEYBOARD] Target keyboard lock cleared`);
+        setBoundKeyboardStatus('', '');
+      } else if (line.startsWith('TARGET_KEYBOARD ')) {
+        const payload = line.substring(16).trim();
+        const spaceIdx = payload.indexOf(' ');
+        const mac = spaceIdx !== -1 ? payload.substring(0, spaceIdx) : payload;
+        const name = spaceIdx !== -1 ? payload.substring(spaceIdx + 1) : (boundTargetKeyboardName || 'BLE Keyboard');
+        setBoundKeyboardStatus(mac, name);
       } else if (line.startsWith('OK_SAVE')) {
         console.log(`[${source} SAVE LOG] ESP32 confirmed SAVE_CONFIG successful!`);
+      } else if (line.startsWith('CHALLENGE ')) {
+        const nonce = line.substring(10).trim();
+        console.log(`[${source} AUTH] Received challenge nonce from ESP32:`, nonce);
+        handleAuthChallenge(nonce);
+      } else if (line.startsWith('OK_AUTH')) {
+        console.log(`[${source} AUTH LOG] ESP32 confirmed Challenge-Response authentication successful!`);
+        updateConnectionUI('bluetooth');
+      } else if (line.startsWith('ERROR_UNAUTHORIZED') || line.startsWith('ERROR_AUTH')) {
+        console.warn(`[${source} AUTH ERROR] Authentication failed on ESP32:`, line);
+        updateConnectionUI('none');
+        disconnectAllChannels();
+        if (line.includes('Invalid signature') || line.includes('ERROR_AUTH')) {
+          localStorage.removeItem('esp32_ble_password');
+          showToast('❌ Incorrect ESP32 access password! Disconnected.', 'error', 3500);
+        }
       }
+    }
+
+    let pendingAuthNonce = null;
+
+    function getStoredBlePassword() {
+      return localStorage.getItem('esp32_ble_password') || '';
+    }
+
+    function openAuthModal(nonce) {
+      pendingAuthNonce = nonce;
+      const modal = document.getElementById('esp32AuthModal');
+      const backdrop = document.getElementById('authModalBackdrop');
+      const input = document.getElementById('authPasswordInput');
+      const rememberCheck = document.getElementById('rememberPasswordCheck');
+      const storedPwd = getStoredBlePassword();
+      if (modal) modal.style.display = 'block';
+      if (backdrop) backdrop.style.display = 'block';
+      if (input) {
+        input.value = storedPwd;
+        setTimeout(() => {
+          input.focus();
+          if (storedPwd) input.select();
+        }, 50);
+      }
+      if (rememberCheck) {
+        rememberCheck.checked = storedPwd ? true : rememberCheck.checked;
+      }
+    }
+
+    function closeAuthModal() {
+      const modal = document.getElementById('esp32AuthModal');
+      const backdrop = document.getElementById('authModalBackdrop');
+      if (modal) modal.style.display = 'none';
+      if (backdrop) backdrop.style.display = 'none';
+    }
+
+    function cancelAuthModal() {
+      const wasPending = (pendingAuthNonce !== null && activeConnectionType !== 'bluetooth');
+      pendingAuthNonce = null;
+      closeAuthModal();
+      if (wasPending) {
+        disconnectAllChannels();
+        updateConnectionUI('none');
+      }
+    }
+
+    function toggleAuthPasswordVisibility() {
+      const input = document.getElementById('authPasswordInput');
+      const icon = document.getElementById('eyeIcon');
+      if (input) {
+        const isPwd = input.type === 'password';
+        input.type = isPwd ? 'text' : 'password';
+        if (icon) {
+          if (isPwd) {
+            icon.innerHTML = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line>';
+          } else {
+            icon.innerHTML = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle>';
+          }
+        }
+      }
+    }
+
+    async function submitAuthPassword() {
+      const input = document.getElementById('authPasswordInput');
+      const pwd = input ? input.value : '';
+
+      const remember = document.getElementById('rememberPasswordCheck')?.checked;
+      if (remember && pwd.length > 0) {
+        localStorage.setItem('esp32_ble_password', pwd);
+      } else {
+        localStorage.removeItem('esp32_ble_password');
+      }
+
+      const nonce = pendingAuthNonce;
+      pendingAuthNonce = null;
+      closeAuthModal();
+
+      if (nonce) {
+        const hash = await calculateSha256(pwd + ':' + nonce);
+        console.log('[BLE AUTH] Responding with SHA-256 hash from user input');
+        sendESP32Command(`AUTH_RESPONSE ${hash}\n`);
+      }
+    }
+
+    function handleAuthChallenge(nonce) {
+      openAuthModal(nonce);
+    }
+
+    async function calculateSha256(str) {
+      const buffer = new TextEncoder().encode(str);
+      const hashBuffer = await window.crypto.subtle.digest('SHA-256', buffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
     }
 
     let bleNotifyBuffer = '';
@@ -3404,21 +3732,6 @@
       }
     }
 
-    async function ensureBleConnected() {
-      if (!window.esp32BleDevice) return false;
-      if (!window.esp32BleDevice.gatt.connected) {
-        console.log('[BLE] Reconnecting GATT server...');
-        window.esp32BleServer = await window.esp32BleDevice.gatt.connect();
-        window.esp32BleService = await window.esp32BleServer.getPrimaryService(CONFIG_SERVICE_UUID);
-        window.esp32BleRxChar = await window.esp32BleService.getCharacteristic(CONFIG_RX_UUID);
-        window.esp32BleTxChar = await window.esp32BleService.getCharacteristic(CONFIG_TX_UUID);
-        await window.esp32BleTxChar.startNotifications();
-        window.esp32BleTxChar.addEventListener('characteristicvaluechanged', handleBleNotification);
-        setConnectedStatus(true, 'Bluetooth Connected: ESP32 KVM Server');
-      }
-      return true;
-    }
-
     let cmdWriteQueue = Promise.resolve();
 
     async function sendESP32Command(cmd) {
@@ -3426,8 +3739,7 @@
 
       return new Promise((resolve) => {
         cmdWriteQueue = cmdWriteQueue.then(async () => {
-          if (activeConnectionType === 'bluetooth' && window.esp32BleDevice && window.esp32BleRxChar) {
-            await ensureBleConnected();
+          if (window.esp32BleDevice && window.esp32BleRxChar && window.esp32BleDevice.gatt && window.esp32BleDevice.gatt.connected) {
             bleNotifyBuffer = ''; // Reset notification buffer right before writing to GATT Rx
             const encoder = new TextEncoder();
             const data = encoder.encode(cmd);
@@ -3453,7 +3765,7 @@
               await new Promise(r => setTimeout(r, 15)); // Inter-packet delay for flow control
             }
             resolve(true);
-          } else if (activeConnectionType === 'usb' && window.esp32SerialPort && window.esp32SerialPort.writable) {
+          } else if (window.esp32SerialPort && window.esp32SerialPort.writable) {
             if (!window.esp32SerialPort || !window.esp32SerialPort.writable) {
               resolve(false);
               return;
@@ -3527,8 +3839,20 @@
       }
     }
 
+    function onGattDisconnected(e) {
+      if (activeConnectionType === 'bluetooth') {
+        console.warn('[BLE] GATT server disconnected unexpectedly');
+      } else {
+        console.log('[BLE] GATT server disconnected cleanly');
+      }
+      disconnectAllChannels();
+    }
+
     async function disconnectAllChannels() {
       activeConnectionType = 'none';
+      pendingAuthNonce = null;
+      bleNotifyBuffer = '';
+      cmdWriteQueue = Promise.resolve();
 
       if (window.esp32SerialReader) {
         try {
@@ -3549,11 +3873,22 @@
         window.esp32SerialPort = null;
       }
 
-      if (window.esp32BleDevice && window.esp32BleDevice.gatt && window.esp32BleDevice.gatt.connected) {
+      if (window.esp32BleTxChar) {
         try {
-          window.esp32BleDevice.gatt.disconnect();
-        } catch (e) {
-          console.warn('Error disconnecting BLE GATT:', e);
+          window.esp32BleTxChar.removeEventListener('characteristicvaluechanged', handleBleNotification);
+        } catch(e) {}
+      }
+
+      if (window.esp32BleDevice) {
+        try {
+          window.esp32BleDevice.removeEventListener('gattserverdisconnected', onGattDisconnected);
+        } catch(e) {}
+        if (window.esp32BleDevice.gatt && window.esp32BleDevice.gatt.connected) {
+          try {
+            window.esp32BleDevice.gatt.disconnect();
+          } catch (e) {
+            console.warn('Error disconnecting BLE GATT:', e);
+          }
         }
       }
       window.esp32BleDevice = null;
@@ -3592,18 +3927,28 @@
           updateConnectionUI('none');
         }
       } else {
-        alert('Web Serial API is not supported in this browser.');
+        showToast('❌ Web Serial API is not supported in this browser.', 'error', 4000);
       }
     });
 
     document.getElementById('btnConnectBT').addEventListener('click', async () => {
       if (activeConnectionType === 'bluetooth') {
-        await disconnectAllChannels();
-        console.log('[BLE] Connection closed by user.');
+        // Drop authenticated session and lock UI
+        activeConnectionType = 'none';
+        pendingAuthNonce = null;
+        bleNotifyBuffer = '';
+        updateConnectionUI('none');
+        showToast('Bluetooth disconnected.', 'info', 2000);
+        console.log('[BLE] Session closed by user (GATT link kept warm).');
         return;
       }
 
-      await disconnectAllChannels();
+      // If GATT link is already open from this tab, instantly request new challenge
+      if (window.esp32BleDevice && window.esp32BleDevice.gatt && window.esp32BleDevice.gatt.connected && window.esp32BleRxChar && window.esp32BleTxChar) {
+        console.log('[BLE] Reusing active GATT link, requesting new authentication challenge...');
+        await sendESP32Command('GET_CHALLENGE\n');
+        return;
+      }
 
       if ('bluetooth' in navigator) {
         try {
@@ -3612,24 +3957,19 @@
             optionalServices: [CONFIG_SERVICE_UUID, '12345678-1234-1234-1234-1234567890ab', 0x1812]
           });
           window.esp32BleDevice = device;
-          device.addEventListener('gattserverdisconnected', () => {
-            if (activeConnectionType === 'bluetooth') {
-              console.warn('[BLE] GATT server disconnected unexpectedly');
-            } else {
-              console.log('[BLE] GATT server disconnected cleanly');
-            }
-            updateConnectionUI('none');
-          });
+          device.removeEventListener('gattserverdisconnected', onGattDisconnected);
+          device.addEventListener('gattserverdisconnected', onGattDisconnected);
 
           console.log('[BLE] Connecting to GATT server for device:', device.name);
           const server = await device.gatt.connect();
+          window.esp32BleServer = server;
 
           let service;
           try {
             service = await server.getPrimaryService(CONFIG_SERVICE_UUID);
           } catch(serviceErr) {
             console.warn('[BLE] Config service not found:', serviceErr);
-            alert('⚠️ Не знайдено Config Service на ESP32!\n\n1. Перевірте, що ви прошили плату через PlatformIO (Build 129+).\n2. Видаліть "ESP32 KVM Mouse" з налаштувань Bluetooth у Windows та підключіться знову, щоб оновити кеш.');
+            showToast('⚠️ Config Service not found on ESP32!\n1. Flash firmware via PlatformIO.\n2. Remove device from OS Bluetooth settings and pair again.', 'error', 5000);
             updateConnectionUI('none');
             return;
           }
@@ -3638,16 +3978,25 @@
           window.esp32BleTxChar = await service.getCharacteristic(CONFIG_TX_UUID);
 
           await window.esp32BleTxChar.startNotifications();
+          window.esp32BleTxChar.removeEventListener('characteristicvaluechanged', handleBleNotification);
           window.esp32BleTxChar.addEventListener('characteristicvaluechanged', handleBleNotification);
 
-          updateConnectionUI('bluetooth');
+          // Initiate Challenge-Response authentication over Web Bluetooth
+          console.log('[BLE] Requesting authentication challenge from ESP32...');
+          await sendESP32Command('GET_CHALLENGE\n');
+
+          // Connection established and authenticated
         } catch (err) {
-          console.error('[BLE Error]:', err);
+          if (err.name === 'NotFoundError' || (err.message && err.message.includes('cancelled'))) {
+            console.log('[BLE] Connection cancelled by user.');
+          } else {
+            console.error('[BLE Error]:', err);
+            showToast('Failed to connect via Bluetooth: ' + err.message, 'error', 3500);
+          }
           updateConnectionUI('none');
-          alert('Failed to connect via Bluetooth: ' + err.message);
         }
       } else {
-        alert('Web Bluetooth API is not supported in this browser.');
+        showToast('❌ Web Bluetooth API is not supported in this browser.', 'error', 4000);
       }
     });
 

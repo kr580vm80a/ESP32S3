@@ -527,6 +527,22 @@ ble_l2cap_sig_update(uint16_t conn_handle,
         goto done;
     }
 
+    ble_hs_lock();
+    struct ble_l2cap_sig_proc *cur, *prev_proc = NULL;
+    STAILQ_FOREACH(cur, &ble_l2cap_sig_procs, next) {
+        if (cur->conn_handle == conn_handle) {
+            if (prev_proc == NULL) {
+                STAILQ_REMOVE_HEAD(&ble_l2cap_sig_procs, next);
+            } else {
+                STAILQ_REMOVE_AFTER(&ble_l2cap_sig_procs, prev_proc, next);
+            }
+            ble_l2cap_sig_proc_free(cur);
+            break;
+        }
+        prev_proc = cur;
+    }
+    ble_hs_unlock();
+
     proc = ble_l2cap_sig_proc_alloc();
     if (proc == NULL) {
         STATS_INC(ble_l2cap_stats, update_fail);

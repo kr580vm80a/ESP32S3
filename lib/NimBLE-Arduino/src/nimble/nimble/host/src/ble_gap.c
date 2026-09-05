@@ -5828,16 +5828,21 @@ ble_gap_update_tx(uint16_t conn_handle,
     struct ble_hci_le_conn_update_cp cmd;
 
     cmd.conn_handle = htole16(conn_handle);
-    cmd.conn_itvl_min = htole16(params->itvl_min);
-    cmd.conn_itvl_max = htole16(params->itvl_max);
+    uint16_t min_itvl = params->itvl_min;
+    uint16_t max_itvl = params->itvl_max;
+    if (min_itvl < 12) min_itvl = 12;
+    if (max_itvl < 12) max_itvl = 12;
+    cmd.conn_itvl_min = htole16(min_itvl);
+    cmd.conn_itvl_max = htole16(max_itvl);
     cmd.conn_latency = htole16(params->latency);
     cmd.supervision_timeout = htole16(params->supervision_timeout);
-    cmd.min_ce_len = htole16(params->min_ce_len);
-    cmd.max_ce_len = htole16(params->max_ce_len);
+    cmd.min_ce_len = 0;
+    cmd.max_ce_len = 0;
 
-    return ble_hs_hci_cmd_tx(BLE_HCI_OP(BLE_HCI_OGF_LE,
+    int rc = ble_hs_hci_cmd_tx(BLE_HCI_OP(BLE_HCI_OGF_LE,
                                         BLE_HCI_OCF_LE_CONN_UPDATE),
                                         &cmd, sizeof(cmd), NULL, 0);
+    return rc;
 }
 
 static bool
@@ -5932,9 +5937,11 @@ ble_gap_update_params(uint16_t conn_handle,
     /*
      * If LL update procedure is not supported on this connection and we are
      * the slave, fail over to the L2CAP update procedure.
+     * NOTE: ESP32-S3 controller advertises BLE_HS_HCI_LE_FEAT_CONN_PARAM_REQUEST
+     * but returns rc=530 (0x12) when HCI_LE_Connection_Update is called from
+     * Slave role. Force L2CAP path for any Slave connection to avoid this.
      */
-    if ((conn->supported_feat & BLE_HS_HCI_LE_FEAT_CONN_PARAM_REQUEST) == 0 &&
-            !(conn->bhc_flags & BLE_HS_CONN_F_MASTER)) {
+    if (!(conn->bhc_flags & BLE_HS_CONN_F_MASTER)) {
         l2cap_update = 1;
         rc = 0;
     } else {

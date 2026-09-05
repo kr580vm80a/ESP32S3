@@ -504,6 +504,10 @@ int NimBLEServer::handleGapEvent(struct ble_gap_event *event, void *arg) {
 
         case BLE_GAP_EVENT_CONN_UPDATE: {
             NIMBLE_LOGD(LOG_TAG, "Connection parameters updated.");
+            rc = ble_gap_conn_find(event->conn_update.conn_handle, &desc);
+            if (rc == 0) {
+                server->m_pServerCallbacks->onConnUpdate(server, &desc);
+            }
             return 0;
         } // BLE_GAP_EVENT_CONN_UPDATE
 
@@ -825,6 +829,11 @@ void NimBLEServer::updateConnParams(uint16_t conn_handle,
     int rc = ble_gap_update_params(conn_handle, &params);
     if(rc != 0) {
         NIMBLE_LOGE(LOG_TAG, "Update params error: %d, %s", rc, NimBLEUtils::returnCodeToString(rc));
+        Serial.printf("[BLE GAP] updateConnParams conn=%d [itvl: %d..%d, lat: %d, to: %d] -> FAILED rc=%d\n",
+                      conn_handle, minInterval, maxInterval, latency, timeout, rc);
+    } else {
+        Serial.printf("[BLE GAP] updateConnParams conn=%d [itvl: %d..%d, lat: %d, to: %d] -> rc=0 (sent)\n",
+                      conn_handle, minInterval, maxInterval, latency, timeout);
     }
 } // updateConnParams
 
@@ -918,6 +927,9 @@ void NimBLEServerCallbacks::onAuthenticationComplete(ble_gap_conn_desc*){
 bool NimBLEServerCallbacks::onConfirmPIN(uint32_t pin){
     NIMBLE_LOGD("NimBLEServerCallbacks", "onConfirmPIN: default: true");
     return true;
+}
+void NimBLEServerCallbacks::onConnUpdate(NimBLEServer* pServer, ble_gap_conn_desc* desc){
+    NIMBLE_LOGD("NimBLEServerCallbacks", "onConnUpdate: default");
 }
 
 #endif /* CONFIG_BT_ENABLED && CONFIG_BT_NIMBLE_ROLE_PERIPHERAL */

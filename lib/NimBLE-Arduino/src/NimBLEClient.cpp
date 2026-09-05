@@ -489,6 +489,11 @@ void NimBLEClient::updateConnParams(uint16_t minInterval, uint16_t maxInterval,
     if(rc != 0) {
         NIMBLE_LOGE(LOG_TAG, "Update params error: %d, %s",
                     rc, NimBLEUtils::returnCodeToString(rc));
+        Serial.printf("[BLE Host] updateConnParams conn=%d [itvl: %d..%d, lat: %d, to: %d] -> FAILED rc=%d\n",
+                      m_conn_id, minInterval, maxInterval, latency, timeout, rc);
+    } else {
+        Serial.printf("[BLE Host] updateConnParams conn=%d [itvl: %d..%d, lat: %d, to: %d] -> rc=0 (sent)\n",
+                      m_conn_id, minInterval, maxInterval, latency, timeout);
     }
 } // updateConnParams
 
@@ -1079,10 +1084,27 @@ int NimBLEClient::handleGapEvent(struct ble_gap_event *event, void *arg) {
 
 
             if(!rc && event->type == BLE_GAP_EVENT_CONN_UPDATE_REQ ) {
-                event->conn_update_req.self_params->itvl_min = client->m_pConnParams.itvl_min;
-                event->conn_update_req.self_params->itvl_max = client->m_pConnParams.itvl_max;
-                event->conn_update_req.self_params->latency  = client->m_pConnParams.latency;
-                event->conn_update_req.self_params->supervision_timeout = client->m_pConnParams.supervision_timeout;
+                if (event->conn_update_req.peer_params->itvl_max <= 9) {
+                    event->conn_update_req.self_params->itvl_min = event->conn_update_req.peer_params->itvl_min;
+                    event->conn_update_req.self_params->itvl_max = event->conn_update_req.peer_params->itvl_max;
+                    event->conn_update_req.self_params->latency  = event->conn_update_req.peer_params->latency;
+                    event->conn_update_req.self_params->supervision_timeout = event->conn_update_req.peer_params->supervision_timeout;
+                    event->conn_update_req.self_params->min_ce_len = BLE_GAP_INITIAL_CONN_MIN_CE_LEN;
+                    event->conn_update_req.self_params->max_ce_len = BLE_GAP_INITIAL_CONN_MAX_CE_LEN;
+                } else {
+                    event->conn_update_req.self_params->itvl_min = client->m_pConnParams.itvl_min;
+                    event->conn_update_req.self_params->itvl_max = client->m_pConnParams.itvl_max;
+                    event->conn_update_req.self_params->latency  = client->m_pConnParams.latency;
+                    event->conn_update_req.self_params->supervision_timeout = client->m_pConnParams.supervision_timeout;
+                }
+            } else if (!rc && event->type == BLE_GAP_EVENT_L2CAP_UPDATE_REQ) {
+                ble_gap_upd_params* p = (ble_gap_upd_params*)event->conn_update_req.peer_params;
+                if (p->itvl_max <= 9) {
+                    p->itvl_min = 6;  // 7.50 ms (133 Hz)
+                    p->itvl_max = 9;  // 11.25 ms
+                    p->min_ce_len = 0;
+                    p->max_ce_len = 0;
+                }
             }
 
             NIMBLE_LOGD(LOG_TAG, "%s peer params", (rc == 0) ? "Accepted" : "Rejected");

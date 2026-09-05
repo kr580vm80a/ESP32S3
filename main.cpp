@@ -4,14 +4,13 @@
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
 #include "nimble/nimble/host/include/host/ble_gap.h"
+#include "nimble/nimble/host/services/gatt/include/services/gatt/ble_svc_gatt.h"
 #include <esp_mac.h>
 #include <mbedtls/sha256.h>
 
-#if CONFIG_IDF_TARGET_ESP32S3
-#include <HWCDC.h>
-#endif
+#include "logi_bolt.h"
 
-#define BLE_DEVICE_NAME "ESP32 KVM Mouse"
+#define BLE_DEVICE_NAME "ESP32 KVM Combo"
 
 Preferences preferences;
 
@@ -23,6 +22,8 @@ enum os {
     OS_WINDOWS = 0,
     OS_MAC = 1
 };
+static String firstConnectedPcMac = "";
+static bool isCalibrated = false;
 // Structure to store monitor configuration
 struct MonitorConfig {
     int id = 1;
@@ -50,6 +51,8 @@ NimBLECharacteristic* macAbsInputChar = nullptr;
 NimBLECharacteristic* keyboardInputChar = nullptr;
 NimBLECharacteristic* keyboardOutputChar = nullptr;
 NimBLECharacteristic* mediaInputChar = nullptr;
+static NimBLERemoteCharacteristic* pKbLedChar = nullptr;
+static NimBLERemoteCharacteristic* pKbBootLedChar = nullptr;
 
 // --- Security & Authentication Constants ---
 #define BLE_PAIRING_PIN             123456           // Static 6-digit PIN code for PC Bluetooth pairing
@@ -75,11 +78,25 @@ struct KVMClient {
   String mac;
   String name;
   bool active;
+  bool isTurbo;
+  bool isHandshaking;
+  uint32_t handshakeStartMs;
+  uint8_t ledState; // Saved keyboard LED state (Caps/Num/Scroll) for this PC
 };
 #define MAX_SUPPORTED_KVM_CLIENTS 6 // 6 PCs + 1 Mouse + 1 Keyboard + 1 Web = 9 max NimBLE connections
 KVMClient kvmClients[MAX_SUPPORTED_KVM_CLIENTS];
 int maxKvmClients = 3; // Dynamic variable based on number of PCs in current configuration
-static TaskHandle_t bootCalibTaskHandle = NULL;
+
+// Dedicated tracking for non-KVM / Web Bluetooth connections
+struct NonKvmClient {
+  uint16_t conn_id = BLE_HS_CONN_HANDLE_NONE;
+  String mac = "";
+  uint32_t connectedTimeMs = 0;
+  bool isWebConfig = false;
+};
+#define MAX_NON_KVM_CLIENTS 2
+static NonKvmClient nonKvmClients[MAX_NON_KVM_CLIENTS];
+
 uint16_t getTargetConnHandle(const String& targetMac);
 
 // Virtual Cursor Position & State
@@ -135,7 +152,7 @@ const uint8_t hidReportMap[] = {
     0x81, 0x00,        //   Input (Data,Array,Abs) - 6 keycodes
     0xC0,              // End Collection
 
-    // --- REPORT ID 2: Standard Relative Mouse (for natural physical movement) ---
+    // --- REPORT ID 2: Native 12-bit High-Resolution Mouse (Logitech Darkfield Standard) ---
     0x05, 0x01,        // Usage Page (Generic Desktop Ctrls)
     0x09, 0x02,        // Usage (Mouse)
     0xA1, 0x01,        // Collection (Application)
@@ -156,9 +173,9 @@ const uint8_t hidReportMap[] = {
     0x05, 0x01,        //     Usage Page (Generic Desktop Ctrls)
     0x09, 0x30,        //     Usage (X)
     0x09, 0x31,        //     Usage (Y)
-    0x16, 0x01, 0x80,  //     Logical Minimum (-32767)
-    0x26, 0xFF, 0x7F,  //     Logical Maximum (32767)
-    0x75, 0x10,        //     Report Size (16)
+    0x16, 0x01, 0xF8,  //     Logical Minimum (-2047)
+    0x26, 0xFF, 0x07,  //     Logical Maximum (2047)
+    0x75, 0x0C,        //     Report Size (12)
     0x95, 0x02,        //     Report Count (2: X, Y)
     0x81, 0x06,        //     Input (Data,Var,Rel)
     0x09, 0x38,        //     Usage (Wheel)
@@ -251,10 +268,6 @@ void logPrint(const char* format, ...) {
 
     Serial.print(timeStr);
     Serial.println(buffer);
-#if CONFIG_IDF_TARGET_ESP32S3
-    USBSerial.print(timeStr);
-    USBSerial.println(buffer);
-#endif
 }
 
 static String targetMouseMac = "";
@@ -280,8 +293,23 @@ static NimBLEUUID reportCharUUID("2a4d");
 
 static uint32_t lastConfigActivityTime = 0;
 
+bool isAnyPcHandshaking() {
+    uint32_t now = millis();
+    for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active && kvmClients[i].isHandshaking) {
+            // Failsafe Watchdog: if handshake has taken > 2500ms, unlock it to prevent deadlock
+            if (now - kvmClients[i].handshakeStartMs > 2500) {
+                kvmClients[i].isHandshaking = false;
+                logPrint("[BLE Watchdog] Handshake timeout for %s -> Failsafe unlocked", kvmClients[i].mac.c_str());
+            } else {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 bool isMacInActiveLayout(const String& mac) {
-    if (mac.length() == 0) return false;
     for (int i = 0; i < monitorCount; i++) {
         if (monitors[i].mac.equals(mac)) return true;
     }
@@ -316,30 +344,68 @@ void checkAndResumeAdvertising() {
     for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
         if (kvmClients[i].active) activeCount++;
     }
+    for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
+        if (nonKvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) activeCount++;
+    }
 
     // Hardware ACL budget: 8 max simultaneous connections in ESP32-S3 controller (10 activities).
     int maxAllowedPcConnections = max(2, 8 - (targetMouseMac.length() > 0 ? 1 : 0) - (targetKeyboardMac.length() > 0 ? 1 : 0));
 
-    // When in config mode or when PCs are not full: keep advertising active so Web Bluetooth and PCs can connect!
     int layoutPcs = getActiveLayoutPcCount();
-    int targetPcLimit = isConfigModeActive() ? maxAllowedPcConnections : (layoutPcs > 0 ? max(layoutPcs, 2) : 2);
-    if (targetPcLimit > maxAllowedPcConnections) targetPcLimit = maxAllowedPcConnections;
 
+    // Keep advertising active as long as hardware handles are available (up to maxAllowedPcConnections)
+    // so Web Bluetooth browser interface can discover and connect to ESP32 at any time!
     if (activeCount < maxAllowedPcConnections) {
         if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-            logPrint("[BLE Server] Advertising active (PCs: %d/%d [Layout: %d, ConfigMode: %s] | Mouse: %d | KB: %d)", 
-                     activeCount, targetPcLimit, layoutPcs, isConfigModeActive() ? "YES" : "NO",
+            logPrint("[BLE Server] Advertising active (PCs: %d/%d [Layout: %d] | Mouse: %d | KB: %d)", 
+                     activeCount, maxAllowedPcConnections, layoutPcs,
                      mouseConnected ? 1 : 0, kbConnected ? 1 : 0);
             NimBLEDevice::getAdvertising()->start();
         }
     } else {
         if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
-            logPrint("[BLE Server] Advertising paused (PCs connected: %d/%d [Layout: %d, ConfigMode: %s])", 
-                     activeCount, targetPcLimit, layoutPcs, isConfigModeActive() ? "YES" : "NO");
+            logPrint("[BLE Server] Advertising paused (All %d connection slots full)", activeCount);
             NimBLEDevice::getAdvertising()->stop();
         }
     }
 }
+
+void markClientAsWebConfig(uint16_t connHandle) {
+    for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
+        if (nonKvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && 
+            (nonKvmClients[i].conn_id == connHandle || connHandle == BLE_HS_CONN_HANDLE_NONE)) {
+            if (!nonKvmClients[i].isWebConfig) {
+                nonKvmClients[i].isWebConfig = true;
+                logPrint("[BLE Server] Client %s (conn: %d) identified as Web Configurator (Grace Period cancelled)",
+                         nonKvmClients[i].mac.c_str(), nonKvmClients[i].conn_id);
+            }
+        }
+    }
+}
+
+void checkWebGracePeriod() {
+    if (monitorCount == 0) return; // Allow unconfigured setup
+    NimBLEServer* pServer = NimBLEDevice::getServer();
+    if (!pServer) return;
+
+    uint32_t now = millis();
+    for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
+        if (nonKvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) {
+            uint32_t elapsed = now - nonKvmClients[i].connectedTimeMs;
+            if (!nonKvmClients[i].isWebConfig && elapsed >= 3000) {
+                logPrint("[BLE Server] ⛔ REJECTED: PC %s is NOT in active layout and no Web Config activity after 3s! Disconnecting...",
+                         nonKvmClients[i].mac.c_str());
+                pServer->disconnect(nonKvmClients[i].conn_id);
+                nonKvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
+                nonKvmClients[i].mac = "";
+                nonKvmClients[i].connectedTimeMs = 0;
+                nonKvmClients[i].isWebConfig = false;
+            }
+        }
+    }
+}
+
+void checkAndLogPhyStatus(uint16_t connHandle, const char* deviceLabel);
 
 class SecurityCallbacks : public NimBLESecurityCallbacks {
     uint32_t onPassKeyRequest() {
@@ -367,13 +433,284 @@ class SecurityCallbacks : public NimBLESecurityCallbacks {
     void onAuthenticationComplete(ble_gap_conn_desc* desc) {
         logPrint("[BLE Security] onAuthenticationComplete: conn=%d, enc=%d, auth=%d, bonded=%d",
                  desc->conn_handle, desc->sec_state.encrypted, desc->sec_state.authenticated, desc->sec_state.bonded);
+        if (desc->sec_state.encrypted) {
+            ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
+            ble_svc_gatt_changed(0x0001, 0xffff);
+        }
         checkAndResumeAdvertising();
     }
 };
 
+// --- Asynchronous BLE Link Metrics & PHY Status Logger ---
+void checkAndLogPhyStatus(uint16_t connHandle, const char* deviceLabel) {
+    if (connHandle == BLE_HS_CONN_HANDLE_NONE) return;
+    struct PhyCheckParams {
+        uint16_t handle;
+        char label[32];
+    };
+    PhyCheckParams* params = new PhyCheckParams();
+    params->handle = connHandle;
+    strncpy(params->label, deviceLabel, sizeof(params->label) - 1);
+    params->label[sizeof(params->label) - 1] = '\0';
+
+    xTaskCreate([](void* param) {
+        PhyCheckParams* p = (PhyCheckParams*)param;
+        vTaskDelay(pdMS_TO_TICKS(1500));
+        uint8_t txPhy = 0, rxPhy = 0;
+        ble_gap_read_le_phy(p->handle, &txPhy, &rxPhy);
+        if (txPhy != 2 && rxPhy != 2) {
+            vTaskDelay(pdMS_TO_TICKS(1200));
+            ble_gap_read_le_phy(p->handle, &txPhy, &rxPhy);
+        }
+        ble_gap_conn_desc desc;
+        if (ble_gap_conn_find(p->handle, &desc) == 0) {
+            logPrint("[BLE LINK METRICS] %s (conn: %d) -> Itvl: %.2f ms (itvl: %d) | Latency: %d | Timeout: %d ms | TX: %s | RX: %s",
+                     p->label, p->handle,
+                     desc.conn_itvl * 1.25f, desc.conn_itvl,
+                     desc.conn_latency,
+                     desc.supervision_timeout * 10,
+                     txPhy == 2 ? "2M (⚡)" : (txPhy == 1 ? "1M" : "CODED"),
+                     rxPhy == 2 ? "2M (⚡)" : (rxPhy == 1 ? "1M" : "CODED"));
+        }
+        delete p;
+        vTaskDelete(NULL);
+    }, "phyCheckTask", 4096, params, 1, NULL);
+}
+
+/**
+ * @brief Dynamic Link Optimization Subsystem ("Active Turbo + Background Standby")
+ * Elevates the currently active PC (where the mouse cursor is located) to high-speed Turbo profile (11.25ms - 15.0ms, latency 0),
+ * while shifting all background PCs to Standby profile (60ms - 80ms, latency 4) to free 90% radio bandwidth for Mouse + Active PC.
+ */
+void updateKvmPowerAndRateProfiles(String activeMac = "", bool force = false) {
+    NimBLEServer* pServer = NimBLEDevice::getServer();
+    if (!pServer) return;
+
+    if (activeMac.length() == 0 && monitorCount > 0 && currentMonitorIndex < monitorCount) {
+        activeMac = monitors[currentMonitorIndex].mac;
+    }
+
+    bool boltActive = logi_bolt_is_mouse_connected();
+    bool isMouseActive = mouseConnected || boltActive;
+
+    for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) {
+            String clientMac = kvmClients[i].mac;
+            // Detect OS type from monitor configuration
+            int clientOs = OS_WINDOWS;
+            for (int m = 0; m < monitorCount; m++) {
+                if (monitors[m].mac.equals(clientMac)) {
+                    clientOs = monitors[m].os;
+                    break;
+                }
+            }
+
+            // DUAL-MODE SMART POWER & BANDWIDTH ALLOCATION:
+            // 1. With Logi Bolt (USB): Radio has NO BLE mouse traffic -> ALL connected PCs stay in PERMANENT TURBO (0ms switch lag!)
+            // 2. With BLE Mouse: Active PC gets TURBO, background PCs get STANDBY (frees 90% radio bandwidth for BLE mouse!)
+            bool isCurrentActivePc = (activeMac.length() > 0 && clientMac.equals(activeMac));
+            bool shouldBeTurbo = isMouseActive && (boltActive || isCurrentActivePc);
+
+            bool wasTurbo = kvmClients[i].isTurbo;
+            if (force || wasTurbo != shouldBeTurbo) {
+                kvmClients[i].isTurbo = shouldBeTurbo;
+                ble_gap_conn_desc desc;
+                bool hasDesc = (ble_gap_conn_find(kvmClients[i].conn_id, &desc) == 0);
+
+                if (shouldBeTurbo) {
+                    if (clientOs == OS_MAC) {
+                        if (hasDesc && desc.conn_latency == 0 && desc.conn_itvl == 12) {
+                            continue; // Already in Apple Turbo!
+                        }
+                        // macOS ACTIVE TURBO: Apple strictly mandates itvl: 12 (15.00ms). Latency 0 gives 0ms slave latency!
+                        pServer->updateConnParams(kvmClients[i].conn_id, 12, 12, 0, 216);
+                        logPrint("[BLE Server] Enforcing macOS PERMANENT TURBO for PC: %s (Target: 15.00 ms, Latency: 0, ⚡)", kvmClients[i].mac.c_str());
+                    } else {
+                        if (hasDesc && desc.conn_itvl <= 8 && (desc.conn_latency == 0 || (wasTurbo && (boltActive || isCurrentActivePc)))) {
+                            continue; // Already in Windows Turbo!
+                        }
+                        // Windows ACTIVE TURBO: 7.50ms..10.00ms (itvl 6..8), latency 0, timeout 6000ms (Ultra-fast 100..133Hz)
+                        pServer->updateConnParams(kvmClients[i].conn_id, 6, 8, 0, 600);
+                        logPrint("[BLE Server] Enforcing Windows PERMANENT TURBO for PC: %s (Target: 7.50..10.00 ms, Latency: 0, ⚡)", kvmClients[i].mac.c_str());
+                    }
+                } else {
+                    // Safe idle standby only when no mouse is active at all
+                    if (clientOs == OS_MAC) {
+                        pServer->updateConnParams(kvmClients[i].conn_id, 12, 12, 4, 216);
+                        logPrint("[BLE Server] Idle Standby for macOS PC: %s (Latency: 4, 💤)", kvmClients[i].mac.c_str());
+                    } else {
+                        pServer->updateConnParams(kvmClients[i].conn_id, 6, 8, 4, 600);
+                        logPrint("[BLE Server] Idle Standby for Windows PC: %s (Latency: 4, 💤)", kvmClients[i].mac.c_str());
+                    }
+                }
+            }
+        }
+    }
+}
+
 void calibrateFirstConnectedPcToCenter(String targetMac);
+static TaskHandle_t bootCalibTaskHandle = NULL;
+
+void scheduleBootCalibration() {
+    bool isMouseActive = mouseConnected || logi_bolt_is_mouse_connected();
+    if (monitorCount == 0 || !isMouseActive || isCalibrated || firstConnectedPcMac.length() == 0) return;
+    isCalibrated = true;
+    if (bootCalibTaskHandle != NULL) {
+        vTaskDelete(bootCalibTaskHandle);
+        bootCalibTaskHandle = NULL;
+    }
+    xTaskCreate([](void* param) {
+        String* pMac = (String*)param;
+        vTaskDelay(pdMS_TO_TICKS(600));
+        calibrateFirstConnectedPcToCenter(*pMac);
+        delete pMac;
+        bootCalibTaskHandle = NULL;
+        vTaskDelete(NULL);
+    }, "bootCalibTask", 3072, new String(firstConnectedPcMac), 1, &bootCalibTaskHandle);
+}
+
+static bool s_capsLockLedState = false;
+
+void syncPhysicalKeyboardLedsForPc(const String& targetMac) {
+    if (targetMac.length() == 0) return;
+    uint8_t targetLeds = 0;
+    for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+        if (kvmClients[k].active && kvmClients[k].mac.equalsIgnoreCase(targetMac)) {
+            targetLeds = kvmClients[k].ledState;
+            break;
+        }
+    }
+    s_capsLockLedState = (targetLeds & 0x02) ? true : false;
+    if (logi_bolt_is_keyboard_connected()) {
+        logi_bolt_set_keyboard_leds(targetLeds);
+    }
+    if (pKbLedChar && kbConnected) {
+        bool useResponse = pKbLedChar->canWrite() && !pKbLedChar->canWriteNoResponse();
+        bool ok = pKbLedChar->writeValue(&targetLeds, 1, useResponse);
+        logPrint("[KEYBOARD LED] BLE write to Report ID 1 (resp: %d) -> res: %d | val: 0x%02X (Caps: %d)",
+                 useResponse, ok, targetLeds, (targetLeds & 0x02) ? 1 : 0);
+    }
+    if (pKbBootLedChar && kbConnected) {
+        bool useResponse = pKbBootLedChar->canWrite() && !pKbBootLedChar->canWriteNoResponse();
+        bool ok = pKbBootLedChar->writeValue(&targetLeds, 1, useResponse);
+        logPrint("[KEYBOARD LED] BLE write to Boot Output 0x2A32 (resp: %d) -> res: %d | val: 0x%02X (Caps: %d)",
+                 useResponse, ok, targetLeds, (targetLeds & 0x02) ? 1 : 0);
+    }
+    logPrint("[KEYBOARD LED] Synced physical LEDs for PC %s -> 0x%02X (Caps: %d)",
+             targetMac.c_str(), targetLeds, (targetLeds & 0x02) ? 1 : 0);
+}
+
+void checkAndSyncCapsLock(const uint8_t* rep8) {
+    if (!rep8) return;
+    static bool s_lastCapsLockPressed = false;
+    bool currentCapsLockPressed = false;
+    for (int k = 2; k < 8; k++) {
+        if (rep8[k] == 0x39) {
+            currentCapsLockPressed = true;
+            break;
+        }
+    }
+    if (currentCapsLockPressed && !s_lastCapsLockPressed) {
+        String activeMac = (monitorCount > 0) ? monitors[currentMonitorIndex].mac : "";
+        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+            if (kvmClients[i].active && kvmClients[i].mac.equalsIgnoreCase(activeMac)) {
+                kvmClients[i].ledState ^= 0x02; // Toggle CapsLock bit for currently active PC
+                break;
+            }
+        }
+        syncPhysicalKeyboardLedsForPc(activeMac);
+    }
+    s_lastCapsLockPressed = currentCapsLockPressed;
+}
+
+class KeyboardOutputCallbacks : public NimBLECharacteristicCallbacks {
+    void onWrite(NimBLECharacteristic* pCharacteristic, ble_gap_conn_desc* desc) override {
+        std::string val = pCharacteristic->getValue();
+        if (val.length() > 0) {
+            uint8_t leds = (uint8_t)val[0];
+            uint16_t connHandle = desc ? desc->conn_handle : BLE_HS_CONN_HANDLE_NONE;
+            
+            String senderMac = "";
+            for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                if (kvmClients[i].conn_id == connHandle) {
+                    kvmClients[i].ledState = leds;
+                    senderMac = kvmClients[i].mac;
+                    break;
+                }
+            }
+            
+            String activeMac = (monitorCount > 0) ? monitors[currentMonitorIndex].mac : "";
+            bool isActivePc = (senderMac.length() > 0 && senderMac.equalsIgnoreCase(activeMac));
+            
+            logPrint("[KEYBOARD LED] PC %s (conn %d) sent LED state: 0x%02X (Caps: %d, Active: %s)",
+                     senderMac.c_str(), connHandle, leds, (leds & 0x02) ? 1 : 0, isActivePc ? "YES" : "NO");
+            
+            if (isActivePc || senderMac.length() == 0) {
+                syncPhysicalKeyboardLedsForPc(activeMac.length() > 0 ? activeMac : senderMac);
+            }
+        }
+    }
+};
 
 class ServerCallbacks : public NimBLEServerCallbacks {
+    void onConnUpdate(NimBLEServer* pServer, ble_gap_conn_desc* desc) override {
+        String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
+        peerMac.toLowerCase();
+        peerMac.trim();
+        const char* mode = (desc->conn_itvl <= 16 && desc->conn_latency == 0) ? "ACTIVE TURBO (⚡)" : "BACKGROUND STANDBY (💤)";
+        logPrint("[BLE Server] Connection Metrics Applied -> PC: %s (conn: %d) | Itvl: %.2f ms (itvl: %d) | Latency: %d | Timeout: %d ms -> %s",
+                 peerMac.c_str(), desc->conn_handle,
+                 desc->conn_itvl * 1.25f, desc->conn_itvl,
+                 desc->conn_latency,
+                 desc->supervision_timeout * 10,
+                 mode);
+
+        // If Bolt is active, NO PC is ever allowed to sleep (PERMANENT TURBO for all PCs).
+        // If BLE mouse is used, only the active PC (or sole connected PC) is kept in TURBO.
+        // If NO mouse is active (e.g. Bolt unplugged and no BLE mouse), background standby is expected.
+        bool boltActive = logi_bolt_is_mouse_connected();
+        bool isMouseActive = mouseConnected || boltActive;
+        String activeMac = (monitorCount > 0 && currentMonitorIndex < monitorCount) ? monitors[currentMonitorIndex].mac : "";
+        int activeCount = 0;
+        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+            if (kvmClients[i].active) activeCount++;
+        }
+        bool isCurrentActivePc = (activeMac.length() > 0 && peerMac.equalsIgnoreCase(activeMac));
+        bool shouldBeTurbo = isMouseActive && (boltActive || activeCount == 1 || isCurrentActivePc);
+
+        if (shouldBeTurbo && desc->conn_latency > 0) {
+            logPrint("[BLE Server] PC %s dropped into Latency %d (shouldBeTurbo=1)! Scheduling TURBO re-assertion...",
+                     peerMac.c_str(), desc->conn_latency);
+            xTaskCreate([](void* param) {
+                uint16_t connId = (uint16_t)(uintptr_t)param;
+                vTaskDelay(pdMS_TO_TICKS(250));
+                NimBLEServer* srv = NimBLEDevice::getServer();
+                if (srv) {
+                    ble_gap_conn_desc d;
+                    if (ble_gap_conn_find(connId, &d) == 0 && d.conn_latency > 0) {
+                        String pMac = NimBLEAddress(d.peer_ota_addr).toString().c_str();
+                        pMac.toLowerCase();
+                        pMac.trim();
+                        int pcOs = OS_WINDOWS;
+                        for (int m = 0; m < monitorCount; m++) {
+                            if (monitors[m].mac.equalsIgnoreCase(pMac)) {
+                                pcOs = monitors[m].os;
+                                break;
+                            }
+                        }
+                        if (pcOs == OS_MAC) {
+                            srv->updateConnParams(connId, 12, 12, 0, 216);
+                            logPrint("[BLE Server] Re-asserted macOS TURBO for conn %d (Target: 15.00ms, Latency: 0, ⚡)!", connId);
+                        } else {
+                            srv->updateConnParams(connId, 6, 8, 0, 600);
+                            logPrint("[BLE Server] Re-asserted Windows TURBO for conn %d (Target: 7.50..10.00ms, Latency: 0, ⚡)!", connId);
+                        }
+                    }
+                }
+                vTaskDelete(NULL);
+            }, "reTurboTask", 4096, (void*)(uintptr_t)desc->conn_handle, 1, NULL);
+        }
+    }
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         peerMac.toLowerCase();
@@ -382,50 +719,71 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                   peerMac.c_str(), desc->conn_handle, desc->conn_itvl, desc->conn_latency, desc->supervision_timeout);
 
         // Save connection
-        bool updated = false;
-        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-            if (kvmClients[i].mac.equals(peerMac)) {
-                kvmClients[i].conn_id = desc->conn_handle;
-                kvmClients[i].active = true;
-                updated = true;
-                break;
-            }
+        bool isLayoutPc = (monitorCount == 0) || isMacInActiveLayout(peerMac);
+
+        // Request BLE 5.0 2M PHY (2 Mbps ultra-low latency) only for KVM layout PCs
+        if (isLayoutPc) {
+            ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
+            checkAndLogPhyStatus(desc->conn_handle, peerMac.c_str());
         }
-        if (!updated) {
+
+        if (isLayoutPc) {
+            bool updated = false;
             for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-                if (!kvmClients[i].active) {
+                if (kvmClients[i].mac.equals(peerMac)) {
                     kvmClients[i].conn_id = desc->conn_handle;
-                    kvmClients[i].mac = peerMac;
-                    kvmClients[i].name = ""; // Always reset name to prevent leaking stale name from previous device
                     kvmClients[i].active = true;
+                    kvmClients[i].isTurbo = false;
+                    updated = true;
                     break;
                 }
             }
+            if (!updated) {
+                for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                    if (!kvmClients[i].active && kvmClients[i].mac.length() == 0) {
+                        kvmClients[i].conn_id = desc->conn_handle;
+                        kvmClients[i].mac = peerMac;
+                        kvmClients[i].name = ""; // Always reset name to prevent leaking stale name from previous device
+                        kvmClients[i].active = true;
+                        kvmClients[i].isTurbo = false;
+                        break;
+                    }
+                }
+            }
+        } else {
+            // Non-KVM Client (Candidate Web Bluetooth Configurator) - do NOT pollute kvmClients!
+            bool slotted = false;
+            for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
+                if (nonKvmClients[i].conn_id == BLE_HS_CONN_HANDLE_NONE || nonKvmClients[i].mac.equals(peerMac)) {
+                    nonKvmClients[i].conn_id = desc->conn_handle;
+                    nonKvmClients[i].mac = peerMac;
+                    nonKvmClients[i].connectedTimeMs = millis();
+                    nonKvmClients[i].isWebConfig = false;
+                    slotted = true;
+                    break;
+                }
+            }
+            if (!slotted) {
+                nonKvmClients[0].conn_id = desc->conn_handle;
+                nonKvmClients[0].mac = peerMac;
+                nonKvmClients[0].connectedTimeMs = millis();
+                nonKvmClients[0].isWebConfig = false;
+            }
+            logPrint("[BLE Server] ⏳ Non-KVM Client %s (conn: %d) connected. Starting 3s Web Config Grace Period...", 
+                     peerMac.c_str(), desc->conn_handle);
         }
 
-        // Count active connections
         int activeCount = 0;
         for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
             if (kvmClients[i].active) activeCount++;
         }
-
-        // If this is the FIRST connected PC that is in active layout, calibrate cursor to center
+        isCalibrated = false;
         if (activeCount == 1 && isMacInActiveLayout(peerMac)) {
-            if (bootCalibTaskHandle != NULL) {
-                vTaskDelete(bootCalibTaskHandle);
-                bootCalibTaskHandle = NULL;
-            }
-            String firstMac = peerMac;
-            xTaskCreate([](void* param) {
-                String* pMac = (String*)param;
-                vTaskDelay(pdMS_TO_TICKS(600));
-                calibrateFirstConnectedPcToCenter(*pMac);
-                delete pMac;
-                bootCalibTaskHandle = NULL;
-                vTaskDelete(NULL);
-            }, "bootCalibTask", 3072, new String(firstMac), 1, &bootCalibTaskHandle);
+            firstConnectedPcMac = peerMac;
+            scheduleBootCalibration();
         }
 
+        // Do not update connection parameters immediately in onConnect to prevent sch_prog.c assertion
         checkAndResumeAdvertising();
     }
 
@@ -437,37 +795,46 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
         isWebBleAuthenticated = false; // Reset Web Bluetooth authorization on client disconnect
         currentAuthNonce = "";
-
-        if (bootCalibTaskHandle != NULL) {
-            vTaskDelete(bootCalibTaskHandle);
-            bootCalibTaskHandle = NULL;
-        }
         
+        // Check if disconnected client was a non-KVM / Web client
+        bool isNonKvm = false;
+        for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
+            if (nonKvmClients[i].conn_id == desc->conn_handle || nonKvmClients[i].mac.equals(peerMac)) {
+                nonKvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
+                nonKvmClients[i].mac = "";
+                nonKvmClients[i].connectedTimeMs = 0;
+                nonKvmClients[i].isWebConfig = false;
+                isNonKvm = true;
+                break;
+            }
+        }
+
         for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
             if (kvmClients[i].conn_id == desc->conn_handle || kvmClients[i].mac.equals(peerMac)) {
                 kvmClients[i].active = false;
+                kvmClients[i].isTurbo = false;
                 break;
             }
         }
 
         // If the disconnected PC was the current active PC, failover to another connected PC!
+        isCalibrated = false;
         if (monitorCount > 0 && monitors[currentMonitorIndex].mac.equals(peerMac)) {
-            String fallbackMac = "";
+            firstConnectedPcMac = "";
             for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-                if (kvmClients[i].active && kvmClients[i].mac.length() > 0 && !kvmClients[i].mac.equals(peerMac)) {
-                    fallbackMac = kvmClients[i].mac;
+                if (kvmClients[i].active && !kvmClients[i].mac.equals(peerMac) && isMacInActiveLayout(kvmClients[i].mac)) {
+                    firstConnectedPcMac = kvmClients[i].mac;
                     break;
                 }
             }
-
-            if (fallbackMac.length() > 0) {
-                calibrateFirstConnectedPcToCenter(fallbackMac);
-                logPrint("[FAILOVER] Current PC %s disconnected! Switched control to active PC %s (Cursor at %ld, %ld)", peerMac.c_str(), fallbackMac.c_str(), virtualX, virtualY);
+            if (firstConnectedPcMac.length() > 0) {
+                scheduleBootCalibration();
+                logPrint("[FAILOVER] Current PC %s disconnected! Switched control to active PC %s (Cursor at %ld, %ld)", peerMac.c_str(), firstConnectedPcMac.c_str(), virtualX, virtualY);
             } else {
                 logPrint("[FAILOVER] Current PC %s disconnected and no other active PC available.", peerMac.c_str());
             }
         }
-
+        updateKvmPowerAndRateProfiles(isCalibrated ? firstConnectedPcMac : "");
         checkAndResumeAdvertising();
     }
 
@@ -480,12 +847,31 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         if (!desc->sec_state.bonded) {
             logPrint("[BLE Server] Bonding incomplete (Bonded: 0) for %s! Clearing stale bond key to allow fresh pairing...", peerMac.c_str());
             NimBLEDevice::deleteBond(desc->peer_ota_addr);
+        } else {
+            int activeCount = 0;
+            for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                if (kvmClients[i].active) activeCount++;
+            }
+            if (activeCount == 1) {
+                firstConnectedPcMac = peerMac;
+                isCalibrated = false;
+                scheduleBootCalibration();
+            }
+            // Connection is securely bonded and link layer is stable: apply rate profile safely!
+            updateKvmPowerAndRateProfiles(peerMac, true);
         }
     }
 };
 
 String getMonDisplayName(int idx) {
     return monitors[idx].name;
+}
+
+int getActiveClientOs() {
+    if (monitorCount > 0 && currentMonitorIndex < monitorCount) {
+        return monitors[currentMonitorIndex].os;
+    }
+    return OS_WINDOWS;
 }
 
 uint16_t getTargetConnHandle(const String& targetMac) {
@@ -497,21 +883,13 @@ uint16_t getTargetConnHandle(const String& targetMac) {
     return BLE_HS_CONN_HANDLE_NONE;
 }
 
-// Send HID report to target connection handle or broadcast notify
-void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8_t* report, size_t length = 7) {
-    if (!pChar || !report || length == 0) return;
-    if (connHandle != BLE_HS_CONN_HANDLE_NONE) {
-        os_mbuf *om = ble_hs_mbuf_from_flat(report, length);
-        if (om != NULL) {
-            int rc = ble_gatts_notify_custom(connHandle, pChar->getHandle(), om);
-            if (rc != 0) {
-                logPrint("[BLE HID NOTIFY ERR] conn: %d handle: 0x%04X rc: %d", connHandle, pChar->getHandle(), rc);
-                os_mbuf_free_chain(om);
-            }
-        }
-    } else {
-        pChar->setValue(report, length);
-        pChar->notify();
+// Send HID report directly to target connection handle
+void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8_t* report, size_t length) {
+    if (!pChar || !report || length == 0 || connHandle == BLE_HS_CONN_HANDLE_NONE) return;
+    os_mbuf *om = ble_hs_mbuf_from_flat(report, length);
+    if (!om) return;
+    if (ble_gatts_notify_custom(connHandle, pChar->getHandle(), om) != 0) {
+        os_mbuf_free_chain(om);
     }
 }
 
@@ -524,6 +902,28 @@ void sendAbsPosWindows(uint16_t connHandle, uint16_t absX, uint16_t absY) {
     };
     sendHidReport(absInputChar, connHandle, absReport, sizeof(absReport));
     logPrint("Sent Window position at (%ld, %ld), Virtual: (%ld, %ld)", absX, absY, virtualX, virtualY);
+}
+
+void sendRelative12Bit(uint16_t connHandle, int32_t dx, int32_t dy, uint8_t buttons = 0, int8_t scroll = 0, int8_t hScroll = 0) {
+    do {
+        int16_t curDx = (int16_t)constrain(dx, -2047, 2047);
+        int16_t curDy = (int16_t)constrain(dy, -2047, 2047);
+        uint16_t uX = (uint16_t)(curDx & 0x0FFF);
+        uint16_t uY = (uint16_t)(curDy & 0x0FFF);
+        uint8_t rep[6] = {
+            (uint8_t)(buttons & 0x1F),
+            (uint8_t)(uX & 0xFF),
+            (uint8_t)(((uX >> 8) & 0x0F) | ((uY & 0x0F) << 4)),
+            (uint8_t)((uY >> 4) & 0xFF),
+            (uint8_t)constrain(scroll, -127, 127),
+            (uint8_t)constrain(hScroll, -127, 127)
+        };
+        sendHidReport(inputChar, connHandle, rep, sizeof(rep));
+        dx -= curDx;
+        dy -= curDy;
+        scroll = 0;
+        hScroll = 0;
+    } while (dx != 0 || dy != 0);
 }
 
 MonitorConfig& primaryMonitor(const String& targetMac) {
@@ -560,15 +960,15 @@ void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targ
     int jumpX = 0, jumpY = 0;
     int step1X = 0, step1Y = 0;
     int shiftX = 0, shiftY = 0;
-    if (targetGlobalY < primaryMon.y - 1 - shift) {
+    if (targetGlobalY < primaryMon.y) {
         jumpY = primaryMon.y;
-        if (targetGlobalX < (primaryMon.x + shift)) {
+        if (targetGlobalX <= (primaryMon.x)) {
             // use top left corner
             jumpX = primaryMon.x + shift;
             step1Y = -1;
             shiftX = -shift;
             shiftY = 1;
-        } else if (targetGlobalX > (primaryMon.x + primaryMon.width - 1 - shift)) {
+        } else if (targetGlobalX >= (primaryMon.x + primaryMon.width - 1)) {
             // use top right corner
             jumpX = primaryMon.x + primaryMon.width - 1 - shift;
             step1Y = -1;
@@ -579,15 +979,15 @@ void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targ
             jumpX = targetGlobalX;
             jumpY = primaryMon.y;
         }
-    } else if (targetGlobalY > (primaryMon.y + primaryMon.height + shift)) {
+    } else if (targetGlobalY > (primaryMon.y + primaryMon.height - 1)) {
         jumpY = primaryMon.y + primaryMon.height - 1;
-        if (targetGlobalX < (primaryMon.x + shift)) {
+        if (targetGlobalX <= (primaryMon.x)) {
             // use bottom left corner
             jumpX = primaryMon.x + shift;
             step1Y = 1;
             shiftX = -shift;
             shiftY = -1;
-        } else if (targetGlobalX > (primaryMon.x + primaryMon.width - 1 - shift)) {
+        } else if (targetGlobalX >= (primaryMon.x + primaryMon.width - 1)) {
             // use bottom right corner
             jumpX = primaryMon.x + primaryMon.width - 1 - shift;
             step1Y = 1;
@@ -617,69 +1017,44 @@ void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targ
     logPrint("Window jump position at (%ld, %ld)", jumpX, jumpY);
 
     if (step1X != 0 || step1Y != 0) {
-        uint8_t report[7] = {
-            0,
-            (uint8_t)(step1X & 0xFF),
-            (uint8_t)((step1X >> 8) & 0xFF),
-            (uint8_t)(step1Y & 0xFF),
-            (uint8_t)((step1Y >> 8) & 0xFF),
-            0,
-            0
-        };
-        sendHidReport(inputChar, connHandle, report, sizeof(report));
+        sendRelative12Bit(connHandle, step1X, step1Y);
         logPrint("Window step position at (%ld, %ld)", step1X, step1Y);
     }
 
     int32_t deltaX = targetGlobalX - jumpX + shiftX;
     int32_t deltaY = targetGlobalY - jumpY + shiftY;
     logPrint("Window move at (%ld, %ld)", deltaX, deltaY);
-    uint8_t report[7] = {
-        0,
-        (uint8_t)(deltaX & 0xFF),
-        (uint8_t)((deltaX >> 8) & 0xFF),
-        (uint8_t)(deltaY & 0xFF),
-        (uint8_t)((deltaY >> 8) & 0xFF),
-        0,
-        0
-    };
-    sendHidReport(inputChar, connHandle, report, sizeof(report));
+    sendRelative12Bit(connHandle, deltaX, deltaY);
 }
 
-// --- Absolute HID Positioning Function ---
+// --- Simplified Absolute HID Positioning Function for macOS (MacBook at bottom) ---
 void sendAbsoluteCoordinatesMacOs(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
     MonitorConfig& targetMon = monitors[monIndex];
+    MonitorConfig& primaryMon = primaryMonitor(targetMon.mac);
+    sendRelative12Bit(connHandle, 0, -5000);
+    sendRelative12Bit(connHandle, -6000, 0);
+    if (!targetMon.isPrimary) {
+        if (targetMon.y > 0) sendRelative12Bit(connHandle, 0, targetMon.y + 100);
+        if (targetMon.x > 0) sendRelative12Bit(connHandle, targetMon.x + 200, 0);
+    } else {
+        int32_t overMacX = primaryMon.x + (primaryMon.width / 2);
+        long topMonitorY = 0;
+        for (int i = 0; i < monitorCount; i++) {
+            if (monitors[i].mac.equals(targetMon.mac) && !monitors[i].isPrimary) {
+                if (overMacX >= monitors[i].x && overMacX < monitors[i].x + monitors[i].width) {
+                    topMonitorY = monitors[i].y;
+                    break;
+                }
+            }
+        }
+        if (topMonitorY > 0) sendRelative12Bit(connHandle, 0, topMonitorY + 100);
+        if (overMacX > 0) sendRelative12Bit(connHandle, overMacX, 0);
+        sendRelative12Bit(connHandle, 0, 3000);
+    }
     long relX = constrain(targetGlobalX - targetMon.x, 0, targetMon.width);
     long relY = constrain(targetGlobalY - targetMon.y, 0, targetMon.height);
     uint16_t absX = (uint16_t)round(((float)relX / (float)targetMon.width) * 32767.0f);
     uint16_t absY = (uint16_t)round(((float)relY / (float)targetMon.height) * 32767.0f);
-    long maxOtherY = targetMon.y;
-    long minOtherY = targetMon.y;
-    for (int i = 0; i < monitorCount; i++) {
-        if (monitors[i].mac.equals(targetMon.mac)) {
-            if (monitors[i].y > maxOtherY) maxOtherY = monitors[i].y;
-            if (monitors[i].y < minOtherY) minOtherY = monitors[i].y;
-        }
-    }
-
-    uint8_t anchorReport[7] = { 0, 0, 0, 0, 0, 0, 0 };
-    if (targetMon.y >= maxOtherY && maxOtherY > minOtherY) {
-        // Target is bottom monitor (Retina) -> send rapid burst DOWN to force focus to bottom screen
-        int16_t dY = 500;
-        anchorReport[3] = (uint8_t)(dY & 0xFF);
-        anchorReport[4] = (uint8_t)((dY >> 8) & 0xFF);
-        for (int k = 0; k < 3; k++) {
-            sendHidReport(inputChar, connHandle, anchorReport, sizeof(anchorReport));
-        }
-    } else if (targetMon.y <= minOtherY && maxOtherY > minOtherY) {
-        // Target is top monitor (DELL) -> send rapid burst UP to force focus to top screen
-        int16_t dY = -500;
-        anchorReport[3] = (uint8_t)(dY & 0xFF);
-        anchorReport[4] = (uint8_t)((dY >> 8) & 0xFF);
-        for (int k = 0; k < 3; k++) {
-            sendHidReport(inputChar, connHandle, anchorReport, sizeof(anchorReport));
-        }
-    }
-
     uint8_t absReport[5] = {
         0x01,                               // In Range = ON
         (uint8_t)(absX & 0xFF),
@@ -688,15 +1063,14 @@ void sendAbsoluteCoordinatesMacOs(uint16_t connHandle, int monIndex, long target
         (uint8_t)((absY >> 8) & 0xFF)
     };
     sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
-    absReport[0] = 0x00;                    // In Range = OFF (release hover)
+    absReport[0] = 0x00;                    // In Range = OFF
     sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
-    logPrint("[%s] Sent macOS digitizer position to PC %s at (%ld, %ld) [Rel: %ld, %ld -> Norm: %u, %u] on Mon #%d (%s)",
-                contextLabel, targetMon.mac.c_str(), targetGlobalX, targetGlobalY, relX, relY, absX, absY, targetMon.id, targetMon.name.c_str());
+    logPrint("[%s] Sent macOS1 digitizer position to PC %s at (%ld, %ld) [Rel: %ld, %ld -> Norm: %u, %u] on Mon #%d (%s)",
+             contextLabel, targetMon.mac.c_str(), targetGlobalX, targetGlobalY, relX, relY, absX, absY, targetMon.id, targetMon.name.c_str());
 }
 
 // --- Absolute HID Positioning Function ---
 void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
-    if (monitorCount == 0) return;
     if (monitors[monIndex].os == OS_MAC) {
         sendAbsoluteCoordinatesMacOs(connHandle, monIndex, targetGlobalX, targetGlobalY, contextLabel);
     } else {
@@ -706,7 +1080,6 @@ void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGloba
 
 // --- Boot Center Calibration Wrapper ---
 void calibrateFirstConnectedPcToCenter(String targetMac) {
-    if (monitorCount == 0) return;
     uint16_t connHandle = getTargetConnHandle(targetMac);
     if (connHandle == BLE_HS_CONN_HANDLE_NONE) return;
 
@@ -721,6 +1094,8 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
     virtualX = mon.x + (mon.width / 2);
     virtualY = mon.y + (mon.height / 2);
     sendAbsoluteCoordinates(connHandle, currentMonitorIndex, virtualX, virtualY, "BOOT POSITION");
+    updateKvmPowerAndRateProfiles(mon.mac, true);
+    syncPhysicalKeyboardLedsForPc(mon.mac);
 }
 
 // --- BLE Host (Central) Functions ---
@@ -751,30 +1126,21 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             virtualY = currentMon.y + currentMon.height -1 + shift;
             sendDy += 127;
         }
-        logPrint("[CALIBRATION EDGE] Cursor at (%ld, %ld) on %s", virtualX, virtualY, currentMon.name.c_str());
+        static uint32_t lastCalibLog = 0;
+        if (millis() - lastCalibLog > 500) {
+            lastCalibLog = millis();
+            logPrint("[CALIBRATION EDGE] Cursor at (%ld, %ld) on %s", virtualX, virtualY, currentMon.name.c_str());
+        }
     };
 
     if (currentMon.scale != 100) {
-
-        long effectiveDx = dx;
-        long effectiveDy = dy;
-
         float scaleFactor = currentMon.scale / 100.0f;
-
-        float rawSendX = (dx / scaleFactor) + subpixelX;
-        float rawSendY = (dy / scaleFactor) + subpixelY;
-
-        sendDx = (int16_t)truncf(rawSendX);
-        sendDy = (int16_t)truncf(rawSendY);
-
-        subpixelX = rawSendX - (float)sendDx;
-        subpixelY = rawSendY - (float)sendDy;
 
         float rawEffX = ((float)sendDx * scaleFactor) + effectiveSubpixelX;
         float rawEffY = ((float)sendDy * scaleFactor) + effectiveSubpixelY;
 
-        effectiveDx = (long)truncf(rawEffX);
-        effectiveDy = (long)truncf(rawEffY);
+        long effectiveDx = (long)truncf(rawEffX);
+        long effectiveDy = (long)truncf(rawEffY);
 
         effectiveSubpixelX = rawEffX - (float)effectiveDx;
         effectiveSubpixelY = rawEffY - (float)effectiveDy;
@@ -817,23 +1183,15 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                 }
                 currentMonitorIndex = newMonitorIndex;
                 logPrint("[PC SWITCH] Cursor saved at (%ld, %ld)", virtualX, virtualY);
+                updateKvmPowerAndRateProfiles(monitors[newMonitorIndex].mac, true);
+                syncPhysicalKeyboardLedsForPc(monitors[newMonitorIndex].mac);
                 sendAbsoluteCoordinates(targetConn, newMonitorIndex, virtualX, virtualY, "PC SWITCH");
             }
         }
         resetSubpixelAccumulators();
     }
 
-    // Send 16-bit Relative HID Mouse Report (7 bytes: Buttons, dX_low, dX_high, dY_low, dY_high, VScroll, HScroll)
-    uint8_t report[7] = { 
-        buttons,
-        (uint8_t)(sendDx & 0xFF),
-        (uint8_t)((sendDx >> 8) & 0xFF),
-        (uint8_t)(sendDy & 0xFF),
-        (uint8_t)((sendDy >> 8) & 0xFF),
-        (uint8_t)constrain(scroll, -127, 127), 
-        (uint8_t)constrain(hScroll, -127, 127) 
-    };
-    sendHidReport(inputChar, connHandle, report, sizeof(report));
+    sendRelative12Bit(connHandle, sendDx, sendDy, buttons, scroll, hScroll);
 }
 
 // Callback when HID data is received from the mouse
@@ -856,6 +1214,97 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
     updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
 }
 
+// Dynamic Modifier Remapping for Mac / Windows
+// Logitech keyboards (like MX Keys) send standard PC/Windows modifier codes:
+// - Key next to Spacebar sends Left Alt (0x04)
+// - Key to the left of it (Start) sends Left GUI/Win (0x08)
+// On macOS, users expect the key next to Spacebar (labeled 'cmd') to act as Command (0x08),
+// and the 'opt' key to act as Option (0x04).
+// When target OS is Mac, swap Left Alt <-> Left GUI and Right Alt <-> Right GUI.
+static inline uint8_t remapModifiersForTargetOs(uint8_t mods, int targetOs) {
+    if (targetOs == OS_MAC) {
+        uint8_t remapped = mods & ~(0x04 | 0x08 | 0x40 | 0x80);
+        if (mods & 0x04) remapped |= 0x08; // Left Alt -> Left GUI (Command)
+        if (mods & 0x08) remapped |= 0x04; // Left GUI (Win) -> Left Alt (Option)
+        if (mods & 0x40) remapped |= 0x80; // Right Alt -> Right GUI (Command)
+        if (mods & 0x80) remapped |= 0x40; // Right GUI -> Right Alt (Option)
+        return remapped;
+    }
+    return mods;
+}
+
+// --- macOS Globe Key Pulse Generator (AC Keyboard Layout Select 0x029D) ---
+void sendGlobePulseToMac(uint16_t connHandle) {
+    if (connHandle == BLE_HS_CONN_HANDLE_NONE) return;
+    xTaskCreate([](void* param) {
+        uint16_t conn = (uint16_t)(uintptr_t)param;
+        // 1. Send clean key release on standard keyboard so no modifiers interfere
+        uint8_t zeroKey[8] = { 0 };
+        sendHidReport(keyboardInputChar, conn, zeroKey, 8);
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        // 2. Send Globe key press (Consumer Page 0x0C, Usage 0x029D)
+        uint8_t globePress[2] = { 0x9D, 0x02 };
+        sendHidReport(mediaInputChar, conn, globePress, 2);
+        logPrint("[GLOBE KEY] Sent Globe (0x029D) press to macOS (conn: %d)", conn);
+
+        vTaskDelay(pdMS_TO_TICKS(40));
+
+        // 3. Send Globe key release
+        uint8_t globeRelease[2] = { 0x00, 0x00 };
+        sendHidReport(mediaInputChar, conn, globeRelease, 2);
+        logPrint("[GLOBE KEY] Sent Globe (0x029D) release to macOS (conn: %d)", conn);
+
+        vTaskDelete(NULL);
+    }, "globeTask", 3072, (void*)(uintptr_t)connHandle, 1, NULL);
+}
+
+// --- macOS Ctrl+Shift -> Globe Key Detection ---
+static bool s_ctrlShiftArmed = false;
+static bool s_ctrlShiftOtherKey = false;
+
+void checkCtrlShiftGlobeTrigger(uint8_t rawMods, const uint8_t* rep8, int targetOs, uint16_t targetConn) {
+    if (targetOs != OS_MAC) {
+        s_ctrlShiftArmed = false;
+        s_ctrlShiftOtherKey = false;
+        return;
+    }
+
+    bool hasCtrl = (rawMods & (0x01 | 0x10)) != 0;
+    bool hasShift = (rawMods & (0x02 | 0x20)) != 0;
+    bool hasOtherMods = (rawMods & ~(0x01 | 0x02 | 0x10 | 0x20)) != 0; // Alt or GUI pressed
+
+    bool hasKeys = false;
+    if (rep8) {
+        for (int k = 2; k < 8; k++) {
+            if (rep8[k] != 0) {
+                hasKeys = true;
+                break;
+            }
+        }
+    }
+
+    if (hasCtrl && hasShift && !hasOtherMods) {
+        if (!hasKeys) {
+            if (!s_ctrlShiftArmed) {
+                s_ctrlShiftArmed = true;
+                s_ctrlShiftOtherKey = false; // Reset: Fresh clean Ctrl+Shift engagement
+            }
+        } else {
+            s_ctrlShiftOtherKey = true; // Non-modifier key was pressed while holding Ctrl+Shift (e.g. Ctrl+Shift+T)
+        }
+    } else {
+        if (s_ctrlShiftArmed) {
+            if (!s_ctrlShiftOtherKey) {
+                logPrint("[GLOBE KEY] Ctrl+Shift release detected -> Triggering Globe key on macOS!");
+                sendGlobePulseToMac(targetConn);
+            }
+            s_ctrlShiftArmed = false;
+            s_ctrlShiftOtherKey = false;
+        }
+    }
+}
+
 // Callback when HID data is received from the keyboard (Follow-the-Mouse)
 void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     if (!pData || length == 0) return;
@@ -875,7 +1324,7 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
     if (targetConn == BLE_HS_CONN_HANDLE_NONE) {
         // Fallback to any active connected PC if current monitor target is not matched
         for (int i = 0; i < maxKvmClients; i++) {
-            if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) {
+            if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && isMacInActiveLayout(kvmClients[i].mac)) {
                 targetConn = kvmClients[i].conn_id;
                 break;
             }
@@ -883,11 +1332,16 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
     }
     if (targetConn == BLE_HS_CONN_HANDLE_NONE) return;
 
+    int targetOs = OS_WINDOWS;
+    if (currentMonitorIndex < monitorCount) {
+        targetOs = monitors[currentMonitorIndex].os;
+    }
+
     if (length == 7) {
         // 7-byte report from Logitech MX Keys: [modifiers, key1, key2, key3, key4, key5, key6]
         // Standard HID 6KRO report requires 8 bytes: [modifiers, reserved(0x00), key1, key2, key3, key4, key5, key6]
         uint8_t rep8[8];
-        rep8[0] = pData[0]; // Modifiers (Shift, Ctrl, Alt, GUI)
+        rep8[0] = remapModifiersForTargetOs(pData[0], targetOs); // Modifiers (Shift, Ctrl, Alt, GUI)
         rep8[1] = 0x00;     // Reserved
         rep8[2] = pData[1]; // Key 1
         rep8[3] = pData[2]; // Key 2
@@ -896,15 +1350,30 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         rep8[6] = pData[5]; // Key 5
         rep8[7] = pData[6]; // Key 6
         sendHidReport(keyboardInputChar, targetConn, rep8, 8);
-        logPrint("[KEYBOARD FWD] 7B->8B [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d)", rep8[0], rep8[2], targetConn, currentMonitorIndex + 1);
+        checkAndSyncCapsLock(rep8);
+        checkCtrlShiftGlobeTrigger(pData[0], rep8, targetOs, targetConn);
+        logPrint("[KEYBOARD FWD] 7B->8B [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
+                 rep8[0], rep8[2], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
     } else if (length == 8) {
         // Standard 8-byte keyboard report: [mods, res, k1, k2, k3, k4, k5, k6]
-        sendHidReport(keyboardInputChar, targetConn, pData, length);
-        logPrint("[KEYBOARD FWD] 8B -> Conn %d (Mon #%d)", targetConn, currentMonitorIndex + 1);
+        uint8_t rep8[8];
+        memcpy(rep8, pData, 8);
+        rep8[0] = remapModifiersForTargetOs(pData[0], targetOs);
+        sendHidReport(keyboardInputChar, targetConn, rep8, length);
+        checkAndSyncCapsLock(rep8);
+        checkCtrlShiftGlobeTrigger(pData[0], rep8, targetOs, targetConn);
+        logPrint("[KEYBOARD FWD] 8B [Mods: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
+                 rep8[0], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
     } else if (length == 9) {
         // 9-byte report with Report ID prepended: forward payload without Report ID
-        sendHidReport(keyboardInputChar, targetConn, &pData[1], 8);
-        logPrint("[KEYBOARD FWD] 9B (ID 0x%02X) -> Conn %d (Mon #%d)", pData[0], targetConn, currentMonitorIndex + 1);
+        uint8_t rep8[8];
+        memcpy(rep8, &pData[1], 8);
+        rep8[0] = remapModifiersForTargetOs(pData[1], targetOs);
+        sendHidReport(keyboardInputChar, targetConn, rep8, 8);
+        checkAndSyncCapsLock(rep8);
+        checkCtrlShiftGlobeTrigger(pData[1], rep8, targetOs, targetConn);
+        logPrint("[KEYBOARD FWD] 9B (ID 0x%02X) [Mods: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
+                 pData[0], rep8[0], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
     } else if (length == 2) {
         // Consumer Control report (Media keys)
         sendHidReport(mediaInputChar, targetConn, pData, length);
@@ -913,15 +1382,46 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         // Consumer Control report with Report ID prepended
         sendHidReport(mediaInputChar, targetConn, &pData[1], 2);
         logPrint("[MEDIA FWD] 3B (ID 0x%02X) -> Conn %d (Mon #%d)", pData[0], targetConn, currentMonitorIndex + 1);
+    } else if (length >= 15 && length <= 17) {
+        // 16-byte Bitmap / NKRO Keyboard report from Logitech Bolt Receiver:
+        // Byte 0: Modifiers (Ctrl, Shift, Alt, GUI)
+        // Bytes 1..15: 120-bit key mask starting at HID usage 0x04 ('a')
+        uint8_t rep8[8] = {0};
+        rep8[0] = remapModifiersForTargetOs(pData[0], targetOs); // Modifiers
+        rep8[1] = 0x00;     // Reserved
+        
+        int keyIndex = 2;
+        for (int byteIdx = 1; byteIdx < (int)length && keyIndex < 8; byteIdx++) {
+            uint8_t b = pData[byteIdx];
+            if (b == 0) continue;
+            for (int bitIdx = 0; bitIdx < 8 && keyIndex < 8; bitIdx++) {
+                if (b & (1 << bitIdx)) {
+                    uint8_t hidCode = (uint8_t)((byteIdx - 1) * 8 + bitIdx + 4);
+                    rep8[keyIndex++] = hidCode;
+                }
+            }
+        }
+        sendHidReport(keyboardInputChar, targetConn, rep8, 8);
+        checkAndSyncCapsLock(rep8);
+        checkCtrlShiftGlobeTrigger(pData[0], rep8, targetOs, targetConn);
+        logPrint("[KEYBOARD FWD] Bolt Bitmap %dB->8B [Mods: 0x%02X, Keys: %02X %02X %02X] -> Conn %d (OS: %s)",
+                 (int)length, rep8[0], rep8[2], rep8[3], rep8[4], targetConn, targetOs == OS_MAC ? "Mac" : "Win");
     } else if (length == 19 || pData[0] == 0xFF) {
         // Logitech HID++ vendor packet: ignore
     } else {
-        sendHidReport(keyboardInputChar, targetConn, pData, min((size_t)8, length));
+        uint8_t repBuf[8];
+        size_t copyLen = min((size_t)8, length);
+        memcpy(repBuf, pData, copyLen);
+        if (copyLen > 0) {
+            repBuf[0] = remapModifiersForTargetOs(pData[0], targetOs);
+            checkCtrlShiftGlobeTrigger(pData[0], repBuf, targetOs, targetConn);
+        }
+        sendHidReport(keyboardInputChar, targetConn, repBuf, copyLen);
         logPrint("[KEYBOARD FWD] %dB -> Conn %d", (int)length, targetConn);
     }
 }
 
-bool connectToServer();
+bool connectToMouse();
 bool connectToKeyboard();
 void sendConfigResponse(const String& response);
 void saveMouseToNvsLayout(String mac, String name);
@@ -1026,9 +1526,10 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             mouseMatch = true;
         }
 
-        if (!mouseConnected && !isConnectingToMouse && mouseMatch) {
+        if (!mouseConnected && !logi_bolt_is_mouse_connected() && !isConnectingToMouse && mouseMatch) {
             isConnectingToMouse = true; // Set flag immediately to throttle multiple advertising packets
             logPrint("[BLE Scan] TARGET MOUSE MATCH! Connecting to %s (%s)", devName.c_str(), devMac.c_str());
+            NimBLEDevice::getScan()->stop();
             advDevice = new NimBLEAdvertisedDevice(*advertisedDevice);
             doConnectMouse = true;
         }
@@ -1039,9 +1540,10 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             kbMatch = true;
         }
 
-        if (!kbConnected && !isConnectingToKeyboard && kbMatch) {
+        if (!kbConnected && !logi_bolt_is_keyboard_connected() && !isConnectingToKeyboard && kbMatch) {
             isConnectingToKeyboard = true; // Set flag immediately to throttle multiple advertising packets
             logPrint("[BLE Scan] TARGET KEYBOARD MATCH! Connecting to %s (%s)...", devName.c_str(), devMac.c_str());
+            NimBLEDevice::getScan()->stop();
             advKbDevice = new NimBLEAdvertisedDevice(*advertisedDevice);
             doConnectKeyboard = true;
         }
@@ -1052,11 +1554,12 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
 // ULTRA-FAST HOST RECONNECTION & LINK-LAYER SUBSYSTEM (OS-Level Speed Architecture)
 // =========================================================================================
 TaskHandle_t hostScanTaskHandle = NULL;
+static ScanCallbacks* globalScanCallbacks = nullptr;
 
 /**
  * @brief Background daemon maintaining active reconnection with bonded HID peripherals.
- * Implements 25ms high-duty-cycle channel hopping (Channels 37, 38, 39) to catch short
- * advertisement bursts (<20ms) from Logitech Easy-Switch keyboards and mice.
+ * Implements 30ms 50%-duty-cycle scanning to reliably catch peripheral advertisements
+ * without exhausting controller radio scheduler resources.
  * Uses FreeRTOS Task Notifications for 0ms instant wakeups upon peripheral disconnects.
  */
 void startHostReconnectTask() {
@@ -1064,12 +1567,11 @@ void startHostReconnectTask() {
     xTaskCreate([](void* param) {
         logPrint("[BLE Host] Host Reconnect Daemon started (Instant Wakeup Mode).");
         while (true) {
-            bool needMouse = !mouseConnected;
-            bool needKb = !kbConnected;
+            bool needMouse = !mouseConnected && !logi_bolt_is_mouse_connected();
+            bool needKb = !kbConnected && !logi_bolt_is_keyboard_connected();
 
             if (!needMouse && !needKb) {
                 // Both peripherals connected: Stop radio scanner to reserve 100% bandwidth for HID traffic.
-                // Sleeps efficiently until woken immediately (0ms) by onDisconnect() task notification.
                 NimBLEScan* pScan = NimBLEDevice::getScan();
                 if (pScan && pScan->isScanning()) {
                     pScan->stop();
@@ -1090,10 +1592,11 @@ void startHostReconnectTask() {
             if (!isScanningForMice) {
                 NimBLEScan* pScan = NimBLEDevice::getScan();
                 if (pScan && !pScan->isScanning()) {
-                    pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), false);
+                    if (!globalScanCallbacks) globalScanCallbacks = new ScanCallbacks();
+                    pScan->setAdvertisedDeviceCallbacks(globalScanCallbacks, false);
                     pScan->setActiveScan(true);
-                    pScan->setInterval(40);  // 25ms interval
-                    pScan->setWindow(40);    // 25ms window (100% continuous listening with rapid channel hops)
+                    pScan->setInterval(48);  // 30ms interval
+                    pScan->setWindow(24);    // 15ms window (50% duty cycle, clean radio coexistence)
                     pScan->setDuplicateFilter(false);
                     pScan->start(0, false);  // Continuous non-blocking asynchronous scan
                 }
@@ -1111,16 +1614,25 @@ void startHostReconnectTask() {
 class ClientCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
         logPrint("[BLE Host] Connected to mouse!");
-        mouseConnected = true;
     }
-    void onDisconnect(NimBLEClient* pClient) {
+    void onDisconnect(NimBLEClient* pClientArg) {
         logPrint("[BLE Host] Disconnected from mouse!");
         mouseConnected = false;
         isConnectingToMouse = false;
+        isCalibrated = false;
+        // Instantly return all PCs to Standby (80ms) to free 98% radio airtime for mouse reconnect
+        updateKvmPowerAndRateProfiles("", true);
+        if (pClient) {
+            NimBLEDevice::deleteClient(pClient);
+            pClient = nullptr;
+        }
         // Instantly wake up the reconnect daemon without waiting for periodic timer tick
         if (hostScanTaskHandle != NULL) {
             xTaskNotifyGive(hostScanTaskHandle);
         }
+    }
+    bool onConnParamsUpdateRequest(NimBLEClient* pClient, const ble_gap_upd_params* params) {
+        return true;
     }
 };
 
@@ -1130,10 +1642,16 @@ class KeyboardClientCallbacks : public NimBLEClientCallbacks {
         logPrint("[BLE Host] Connected to Keyboard!");
         kbConnected = true;
     }
-    void onDisconnect(NimBLEClient* pClient) {
+    void onDisconnect(NimBLEClient* pClientArg) {
         logPrint("[BLE Host] Disconnected from Keyboard!");
         kbConnected = false;
         isConnectingToKeyboard = false;
+        pKbLedChar = nullptr;
+        pKbBootLedChar = nullptr;
+        if (pKbClient) {
+            NimBLEDevice::deleteClient(pKbClient);
+            pKbClient = nullptr;
+        }
         // Instantly wake up the reconnect daemon without waiting for periodic timer tick
         if (hostScanTaskHandle != NULL) {
             xTaskNotifyGive(hostScanTaskHandle);
@@ -1254,16 +1772,43 @@ bool connectToKeyboard() {
         int subCount = 0;
         if (pChars != nullptr) {
             for (auto &pChar : *pChars) {
+                logPrint("[BLE KB Char] UUID: %s | Notify: %d | Write: %d | WriteNR: %d",
+                         pChar->getUUID().toString().c_str(),
+                         pChar->canNotify(), pChar->canWrite(), pChar->canWriteNoResponse());
+
                 if (pChar->canNotify()) {
                     // Async subscribe (response=false) completes in 0ms without blocking FreeRTOS queue
                     pChar->subscribe(true, keyboardNotifyCallback, false);
                     subCount++;
+                }
+                
+                if (pChar->canWrite() || pChar->canWriteNoResponse()) {
+                    if (pChar->getUUID() == NimBLEUUID((uint16_t)0x2A32)) {
+                        pKbBootLedChar = pChar;
+                        logPrint("[BLE Host] Identified Boot Output (0x2A32) for Keyboard LEDs!");
+                    } else if (pChar->getUUID() == NimBLEUUID((uint16_t)0x2A4D)) {
+                        NimBLERemoteDescriptor* pDesc = pChar->getDescriptor(NimBLEUUID((uint16_t)0x2908));
+                        if (pDesc != nullptr) {
+                            std::string descVal = pDesc->readValue();
+                            if (descVal.length() >= 2) {
+                                uint8_t repId = (uint8_t)descVal[0];
+                                uint8_t repType = (uint8_t)descVal[1];
+                                logPrint("[BLE Host] Report (0x2A4D) -> ID: %d, Type: %d (1=In, 2=Out, 3=Feat)", repId, repType);
+                                if (repType == 2 && repId == 1) { // Standard Keyboard Output Report (LEDs)
+                                    pKbLedChar = pChar;
+                                    logPrint("[BLE Host] *** MATCH! Selected Standard Keyboard Output Report (ID 1) for LEDs! ***");
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
         kbConnected = true;
         isConnectingToKeyboard = false;
+        ble_gap_set_prefered_le_phy(pKbClient->getConnId(), BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
+        checkAndLogPhyStatus(pKbClient->getConnId(), "Keyboard");
         logPrint("[BLE Host] Keyboard FULLY CONNECTED & READY (%d active chars)!", subCount);
         checkAndResumeAdvertising();
         return true;
@@ -1276,7 +1821,7 @@ bool connectToKeyboard() {
     }
 }
 
-bool connectToServer() {
+bool connectToMouse() {
     if (isScanningForMice) return false;
     if (targetMouseMac.length() == 0 && !advDevice) return false;
 
@@ -1368,10 +1913,6 @@ bool connectToServer() {
         int errCode = pClient ? pClient->getLastError() : -1;
         logPrint("[BLE Host] Connection attempt failed: rc=%d (%s)", 
                  errCode, NimBLEUtils::returnCodeToString(errCode));
-        if (pClient) {
-            NimBLEDevice::deleteClient(pClient);
-            pClient = nullptr;
-        }
         vTaskDelay(pdMS_TO_TICKS(1500));
         isConnectingToMouse = false;
         if (!kbConnected || !mouseConnected) startHostReconnectTask();
@@ -1379,7 +1920,6 @@ bool connectToServer() {
     }
 
     logPrint("[BLE Host] Connected! Securing connection (Pairing)...");
-    pClient->setConnectionParams(6, 12, 0, 500);
     if (!pClient->secureConnection()) {
         logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...");
         delay(100);
@@ -1398,10 +1938,18 @@ bool connectToServer() {
         for (auto &pChar : *pChars) {
             if (pChar->getUUID() == reportCharUUID) {
                 if(pChar->canNotify()) {
-                    pChar->subscribe(true, notifyCallback, false);
-                    logPrint("[BLE Host] Subscribed to HID report!");
+                    pChar->subscribe(true, notifyCallback, true); // Synchronous: waits for ATT_WRITE_RSP confirmation
+                    logPrint("[BLE Host] Subscribed to HID report (Acknowledged)!");
                 }
             }
+        }
+        ble_gap_set_prefered_le_phy(pClient->getConnId(), BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
+        checkAndLogPhyStatus(pClient->getConnId(), "Mouse");
+        logPrint("[BLE Host] GATT Setup Complete Event -> Mouse HID ready!");
+        ble_gap_conn_desc mouseDesc;
+        if (ble_gap_conn_find(pClient->getConnId(), &mouseDesc) == 0 && mouseDesc.conn_itvl > 9) {
+            logPrint("[BLE Host] Requesting low-latency connection params for mouse (Target: 7.50..11.25ms)...");
+            pClient->updateConnParams(6, 9, 44, 216);
         }
     } else {
         pClient->disconnect();
@@ -1412,6 +1960,11 @@ bool connectToServer() {
     }
     mouseConnected = true;
     isConnectingToMouse = false;
+    if (!isCalibrated) {
+        scheduleBootCalibration();
+    } else {
+        updateKvmPowerAndRateProfiles(monitors[currentMonitorIndex].mac, true);
+    }
     checkAndResumeAdvertising();
     if (!kbConnected) startHostReconnectTask();
     return true;
@@ -1428,9 +1981,6 @@ void sendConfigResponse(const String& response) {
   String fullResp = response;
   if (!fullResp.endsWith("\n")) fullResp += "\n";
   Serial.print(fullResp);
-#if CONFIG_IDF_TARGET_ESP32S3
-  USBSerial.print(fullResp);
-#endif
   if (configTxChar) {
     size_t len = fullResp.length();
     size_t chunkSize = 240; // Safe chunk size to avoid exhausting BLE packet memory
@@ -1598,7 +2148,7 @@ void loadConfiguration() {
         if (mMac.length() > 0) {
           bool found = false;
           for (int p = 0; p < pcCount; p++) {
-            if (uniquePcMacs[p].equalsIgnoreCase(mMac)) {
+            if (uniquePcMacs[p].equals(mMac)) {
               found = true;
               break;
             }
@@ -1618,7 +2168,7 @@ void loadConfiguration() {
           if (cMac.length() > 0) {
             bool found = false;
             for (int p = 0; p < pcCount; p++) {
-              if (uniquePcMacs[p].equalsIgnoreCase(cMac)) {
+              if (uniquePcMacs[p].equals(cMac)) {
                 found = true;
                 break;
               }
@@ -1645,7 +2195,7 @@ void loadConfiguration() {
             bool alreadyConnected = false;
             uint16_t existingConn = BLE_HS_CONN_HANDLE_NONE;
             for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
-              if (kvmClients[k].mac.equalsIgnoreCase(mac) && kvmClients[k].active) {
+              if (kvmClients[k].mac.equals(mac) && kvmClients[k].active) {
                 alreadyConnected = true;
                 existingConn = kvmClients[k].conn_id;
                 break;
@@ -1728,9 +2278,6 @@ void executePendingSave() {
       saveConfiguration(pendingSaveJson);
       loadConfiguration();
       Serial.println("OK_SAVE");
-#if CONFIG_IDF_TARGET_ESP32S3
-      USBSerial.println("OK_SAVE");
-#endif
       if (configTxChar) {
         String resp = "OK_SAVE\n";
         configTxChar->setValue((const uint8_t*)resp.c_str(), resp.length());
@@ -1989,20 +2536,29 @@ void processCommand(String input, bool isBleSource = false) {
 static String bleRxBuffer = "";
 static std::vector<String> bleCmdQueue;
 
+class ConfigTxCallbacks : public NimBLECharacteristicCallbacks {
+    void onSubscribe(NimBLECharacteristic* pCharacteristic, ble_gap_conn_desc* desc, uint16_t subValue) override {
+        if (subValue > 0 && desc) {
+            markClientAsWebConfig(desc->conn_handle);
+        }
+    }
+};
+
 class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
-    void onWrite(NimBLECharacteristic* pCharacteristic) {
+    void onWrite(NimBLECharacteristic* pCharacteristic, ble_gap_conn_desc* desc) override {
+        uint16_t connHandle = desc ? desc->conn_handle : BLE_HS_CONN_HANDLE_NONE;
+        markClientAsWebConfig(connHandle);
         std::string rxValue = pCharacteristic->getValue();
-        logPrint("[BLE RX DEBUG]: Received %d bytes: '%s'", (int)rxValue.length(), rxValue.c_str());
         if (rxValue.length() > 0) {
             bleRxBuffer += String(rxValue.c_str());
             while (bleRxBuffer.indexOf('\n') != -1) {
-              int lineEnd = bleRxBuffer.indexOf('\n');
-              String cmd = bleRxBuffer.substring(0, lineEnd);
-              bleRxBuffer = bleRxBuffer.substring(lineEnd + 1);
-              cmd.trim();
-              if (cmd.length() > 0) {
-                bleCmdQueue.push_back(cmd);
-              }
+                int newlineIdx = bleRxBuffer.indexOf('\n');
+                String completeCmd = bleRxBuffer.substring(0, newlineIdx);
+                bleRxBuffer = bleRxBuffer.substring(newlineIdx + 1);
+                completeCmd.trim();
+                if (completeCmd.length() > 0) {
+                    bleCmdQueue.push_back(completeCmd);
+                }
             }
         }
     }
@@ -2011,18 +2567,16 @@ class ConfigRxCallbacks : public NimBLECharacteristicCallbacks {
 void setup() {
     Serial.setRxBufferSize(16384);
     Serial.begin(115200);
-#if CONFIG_IDF_TARGET_ESP32S3
-    USBSerial.begin(115200);
-#endif
     delay(2000);
     
     logPrint("--- ESP32 KVM Switcher Started ---");
+    logi_bolt_init();
     loadConfiguration();
     
     logPrint("[BLE] Initializing NimBLE...");
     uint8_t customMac[6];
     esp_read_mac(customMac, ESP_MAC_BT);
-    customMac[5] += 27; // Increment to present fresh identity to PCs so OS prompts for 6-digit PIN entry
+    customMac[5] += 30; // Increment to present fresh identity to PCs to reload new 12-bit Logitech HID descriptor
     esp_base_mac_addr_set(customMac);
     logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
              customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);
@@ -2053,6 +2607,9 @@ void setup() {
     hidDevice = new NimBLEHIDDevice(pServer);
     keyboardInputChar = hidDevice->inputReport(1); // Report ID 1: Standard Keyboard (6KRO)
     keyboardOutputChar = hidDevice->outputReport(1); // Report ID 1: Keyboard LEDs (Output)
+    keyboardOutputChar->setCallbacks(new KeyboardOutputCallbacks());
+    NimBLECharacteristic* bootOutputChar = hidDevice->bootOutput(); // UUID 0x2A32 (Boot Keyboard Output)
+    bootOutputChar->setCallbacks(new KeyboardOutputCallbacks());
     inputChar = hidDevice->inputReport(2);         // Report ID 2: Relative Mouse
     absInputChar = hidDevice->inputReport(3);      // Report ID 3: Absolute Mouse / Pointer
     macAbsInputChar = hidDevice->inputReport(5);   // Report ID 5: macOS / iPadOS Digitizer
@@ -2071,6 +2628,7 @@ void setup() {
                       CONFIG_TX_UUID,
                       NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::NOTIFY
                    );
+    configTxChar->setCallbacks(new ConfigTxCallbacks());
     configRxChar = pConfigService->createCharacteristic(
                       CONFIG_RX_UUID,
                       NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR
@@ -2084,18 +2642,27 @@ void setup() {
     pAdvertising->addServiceUUID(CONFIG_SERVICE_UUID);
     pAdvertising->setScanResponse(true);
     pAdvertising->start();
-    logPrint("[BLE Server] Advertising HID Combo (Mouse+Keyboard) & ESP32 KVM Server Config Service...");
+    logPrint("[BLE Server] Advertising HID Combo '%s' & Web Bluetooth Service...", BLE_DEVICE_NAME);
 
     // If target devices are bound, start persistent background reconnect task
     startHostReconnectTask();
 }
 
 void loop() {
+    logi_bolt_loop();
+
     // Continuous Advertising Watchdog: ensures ESP32 is discoverable without log spam
     static uint32_t lastAdvCheck = 0;
     if (millis() - lastAdvCheck > 2000) {
         lastAdvCheck = millis();
         checkAndResumeAdvertising();
+    }
+
+    // Smart Web Grace Period Watchdog: disconnects unconfigured PCs after 3s
+    static uint32_t lastGraceCheck = 0;
+    if (millis() - lastGraceCheck > 500) {
+        lastGraceCheck = millis();
+        checkWebGracePeriod();
     }
 
     if (doSaveConfig) {
@@ -2112,7 +2679,7 @@ void loop() {
     if (doConnectMouse) {
         doConnectMouse = false;
         xTaskCreate([](void* param) {
-            connectToServer();
+            connectToMouse();
             vTaskDelete(NULL);
         }, "mouseConnTask", 4096, NULL, 5, NULL);
     }
@@ -2133,15 +2700,4 @@ void loop() {
             processCommand(input, false);
         }
     }
-
-#if CONFIG_IDF_TARGET_ESP32S3
-    if (USBSerial.available()) {
-        String input = USBSerial.readStringUntil('\n');
-        input.trim();
-        if (input.length() > 0) {
-            logPrint("[USB CDC RX CMD]: %s", input.c_str());
-            processCommand(input, false);
-        }
-    }
-#endif
 }

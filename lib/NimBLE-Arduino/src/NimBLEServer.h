@@ -187,6 +187,13 @@ public:
      * @return True to accept the pin.
      */
     virtual bool onConfirmPIN(uint32_t pin);
+
+    /**
+     * @brief Called when the connection parameters (interval, latency, timeout) have been updated.
+     * @param [in] pServer Pointer to the BLE server.
+     * @param [in] desc Pointer to the connection description containing the new parameters.
+     */
+    virtual void onConnUpdate(NimBLEServer* pServer, ble_gap_conn_desc* desc);
 }; // NimBLEServerCallbacks
 
 #endif /* CONFIG_BT_ENABLED && CONFIG_BT_NIMBLE_ROLE_PERIPHERAL */

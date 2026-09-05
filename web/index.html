@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 302;
+    const BUILD_VERSION = 304;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -386,7 +386,7 @@
       </button>
 
       <!-- Save to ESP32 Flash Button -->
-      <button class="icon-btn icon-btn-primary" id="btnSyncESP32" title="Save to ESP32 Flash">
+      <button class="icon-btn icon-btn-primary" id="btnSyncESP32" disabled title="Save to ESP32 Flash" style="opacity: 0.4; cursor: not-allowed;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
       </button>
 
@@ -588,7 +588,7 @@
       </button>
     </div>
     <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 14px;">
-      <input type="checkbox" id="rememberPasswordCheck" checked style="accent-color: var(--primary); cursor: pointer;">
+      <input type="checkbox" id="rememberPasswordCheck" style="accent-color: var(--primary); cursor: pointer;">
       <label for="rememberPasswordCheck" style="font-size: 11px; color: #cbd5e1; cursor: pointer;">Remember password in this browser</label>
     </div>
     <div style="display: flex; justify-content: flex-end; gap: 8px;">
@@ -2644,6 +2644,39 @@
         ctx.fillStyle = isNonDefaultScale ? '#ffffff' : '#64748b';
         ctx.fillText(scaleText, currentBadgeX, badgeY);
 
+        currentBadgeX += scaleW + 12;
+
+        // --- Keep-Alive / Prevent Sleep Badge (Primary Screens) ---
+        // --- Keep-Alive / Prevent Sleep Cup Icon (Primary Screens) ---
+        if (isPrimaryScreen) {
+          const iconX = currentBadgeX;
+          const cupBottomY = badgeY - 0.5;
+          const cupTopY = cupBottomY - 7;
+
+          s.keepAliveHitBox = { x: iconX - 3, y: badgeY - 11, w: 18, h: 16, screen: s };
+
+          ctx.strokeStyle = s.keepAlive ? '#34d399' : '#64748b';
+          ctx.lineWidth = 1.4;
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+
+          // Coffee Cup Path
+          ctx.beginPath();
+          ctx.moveTo(iconX, cupTopY);
+          ctx.lineTo(iconX, cupTopY + 5);
+          ctx.arcTo(iconX, cupBottomY, iconX + 3, cupBottomY, 1.5);
+          ctx.arcTo(iconX + 6, cupBottomY, iconX + 6, cupTopY + 5, 1.5);
+          ctx.lineTo(iconX + 6, cupTopY);
+          ctx.moveTo(iconX + 6, cupTopY + 2);
+          ctx.arcTo(iconX + 8.5, cupTopY + 2, iconX + 8.5, cupTopY + 4, 1.2);
+          ctx.arcTo(iconX + 8.5, cupTopY + 5.5, iconX + 6, cupTopY + 5.5, 1.2);
+          ctx.stroke();
+
+          currentBadgeX += 16;
+        } else {
+          s.keepAliveHitBox = null;
+        }
+
 
         // --- Red Delete Button (Top Right Corner) ---
         // For auto-detected screens, show delete button ONLY on Primary screen of its group
@@ -2748,7 +2781,8 @@
                 scale: s.scale || 100,
                 os: (s.os !== undefined ? Number(s.os) : 0),
                 isDetected: isDetected,
-                isPrimary: isPrimaryVal
+                isPrimary: isPrimaryVal,
+                keepAlive: s.keepAlive ? 1 : 0
               };
             })
           };
@@ -2894,6 +2928,27 @@
           }
         }
 
+        // Check Click on Keep-Alive Badge (Primary Screens)
+        if (s.keepAliveHitBox) {
+          const hb = s.keepAliveHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            e.stopPropagation();
+            const newKA = s.keepAlive ? 0 : 1;
+            const targetGroup = s.group;
+            const targetMac = s.mac;
+            screens.forEach(scr => {
+              const sameGroup = (targetGroup !== undefined && targetGroup !== null && scr.group === targetGroup);
+              const sameMac = (targetMac && scr.mac && scr.mac.toLowerCase() === targetMac.toLowerCase());
+              if (sameGroup || sameMac) {
+                scr.keepAlive = newKA;
+              }
+            });
+            draw();
+            updateJSON();
+            return;
+          }
+        }
+
         // Check Click on Bluetooth Icon (Primary Screens)
         if (s.btIconHitBox) {
           const hb = s.btIconHitBox;
@@ -2984,6 +3039,7 @@
       let hoveringBtIcon = false;
       let hoveringOs = false;
       let hoveringScale = false;
+      let hoveringKeepAlive = false;
       let hoveringScreen = false;
 
       screens.forEach(s => {
@@ -3008,6 +3064,12 @@
             hoveringScale = true;
           }
         }
+        if (s.keepAliveHitBox) {
+          const hb = s.keepAliveHitBox;
+          if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
+            hoveringKeepAlive = true;
+          }
+        }
         if (s.btIconHitBox) {
           const hb = s.btIconHitBox;
           if (mx >= hb.x && mx <= hb.x + hb.w && my >= hb.y && my <= hb.y + hb.h) {
@@ -3028,7 +3090,7 @@
         }
       });
 
-      if (hoveringDelete || hoveringName || hoveringBtIcon || hoveringOs || hoveringScale) {
+      if (hoveringDelete || hoveringName || hoveringBtIcon || hoveringOs || hoveringScale || hoveringKeepAlive) {
         canvas.style.cursor = 'pointer';
       } else if (hoveringResize || isResizing) {
         canvas.style.cursor = 'nwse-resize';
@@ -3453,7 +3515,8 @@
                 color: s.color || getGroupColor(grp),
                 isDetected: isDet,
                 isLocked: isDet,
-                isPrimary: isPrim
+                isPrimary: isPrim,
+                keepAlive: (s.keepAlive !== undefined) ? Number(s.keepAlive) : 0
               };
             })
           }))
@@ -3635,7 +3698,7 @@
         }, 50);
       }
       if (rememberCheck) {
-        rememberCheck.checked = storedPwd ? true : rememberCheck.checked;
+        rememberCheck.checked = !!storedPwd;
       }
     }
 
@@ -3825,6 +3888,13 @@
       }
 
       const isConnected = (type === 'usb' || type === 'bluetooth');
+      const syncBtn = document.getElementById('btnSyncESP32');
+      if (syncBtn) {
+        syncBtn.disabled = !isConnected;
+        syncBtn.style.opacity = isConnected ? '1.0' : '0.4';
+        syncBtn.style.cursor = isConnected ? 'pointer' : 'not-allowed';
+      }
+
       if (loadBtn) {
         loadBtn.disabled = !isConnected;
         loadBtn.style.opacity = isConnected ? '1.0' : '0.4';
@@ -3938,7 +4008,6 @@
         pendingAuthNonce = null;
         bleNotifyBuffer = '';
         updateConnectionUI('none');
-        showToast('Bluetooth disconnected.', 'info', 2000);
         console.log('[BLE] Session closed by user (GATT link kept warm).');
         return;
       }

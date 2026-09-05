@@ -16,7 +16,14 @@ Preferences preferences;
 
 // NVS Flash Storage Constants
 const char* NVS_NAMESPACE = "kvm_config";
-const char* NVS_KEY_LAYOUT = "layout";
+const char* NVS_KEY_ACT_LAYOUT_ID = "actLayoutId";
+const char* NVS_KEY_TOTAL_LAYOUTS = "totalLayouts";
+const char* NVS_KEY_LAYOUTS       = "layouts";
+const char* NVS_KEY_CLIENTS       = "clients";
+const char* NVS_KEY_MOUSE_MAC     = "mouseMac";
+const char* NVS_KEY_MOUSE_NAME    = "mouseName";
+const char* NVS_KEY_KB_MAC        = "keyboardMac";
+const char* NVS_KEY_KB_NAME       = "keyboardName";
 
 enum os {
     OS_WINDOWS = 0,
@@ -36,6 +43,7 @@ struct MonitorConfig {
     int os = OS_WINDOWS;
     int scale = 100;
     bool isPrimary = false;
+    int keepAlive = 0;
 };
 
 #define MAX_MONITORS 10
@@ -671,15 +679,16 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         bool boltActive = logi_bolt_is_mouse_connected();
         bool isMouseActive = mouseConnected || boltActive;
         String activeMac = (monitorCount > 0 && currentMonitorIndex < monitorCount) ? monitors[currentMonitorIndex].mac : "";
-        int activeCount = 0;
-        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-            if (kvmClients[i].active) activeCount++;
-        }
         bool isCurrentActivePc = (activeMac.length() > 0 && peerMac.equalsIgnoreCase(activeMac));
-        bool shouldBeTurbo = isMouseActive && (boltActive || activeCount == 1 || isCurrentActivePc);
+        bool shouldBeTurbo = isMouseActive && isCurrentActivePc;
 
-        if (shouldBeTurbo && desc->conn_latency > 0) {
-            logPrint("[BLE Server] PC %s dropped into Latency %d (shouldBeTurbo=1)! Scheduling TURBO re-assertion...",
+        static uint32_t lastReassertTime[MAX_SUPPORTED_KVM_CLIENTS] = {0};
+        uint16_t handle = desc->conn_handle;
+        uint32_t now = millis();
+
+        if (shouldBeTurbo && desc->conn_latency > 0 && handle < MAX_SUPPORTED_KVM_CLIENTS && (now - lastReassertTime[handle] > 15000)) {
+            lastReassertTime[handle] = now;
+            logPrint("[BLE Server] Active PC %s in Latency %d (shouldBeTurbo=1). Scheduling single TURBO re-assertion...",
                      peerMac.c_str(), desc->conn_latency);
             xTaskCreate([](void* param) {
                 uint16_t connId = (uint16_t)(uintptr_t)param;
@@ -1997,295 +2006,316 @@ void sendConfigResponse(const String& response) {
 }
 
 
-String loadLayoutJsonFromNVS() {
-  preferences.begin(NVS_NAMESPACE, true);
-  String json = "{}";
-  size_t len = preferences.getBytesLength(NVS_KEY_LAYOUT);
-  if (len > 0) {
-    char* buf = (char*)malloc(len + 1);
-    if (buf) {
-      preferences.getBytes(NVS_KEY_LAYOUT, buf, len);
-      buf[len] = '\0';
-      json = String(buf);
-      free(buf);
+static String readNvsBlob(Preferences& pref, const char* key, const String& fallback = "[]") {
+    if (!pref.isKey(key)) {
+        return fallback;
     }
-  }
-  preferences.end();
-
-  targetMouseMac = "";
-  targetMouseName = "";
-  targetKeyboardMac = "";
-  targetKeyboardName = "";
-  if (json.length() > 2) {
-    JsonDocument doc;
-    if (!deserializeJson(doc, json) && doc.is<JsonObject>()) {
-      targetMouseMac = doc["mouseMac"] | "";
-      targetMouseName = doc["mouseName"] | "";
-      targetKeyboardMac = doc["keyboardMac"] | "";
-      targetKeyboardName = doc["keyboardName"] | "";
-      if (targetKeyboardMac.length() > 0 && targetKeyboardMac == targetMouseMac) {
-        targetKeyboardMac = "";
-        targetKeyboardName = "";
-      }
+    size_t len = pref.getBytesLength(key);
+    if (len > 0) {
+        char* buf = (char*)malloc(len + 1);
+        if (buf) {
+            pref.getBytes(key, buf, len);
+            buf[len] = '\0';
+            String res = String(buf);
+            free(buf);
+            return res;
+        }
     }
-  }
-  return json;
-}
-
-void initDefaultConfigDoc(JsonDocument& doc) {
-  doc.clear();
-  doc["activeLayoutId"] = 1;
-  doc["totalLayouts"] = 1;
-  JsonArray layoutsArr = doc["layouts"].to<JsonArray>();
-  JsonObject layout1 = layoutsArr.add<JsonObject>();
-  layout1["id"] = 1;
-  layout1["name"] = "Default Layout";
-  layout1["totalScreens"] = 0;
-  layout1["screens"].to<JsonArray>();
-  doc["clients"].to<JsonArray>();
+    return fallback;
 }
 
 void saveMouseToNvsLayout(String mac, String name) {
-  String json = loadLayoutJsonFromNVS();
-  JsonDocument doc;
-  if (deserializeJson(doc, json) || !doc.is<JsonObject>()) {
-    initDefaultConfigDoc(doc);
-  }
+    targetMouseMac = mac;
+    targetMouseName = name;
 
-  targetMouseMac = mac;
-  targetMouseName = name;
-  doc["mouseMac"] = targetMouseMac;
-  doc["mouseName"] = targetMouseName;
+    preferences.begin(NVS_NAMESPACE, false);
+    preferences.putString(NVS_KEY_MOUSE_MAC, targetMouseMac);
+    preferences.putString(NVS_KEY_MOUSE_NAME, targetMouseName);
+    preferences.end();
 
-  String unifiedJson;
-  serializeJson(doc, unifiedJson);
-
-  preferences.begin(NVS_NAMESPACE, false);
-  preferences.remove(NVS_KEY_LAYOUT);
-  size_t bytesWritten = preferences.putBytes(NVS_KEY_LAYOUT, unifiedJson.c_str(), unifiedJson.length() + 1);
-  preferences.end();
-
-  if (bytesWritten > 0) {
-    logPrint("[NVS] Persisted mouse (%s, '%s') in unified JSON layout (%u bytes)!", targetMouseMac.c_str(), targetMouseName.c_str(), bytesWritten);
-  } else {
-    logPrint("[NVS ERROR] Failed to save mouse to layout (putBytes returned 0)!");
-  }
+    logPrint("[NVS] Persisted mouse (%s, '%s') to granular NVS keys.", targetMouseMac.c_str(), targetMouseName.c_str());
 }
 
 void saveKeyboardToNvsLayout(String mac, String name) {
-  String json = loadLayoutJsonFromNVS();
-  JsonDocument doc;
-  if (deserializeJson(doc, json) || !doc.is<JsonObject>()) {
-    initDefaultConfigDoc(doc);
-  }
+    targetKeyboardMac = mac;
+    targetKeyboardName = name;
 
-  targetKeyboardMac = mac;
-  targetKeyboardName = name;
-  doc["keyboardMac"] = targetKeyboardMac;
-  doc["keyboardName"] = targetKeyboardName;
+    preferences.begin(NVS_NAMESPACE, false);
+    preferences.putString(NVS_KEY_KB_MAC, targetKeyboardMac);
+    preferences.putString(NVS_KEY_KB_NAME, targetKeyboardName);
+    preferences.end();
 
-  String unifiedJson;
-  serializeJson(doc, unifiedJson);
+    logPrint("[NVS] Persisted keyboard (%s, '%s') to granular NVS keys.", targetKeyboardMac.c_str(), targetKeyboardName.c_str());
+}
 
-  preferences.begin(NVS_NAMESPACE, false);
-  preferences.remove(NVS_KEY_LAYOUT);
-  size_t bytesWritten = preferences.putBytes(NVS_KEY_LAYOUT, unifiedJson.c_str(), unifiedJson.length() + 1);
-  preferences.end();
+String buildConfigJson() {
+    preferences.begin(NVS_NAMESPACE, true);
+    int activeLayoutId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 3);
+    int totalLayouts = preferences.getInt(NVS_KEY_TOTAL_LAYOUTS, 3);
+    String mouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, targetMouseMac);
+    String mouseName = preferences.getString(NVS_KEY_MOUSE_NAME, targetMouseName);
+    String kbMac = preferences.getString(NVS_KEY_KB_MAC, targetKeyboardMac);
+    String kbName = preferences.getString(NVS_KEY_KB_NAME, targetKeyboardName);
+    String layoutsJson = readNvsBlob(preferences, NVS_KEY_LAYOUTS, "[]");
+    String clientsJson = readNvsBlob(preferences, NVS_KEY_CLIENTS, "[]");
+    preferences.end();
 
-  if (bytesWritten > 0) {
-    logPrint("[NVS] Persisted keyboard (%s, '%s') in unified JSON layout (%u bytes)!", targetKeyboardMac.c_str(), targetKeyboardName.c_str(), bytesWritten);
-  } else {
-    logPrint("[NVS ERROR] Failed to save keyboard to layout (putBytes returned 0)!");
-  }
+    JsonDocument doc;
+    doc["activeLayoutId"] = activeLayoutId;
+    doc["totalLayouts"] = totalLayouts;
+
+    deserializeJson(doc["layouts"], layoutsJson);
+    if (!doc["layouts"].is<JsonArray>()) {
+        doc["layouts"].to<JsonArray>();
+    }
+
+    deserializeJson(doc["clients"], clientsJson);
+    if (!doc["clients"].is<JsonArray>()) {
+        doc["clients"].to<JsonArray>();
+    }
+
+    doc["mouseMac"] = mouseMac;
+    doc["mouseName"] = mouseName.length() > 0 ? mouseName : (mouseMac.length() > 0 ? "BLE Mouse" : "");
+    doc["keyboardMac"] = kbMac;
+    doc["keyboardName"] = kbName.length() > 0 ? kbName : (kbMac.length() > 0 ? "BLE Keyboard" : "");
+
+    // Update connected status for clients based on live kvmClients[]
+    JsonArray clientsArr = doc["clients"].as<JsonArray>();
+    for (JsonObject c : clientsArr) {
+        c["connected"] = false;
+    }
+    for (int i = 0; i < maxKvmClients; i++) {
+        if (kvmClients[i].active && kvmClients[i].mac.length() > 0) {
+            String activeMac = kvmClients[i].mac;
+            bool exists = false;
+            for (JsonObject c : clientsArr) {
+                String cMac = c["mac"] | "";
+                if (cMac.equalsIgnoreCase(activeMac)) {
+                    c["connected"] = true;
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                JsonObject clientObj = clientsArr.add<JsonObject>();
+                clientObj["mac"] = activeMac;
+                clientObj["name"] = kvmClients[i].name.length() > 0 ? kvmClients[i].name : "Detected Device";
+                clientObj["connected"] = true;
+            }
+        }
+    }
+
+    String unifiedJson;
+    serializeJson(doc, unifiedJson);
+    return unifiedJson;
+}
+
+String loadLayoutJsonFromNVS() {
+    return buildConfigJson();
 }
 
 void loadConfiguration() {
-  String json = loadLayoutJsonFromNVS();
+    preferences.begin(NVS_NAMESPACE, true);
+    targetMouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
+    targetMouseName = preferences.getString(NVS_KEY_MOUSE_NAME, "");
+    targetKeyboardMac = preferences.getString(NVS_KEY_KB_MAC, "");
+    targetKeyboardName = preferences.getString(NVS_KEY_KB_NAME, "");
+    if (targetKeyboardMac.length() > 0 && targetKeyboardMac == targetMouseMac) {
+        targetKeyboardMac = "";
+        targetKeyboardName = "";
+    }
 
-  if (json.length() > 2) {
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, json);
-    if (!err && doc.is<JsonObject>()) {
-      JsonArray arr;
-      if (doc["layouts"].is<JsonArray>() && doc["layouts"].size() > 0) {
-        JsonObject activeLayout = doc["layouts"][0].as<JsonObject>();
-        int targetId = doc["activeLayoutId"] | 1;
-        for (JsonObject l : doc["layouts"].as<JsonArray>()) {
-          int lId = l["id"] | 0;
-          if (lId == targetId || (l["id"].as<String>() == String(targetId))) {
-            activeLayout = l;
-            break;
-          }
+    int targetId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 1);
+    String layoutsJson = readNvsBlob(preferences, NVS_KEY_LAYOUTS, "[]");
+    String clientsJson = readNvsBlob(preferences, NVS_KEY_CLIENTS, "[]");
+    preferences.end();
+
+    JsonDocument docLayouts;
+    deserializeJson(docLayouts, layoutsJson);
+
+    JsonArray arr;
+    if (docLayouts.is<JsonArray>() && docLayouts.size() > 0) {
+        JsonObject activeLayout = docLayouts[0].as<JsonObject>();
+        for (JsonObject l : docLayouts.as<JsonArray>()) {
+            int lId = l["id"] | 0;
+            if (lId == targetId || (l["id"].as<String>() == String(targetId))) {
+                activeLayout = l;
+                break;
+            }
         }
         arr = activeLayout["screens"].as<JsonArray>();
-      }
+    }
 
-      monitorCount = 0;
-      if (arr) {
+    monitorCount = 0;
+    if (arr) {
         for (JsonObject repo : arr) {
-          int defId = monitorCount + 1;
-          String defName = "Monitor #" + String(defId);
-          monitors[monitorCount].id = repo["id"] | defId;
-          monitors[monitorCount].name = repo["name"] | defName;
-          monitors[monitorCount].x = repo["x"] | 0;
-          monitors[monitorCount].y = repo["y"] | 0;
-          monitors[monitorCount].width = repo["width"] | 1920;
-          monitors[monitorCount].height = repo["height"] | 1080;
-          monitors[monitorCount].mac = repo["mac"] | "";
-          monitors[monitorCount].os = repo["os"] | OS_WINDOWS;
-          monitors[monitorCount].scale = repo["scale"] | 100;
-          monitors[monitorCount].isPrimary = repo["isPrimary"] | false;
-          monitorCount++;
+            int defId = monitorCount + 1;
+            String defName = "Monitor #" + String(defId);
+            monitors[monitorCount].id = repo["id"] | defId;
+            monitors[monitorCount].name = repo["name"] | defName;
+            monitors[monitorCount].x = repo["x"] | 0;
+            monitors[monitorCount].y = repo["y"] | 0;
+            monitors[monitorCount].width = repo["width"] | 1920;
+            monitors[monitorCount].height = repo["height"] | 1080;
+            monitors[monitorCount].mac = repo["mac"] | "";
+            monitors[monitorCount].os = repo["os"] | OS_WINDOWS;
+            monitors[monitorCount].scale = repo["scale"] | 100;
+            monitors[monitorCount].isPrimary = repo["isPrimary"] | false;
+            monitors[monitorCount].keepAlive = repo["keepAlive"] | 0;
+            monitorCount++;
         }
-      }
-      // Calculate distinct PCs from the loaded layout screens
-      int pcCount = 0;
-      String uniquePcMacs[MAX_SUPPORTED_KVM_CLIENTS];
-      for (int i = 0; i < monitorCount; i++) {
-        String mMac = monitors[i].mac;
-        mMac.toLowerCase();
-        mMac.trim();
-        if (mMac.length() > 0) {
-          bool found = false;
-          for (int p = 0; p < pcCount; p++) {
-            if (uniquePcMacs[p].equals(mMac)) {
-              found = true;
-              break;
-            }
-          }
-          if (!found && pcCount < MAX_SUPPORTED_KVM_CLIENTS) {
-            uniquePcMacs[pcCount++] = mMac;
-          }
-        }
-      }
+    }
 
-      // Also include doc["clients"] if present
-      if (doc["clients"].is<JsonArray>()) {
-        for (JsonObject client : doc["clients"].as<JsonArray>()) {
-          String cMac = client["mac"] | "";
-          cMac.toLowerCase();
-          cMac.trim();
-          if (cMac.length() > 0) {
+    // Calculate distinct PCs from the loaded layout screens
+    int pcCount = 0;
+    String uniquePcMacs[MAX_SUPPORTED_KVM_CLIENTS];
+    for (int i = 0; i < monitorCount; i++) {
+        String mMac = monitors[i].mac;
+        if (mMac.length() > 0) {
             bool found = false;
             for (int p = 0; p < pcCount; p++) {
-              if (uniquePcMacs[p].equals(cMac)) {
-                found = true;
-                break;
-              }
+                if (uniquePcMacs[p].equals(mMac)) {
+                    found = true;
+                    break;
+                }
             }
             if (!found && pcCount < MAX_SUPPORTED_KVM_CLIENTS) {
-              uniquePcMacs[pcCount++] = cMac;
+                uniquePcMacs[pcCount++] = mMac;
             }
-          }
         }
-      }
-
-      // Support up to MAX_SUPPORTED_KVM_CLIENTS (6 PCs)
-      maxKvmClients = MAX_SUPPORTED_KVM_CLIENTS;
-
-      // Populate / update kvmClients array while preserving existing active connection handles
-      if (doc["clients"].is<JsonArray>()) {
-        int clientCount = 0;
-        for (JsonObject client : doc["clients"].as<JsonArray>()) {
-          if (clientCount >= maxKvmClients) break;
-          String mac = client["mac"] | "";
-          mac.toLowerCase();
-          mac.trim();
-          if (mac.length() > 0) {
-            bool alreadyConnected = false;
-            uint16_t existingConn = BLE_HS_CONN_HANDLE_NONE;
-            for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
-              if (kvmClients[k].mac.equals(mac) && kvmClients[k].active) {
-                alreadyConnected = true;
-                existingConn = kvmClients[k].conn_id;
-                break;
-              }
-            }
-            kvmClients[clientCount].mac = mac;
-            kvmClients[clientCount].name = client["name"] | "Unknown PC";
-            kvmClients[clientCount].conn_id = existingConn;
-            kvmClients[clientCount].active = alreadyConnected;
-            clientCount++;
-          }
-        }
-      }
-
-      logPrint("Loaded %d monitors, %d KVM PC clients (maxKvmClients = %d) from NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
-               monitorCount, pcCount, maxKvmClients, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
     }
-  }
-  checkAndResumeAdvertising();
+
+    JsonDocument docClients;
+    deserializeJson(docClients, clientsJson);
+
+    // Also include docClients if present
+    if (docClients.is<JsonArray>()) {
+        for (JsonObject client : docClients.as<JsonArray>()) {
+            String cMac = client["mac"] | "";
+            if (cMac.length() > 0) {
+                bool found = false;
+                for (int p = 0; p < pcCount; p++) {
+                    if (uniquePcMacs[p].equals(cMac)) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found && pcCount < MAX_SUPPORTED_KVM_CLIENTS) {
+                    uniquePcMacs[pcCount++] = cMac;
+                }
+            }
+        }
+    }
+
+    // Dynamically update maxKvmClients based on current configuration
+    maxKvmClients = (pcCount > 0) ? pcCount : 2;
+
+    // Populate / update kvmClients array while preserving existing active connection handles
+    if (docClients.is<JsonArray>()) {
+        int clientCount = 0;
+        for (JsonObject client : docClients.as<JsonArray>()) {
+            if (clientCount >= maxKvmClients) break;
+            String mac = client["mac"] | "";
+            mac.toLowerCase();
+            mac.trim();
+            if (mac.length() > 0) {
+                bool alreadyConnected = false;
+                uint16_t existingConn = BLE_HS_CONN_HANDLE_NONE;
+                for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+                    if (kvmClients[k].mac.equals(mac) && kvmClients[k].active) {
+                        alreadyConnected = true;
+                        existingConn = kvmClients[k].conn_id;
+                        break;
+                    }
+                }
+                kvmClients[clientCount].mac = mac;
+                kvmClients[clientCount].name = client["name"] | "Unknown PC";
+                kvmClients[clientCount].conn_id = existingConn;
+                kvmClients[clientCount].active = alreadyConnected;
+                clientCount++;
+            }
+        }
+    }
+
+    logPrint("Loaded %d monitors, %d KVM PC clients (maxKvmClients = %d) from granular NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
+             monitorCount, pcCount, maxKvmClients, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
+
+    checkAndResumeAdvertising();
 }
 
 void saveConfiguration(const String& jsonString) {
-  JsonDocument doc;
-  String finalJson = jsonString;
-
-  if (!deserializeJson(doc, jsonString)) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, jsonString);
+    if (err || !doc.is<JsonObject>()) {
+        logPrint("[NVS ERROR] saveConfiguration failed: Invalid JSON or not an object!");
+        return;
+    }
+    preferences.begin(NVS_NAMESPACE, false);
+    int actId = doc["activeLayoutId"] | 0;
+    if (actId > 0) {
+        preferences.putInt(NVS_KEY_ACT_LAYOUT_ID, actId);
+    }
+    int totLay = doc["totalLayouts"] | 0;
+    if (totLay > 0) {
+        preferences.putInt(NVS_KEY_TOTAL_LAYOUTS, totLay);
+    }
+    if (doc["layouts"].is<JsonArray>()) {
+        String layoutsJson;
+        serializeJson(doc["layouts"], layoutsJson);
+        preferences.remove(NVS_KEY_LAYOUTS);
+        preferences.putBytes(NVS_KEY_LAYOUTS, layoutsJson.c_str(), layoutsJson.length() + 1);
+    }
+    if (doc["clients"].is<JsonArray>()) {
+        String clientsJson;
+        serializeJson(doc["clients"], clientsJson);
+        preferences.remove(NVS_KEY_CLIENTS);
+        preferences.putBytes(NVS_KEY_CLIENTS, clientsJson.c_str(), clientsJson.length() + 1);
+    }
     String mac = doc["mouseMac"] | "";
     if (mac.length() > 0) {
-      targetMouseMac = mac;
-    } else if (targetMouseMac.length() > 0) {
-      doc["mouseMac"] = targetMouseMac;
+        targetMouseMac = mac;
+        preferences.putString(NVS_KEY_MOUSE_MAC, targetMouseMac);
     }
-
     String name = doc["mouseName"] | "";
+    name.trim();
     if (name.length() > 0) {
-      name.trim();
-      targetMouseName = name;
-    } else if (targetMouseName.length() > 0) {
-      doc["mouseName"] = targetMouseName;
+        targetMouseName = name;
+        preferences.putString(NVS_KEY_MOUSE_NAME, targetMouseName);
     }
-
     String kbMac = doc["keyboardMac"] | "";
     if (kbMac.length() > 0) {
-      targetKeyboardMac = kbMac;
-    } else if (targetKeyboardMac.length() > 0) {
-      doc["keyboardMac"] = targetKeyboardMac;
+        targetKeyboardMac = kbMac;
+        preferences.putString(NVS_KEY_KB_MAC, targetKeyboardMac);
     }
-
     String kbName = doc["keyboardName"] | "";
+    kbName.trim();
     if (kbName.length() > 0) {
-      kbName.trim();
-      targetKeyboardName = kbName;
-    } else if (targetKeyboardName.length() > 0) {
-      doc["keyboardName"] = targetKeyboardName;
+        targetKeyboardName = kbName;
+        preferences.putString(NVS_KEY_KB_NAME, targetKeyboardName);
     }
-
-    serializeJson(doc, finalJson);
-    logPrint("[NVS] Persisted Mouse '%s' and Keyboard '%s' in unified JSON layout", targetMouseMac.c_str(), targetKeyboardMac.c_str());
-  }
-
-  preferences.begin(NVS_NAMESPACE, false);
-  preferences.remove(NVS_KEY_LAYOUT);
-  size_t bytesWritten = preferences.putBytes(NVS_KEY_LAYOUT, finalJson.c_str(), finalJson.length() + 1);
-  preferences.end();
-  if (bytesWritten > 0) {
-    logPrint("[NVS] Configuration saved to NVS successfully (%u bytes)!", bytesWritten);
-  } else {
-    logPrint("[NVS ERROR] Failed to save configuration (putBytes returned 0)!");
-  }
+    preferences.end();
+    logPrint("[NVS] Configuration successfully saved to separate NVS keys!");
 }
 
 static String pendingSaveJson = "";
 static bool doSaveConfig = false;
 
 void executePendingSave() {
-  if (doSaveConfig && pendingSaveJson.length() > 0) {
-    doSaveConfig = false;
-    JsonDocument doc;
-    if (!deserializeJson(doc, pendingSaveJson)) {
-      saveConfiguration(pendingSaveJson);
-      loadConfiguration();
-      Serial.println("OK_SAVE");
-      if (configTxChar) {
-        String resp = "OK_SAVE\n";
-        configTxChar->setValue((const uint8_t*)resp.c_str(), resp.length());
-        configTxChar->notify();
-      }
+    if (doSaveConfig && pendingSaveJson.length() > 0) {
+        doSaveConfig = false;
+        JsonDocument doc;
+        if (!deserializeJson(doc, pendingSaveJson)) {
+            saveConfiguration(pendingSaveJson);
+            loadConfiguration();
+            Serial.println("OK_SAVE");
+            if (configTxChar) {
+                String resp = "OK_SAVE\n";
+                configTxChar->setValue((const uint8_t*)resp.c_str(), resp.length());
+                configTxChar->notify();
+            }
+        }
+        pendingSaveJson = "";
     }
-    pendingSaveJson = "";
-  }
 }
 
 void processCommand(String input, bool isBleSource = false) {
@@ -2374,58 +2404,7 @@ void processCommand(String input, bool isBleSource = false) {
       doSaveConfig = true;
     }
   } else if (input == "GET_CONFIG") {
-    String json = loadLayoutJsonFromNVS();
-
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, json);
-
-    if (err || !doc.is<JsonObject>()) {
-      initDefaultConfigDoc(doc);
-    }
-
-    // Include bound mouse & keyboard in unified JSON payload
-    doc["mouseMac"] = targetMouseMac;
-    doc["mouseName"] = targetMouseName.length() > 0 ? targetMouseName : (targetMouseMac.length() > 0 ? "BLE Mouse" : "");
-    doc["keyboardMac"] = targetKeyboardMac;
-    doc["keyboardName"] = targetKeyboardName.length() > 0 ? targetKeyboardName : (targetKeyboardMac.length() > 0 ? "BLE Keyboard" : "");
-
-    // Preserve stored clients and reset connected status prior to active connection sync
-    JsonArray clientsArr;
-    if (doc["clients"].is<JsonArray>()) {
-      clientsArr = doc["clients"].as<JsonArray>();
-      for (JsonObject c : clientsArr) {
-        c["connected"] = false;
-      }
-    } else {
-      clientsArr = doc["clients"].to<JsonArray>();
-    }
-
-    // Dynamic merge of active connected BLE clients into unified JSON
-    for (int i = 0; i < maxKvmClients; i++) {
-      if (kvmClients[i].active && kvmClients[i].mac.length() > 0) {
-        String activeMac = kvmClients[i].mac;
-
-        bool exists = false;
-        for (JsonObject c : clientsArr) {
-          String cMac = c["mac"] | "";
-          if (cMac == activeMac) {
-            c["connected"] = true;
-            exists = true;
-            break;
-          }
-        }
-        if (!exists) {
-          JsonObject clientObj = clientsArr.add<JsonObject>();
-          clientObj["mac"] = activeMac;
-          clientObj["name"] = kvmClients[i].name.length() > 0 ? kvmClients[i].name : "Detected Device";
-          clientObj["connected"] = true;
-        }
-      }
-    }
-
-    String unifiedJson;
-    serializeJson(doc, unifiedJson);
-
+    String unifiedJson = buildConfigJson();
     sendConfigResponse("CONFIG " + String(unifiedJson.length()) + " " + unifiedJson);
   } else if (input == "SCAN_MICE" || input == "SCAN_KEYBOARDS" || input == "SCAN_DEVICES") {
     scannedMiceDoc.clear();
@@ -2518,19 +2497,33 @@ void processCommand(String input, bool isBleSource = false) {
     sendConfigResponse("OK_UNBIND_KEYBOARD");
   } else if (input == "GET_TARGET_KEYBOARD") {
     sendConfigResponse("TARGET_KEYBOARD " + targetKeyboardMac);
-  } else if (input == "DUMP_FLASH") {
-    String json = loadLayoutJsonFromNVS();
-    logPrint("--- [NVS FLASH DUMP] ---");
-    logPrint("Flash layout string length: %d bytes", json.length());
-    logPrint("Flash Mouse: %s, Keyboard: %s", targetMouseMac.c_str(), targetKeyboardMac.c_str());
-    logPrint("%s", json.c_str());
-    logPrint("--- [END NVS FLASH DUMP] ---");
-  } else if (input == "CLEAR_BONDS" || input == "CLEAR_BLE_BONDS") {
-    int count = NimBLEDevice::getNumBonds();
-    NimBLEDevice::deleteAllBonds();
-    logPrint("[BLE] Deleted %d bonded devices from NVS. Fresh pairing required for all PCs.", count);
-    sendConfigResponse("OK_CLEAR_BONDS " + String(count));
-  }
+    } else if (input == "DUMP_FLASH") {
+        preferences.begin(NVS_NAMESPACE, true);
+        int actId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 1);
+        int totLay = preferences.getInt(NVS_KEY_TOTAL_LAYOUTS, 1);
+        String mMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
+        String mName = preferences.getString(NVS_KEY_MOUSE_NAME, "");
+        String kMac = preferences.getString(NVS_KEY_KB_MAC, "");
+        String kName = preferences.getString(NVS_KEY_KB_NAME, "");
+        String layJson = readNvsBlob(preferences, NVS_KEY_LAYOUTS, "[]");
+        String cliJson = readNvsBlob(preferences, NVS_KEY_CLIENTS, "[]");
+        preferences.end();
+
+        logPrint("--- [NVS FLASH DUMP] ---");
+        logPrint("Namespace: '%s'", NVS_NAMESPACE);
+        logPrint("  %s: %d", NVS_KEY_ACT_LAYOUT_ID, actId);
+        logPrint("  %s: %d", NVS_KEY_TOTAL_LAYOUTS, totLay);
+        logPrint("  %s: '%s' (%s)", NVS_KEY_MOUSE_MAC, mMac.c_str(), mName.c_str());
+        logPrint("  %s: '%s' (%s)", NVS_KEY_KB_MAC, kMac.c_str(), kName.c_str());
+        logPrint("  %s (len %d): %s", NVS_KEY_LAYOUTS, layJson.length(), layJson.c_str());
+        logPrint("  %s (len %d): %s", NVS_KEY_CLIENTS, cliJson.length(), cliJson.c_str());
+        logPrint("--- [END NVS FLASH DUMP] ---");
+    } else if (input == "CLEAR_BONDS" || input == "CLEAR_BLE_BONDS") {
+        int count = NimBLEDevice::getNumBonds();
+        NimBLEDevice::deleteAllBonds();
+        logPrint("[BLE] Deleted %d bonded devices from NVS. Fresh pairing required for all PCs.", count);
+        sendConfigResponse("OK_CLEAR_BONDS " + String(count));
+    }
 }
 
 static String bleRxBuffer = "";
@@ -2648,6 +2641,51 @@ void setup() {
     startHostReconnectTask();
 }
 
+void checkKeepAlive() {
+    static uint32_t lastKeepAliveCheck = 0;
+    if (millis() - lastKeepAliveCheck < 60000) return;
+    lastKeepAliveCheck = millis();
+
+    String currentActiveMac = "";
+    if (monitorCount > 0 && currentMonitorIndex >= 0 && currentMonitorIndex < monitorCount) {
+        currentActiveMac = monitors[currentMonitorIndex].mac;
+    }
+
+    String handledMacs[MAX_SUPPORTED_KVM_CLIENTS];
+    int handledCount = 0;
+
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].keepAlive && monitors[i].mac.length() > 0) {
+            String targetMac = monitors[i].mac;
+
+            // Do not send keepAlive if cursor is currently on this PC!
+            if (currentActiveMac.length() > 0 && targetMac.equals(currentActiveMac)) {
+                continue;
+            }
+
+            // Check if we already handled this MAC in this cycle
+            bool alreadyDone = false;
+            for (int h = 0; h < handledCount; h++) {
+                if (handledMacs[h].equals(targetMac)) {
+                    alreadyDone = true;
+                    break;
+                }
+            }
+            if (alreadyDone) continue;
+            if (handledCount < MAX_SUPPORTED_KVM_CLIENTS) {
+                handledMacs[handledCount++] = targetMac;
+            }
+
+            uint16_t connHandle = getTargetConnHandle(targetMac);
+            if (connHandle != BLE_HS_CONN_HANDLE_NONE) {
+                logPrint("[KeepAlive] Sending 60s micro-jiggle to %s (conn: %d)", targetMac.c_str(), connHandle);
+                sendRelative12Bit(connHandle, 1, 0);
+                sendRelative12Bit(connHandle, -1, 0);
+            }
+        }
+    }
+}
+
 void loop() {
     logi_bolt_loop();
 
@@ -2664,6 +2702,9 @@ void loop() {
         lastGraceCheck = millis();
         checkWebGracePeriod();
     }
+
+    // Smart Keep-Alive Watchdog: sends 60s micro-jiggle to background PCs with keepAlive enabled
+    checkKeepAlive();
 
     if (doSaveConfig) {
         executePendingSave();

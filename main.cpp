@@ -324,6 +324,17 @@ bool isMacInActiveLayout(const String& mac) {
     return false;
 }
 
+bool isKnownKvmClient(const String& mac) {
+    if (mac.length() == 0) return false;
+    for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+        if (kvmClients[i].mac.equals(mac)) return true;
+    }
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equals(mac)) return true;
+    }
+    return false;
+}
+
 int getActiveLayoutPcCount() {
     String distinctMacs[MAX_SUPPORTED_KVM_CLIENTS];
     int count = 0;
@@ -399,9 +410,17 @@ void checkWebGracePeriod() {
     uint32_t now = millis();
     for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
         if (nonKvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) {
+            // Safety check: if device is actually a known KVM client, do NOT disconnect it!
+            if (isKnownKvmClient(nonKvmClients[i].mac)) {
+                nonKvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
+                nonKvmClients[i].mac = "";
+                nonKvmClients[i].connectedTimeMs = 0;
+                nonKvmClients[i].isWebConfig = false;
+                continue;
+            }
             uint32_t elapsed = now - nonKvmClients[i].connectedTimeMs;
-            if (!nonKvmClients[i].isWebConfig && elapsed >= 3000) {
-                logPrint("[BLE Server] ⛔ REJECTED: PC %s is NOT in active layout and no Web Config activity after 3s! Disconnecting...",
+            if (!nonKvmClients[i].isWebConfig && elapsed >= 5000) {
+                logPrint("[BLE Server] ⛔ REJECTED: Unknown device %s is NOT a KVM client and no Web Config activity after 5s! Disconnecting...",
                          nonKvmClients[i].mac.c_str());
                 pServer->disconnect(nonKvmClients[i].conn_id);
                 nonKvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
@@ -583,7 +602,7 @@ void syncPhysicalKeyboardLedsForPc(const String& targetMac) {
     if (targetMac.length() == 0) return;
     uint8_t targetLeds = 0;
     for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
-        if (kvmClients[k].active && kvmClients[k].mac.equalsIgnoreCase(targetMac)) {
+        if (kvmClients[k].active && kvmClients[k].mac.equals(targetMac)) {
             targetLeds = kvmClients[k].ledState;
             break;
         }
@@ -621,7 +640,7 @@ void checkAndSyncCapsLock(const uint8_t* rep8) {
     if (currentCapsLockPressed && !s_lastCapsLockPressed) {
         String activeMac = (monitorCount > 0) ? monitors[currentMonitorIndex].mac : "";
         for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-            if (kvmClients[i].active && kvmClients[i].mac.equalsIgnoreCase(activeMac)) {
+            if (kvmClients[i].active && kvmClients[i].mac.equals(activeMac)) {
                 kvmClients[i].ledState ^= 0x02; // Toggle CapsLock bit for currently active PC
                 break;
             }
@@ -648,7 +667,7 @@ class KeyboardOutputCallbacks : public NimBLECharacteristicCallbacks {
             }
             
             String activeMac = (monitorCount > 0) ? monitors[currentMonitorIndex].mac : "";
-            bool isActivePc = (senderMac.length() > 0 && senderMac.equalsIgnoreCase(activeMac));
+            bool isActivePc = (senderMac.length() > 0 && senderMac.equals(activeMac));
             
             logPrint("[KEYBOARD LED] PC %s (conn %d) sent LED state: 0x%02X (Caps: %d, Active: %s)",
                      senderMac.c_str(), connHandle, leds, (leds & 0x02) ? 1 : 0, isActivePc ? "YES" : "NO");
@@ -679,8 +698,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         bool boltActive = logi_bolt_is_mouse_connected();
         bool isMouseActive = mouseConnected || boltActive;
         String activeMac = (monitorCount > 0 && currentMonitorIndex < monitorCount) ? monitors[currentMonitorIndex].mac : "";
-        bool isCurrentActivePc = (activeMac.length() > 0 && peerMac.equalsIgnoreCase(activeMac));
-        bool shouldBeTurbo = isMouseActive && isCurrentActivePc;
+        bool isCurrentActivePc = (activeMac.length() > 0 && peerMac.equals(activeMac));
+        bool shouldBeTurbo = isMouseActive && (boltActive || isCurrentActivePc);
 
         static uint32_t lastReassertTime[MAX_SUPPORTED_KVM_CLIENTS] = {0};
         uint16_t handle = desc->conn_handle;
@@ -702,7 +721,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                         pMac.trim();
                         int pcOs = OS_WINDOWS;
                         for (int m = 0; m < monitorCount; m++) {
-                            if (monitors[m].mac.equalsIgnoreCase(pMac)) {
+                            if (monitors[m].mac.equals(pMac)) {
                                 pcOs = monitors[m].os;
                                 break;
                             }
@@ -729,14 +748,15 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
         // Save connection
         bool isLayoutPc = (monitorCount == 0) || isMacInActiveLayout(peerMac);
+        bool isKnownPc = isLayoutPc || isKnownKvmClient(peerMac);
 
-        // Request BLE 5.0 2M PHY (2 Mbps ultra-low latency) only for KVM layout PCs
-        if (isLayoutPc) {
+        // Request BLE 5.0 2M PHY (2 Mbps ultra-low latency) for KVM PCs (active layout or known background)
+        if (isKnownPc) {
             ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
             checkAndLogPhyStatus(desc->conn_handle, peerMac.c_str());
         }
 
-        if (isLayoutPc) {
+        if (isKnownPc) {
             bool updated = false;
             for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
                 if (kvmClients[i].mac.equals(peerMac)) {
@@ -759,6 +779,10 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                     }
                 }
             }
+            if (!isLayoutPc) {
+                logPrint("[BLE Server] 💤 Background KVM PC %s (conn: %d) connected (not in active layout). Staying in Standby.",
+                         peerMac.c_str(), desc->conn_handle);
+            }
         } else {
             // Non-KVM Client (Candidate Web Bluetooth Configurator) - do NOT pollute kvmClients!
             bool slotted = false;
@@ -778,17 +802,17 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 nonKvmClients[0].connectedTimeMs = millis();
                 nonKvmClients[0].isWebConfig = false;
             }
-            logPrint("[BLE Server] ⏳ Non-KVM Client %s (conn: %d) connected. Starting 3s Web Config Grace Period...", 
+            logPrint("[BLE Server] ⏳ Non-KVM Client %s (conn: %d) connected. Starting 5s Web Config Grace Period...", 
                      peerMac.c_str(), desc->conn_handle);
         }
 
-        int activeCount = 0;
+        int activeLayoutConnectedCount = 0;
         for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-            if (kvmClients[i].active) activeCount++;
+            if (kvmClients[i].active && isMacInActiveLayout(kvmClients[i].mac)) activeLayoutConnectedCount++;
         }
-        isCalibrated = false;
-        if (activeCount == 1 && isMacInActiveLayout(peerMac)) {
+        if (activeLayoutConnectedCount == 1 && isMacInActiveLayout(peerMac)) {
             firstConnectedPcMac = peerMac;
+            isCalibrated = false;
             scheduleBootCalibration();
         }
 
@@ -857,11 +881,11 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             logPrint("[BLE Server] Bonding incomplete (Bonded: 0) for %s! Clearing stale bond key to allow fresh pairing...", peerMac.c_str());
             NimBLEDevice::deleteBond(desc->peer_ota_addr);
         } else {
-            int activeCount = 0;
+            int activeLayoutConnectedCount = 0;
             for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-                if (kvmClients[i].active) activeCount++;
+                if (kvmClients[i].active && isMacInActiveLayout(kvmClients[i].mac)) activeLayoutConnectedCount++;
             }
-            if (activeCount == 1) {
+            if (activeLayoutConnectedCount == 1 && isMacInActiveLayout(peerMac)) {
                 firstConnectedPcMac = peerMac;
                 isCalibrated = false;
                 scheduleBootCalibration();
@@ -1332,7 +1356,7 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
     uint16_t targetConn = getTargetConnHandle(monitors[currentMonitorIndex].mac);
     if (targetConn == BLE_HS_CONN_HANDLE_NONE) {
         // Fallback to any active connected PC if current monitor target is not matched
-        for (int i = 0; i < maxKvmClients; i++) {
+        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
             if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && isMacInActiveLayout(kvmClients[i].mac)) {
                 targetConn = kvmClients[i].conn_id;
                 break;
@@ -2084,13 +2108,13 @@ String buildConfigJson() {
     for (JsonObject c : clientsArr) {
         c["connected"] = false;
     }
-    for (int i = 0; i < maxKvmClients; i++) {
+    for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
         if (kvmClients[i].active && kvmClients[i].mac.length() > 0) {
             String activeMac = kvmClients[i].mac;
             bool exists = false;
             for (JsonObject c : clientsArr) {
                 String cMac = c["mac"] | "";
-                if (cMac.equalsIgnoreCase(activeMac)) {
+                if (cMac.equals(activeMac)) {
                     c["connected"] = true;
                     exists = true;
                     break;
@@ -2117,9 +2141,12 @@ String loadLayoutJsonFromNVS() {
 void loadConfiguration() {
     preferences.begin(NVS_NAMESPACE, true);
     targetMouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
+    targetMouseMac.toLowerCase();
+    targetMouseMac.trim();
     targetMouseName = preferences.getString(NVS_KEY_MOUSE_NAME, "");
     targetKeyboardMac = preferences.getString(NVS_KEY_KB_MAC, "");
-    targetKeyboardName = preferences.getString(NVS_KEY_KB_NAME, "");
+    targetKeyboardMac.toLowerCase();
+    targetKeyboardMac.trim();
     if (targetKeyboardMac.length() > 0 && targetKeyboardMac == targetMouseMac) {
         targetKeyboardMac = "";
         targetKeyboardName = "";
@@ -2157,7 +2184,10 @@ void loadConfiguration() {
             monitors[monitorCount].y = repo["y"] | 0;
             monitors[monitorCount].width = repo["width"] | 1920;
             monitors[monitorCount].height = repo["height"] | 1080;
-            monitors[monitorCount].mac = repo["mac"] | "";
+            String mMac = repo["mac"] | "";
+            mMac.toLowerCase();
+            mMac.trim();
+            monitors[monitorCount].mac = mMac;
             monitors[monitorCount].os = repo["os"] | OS_WINDOWS;
             monitors[monitorCount].scale = repo["scale"] | 100;
             monitors[monitorCount].isPrimary = repo["isPrimary"] | false;
@@ -2192,6 +2222,8 @@ void loadConfiguration() {
     if (docClients.is<JsonArray>()) {
         for (JsonObject client : docClients.as<JsonArray>()) {
             String cMac = client["mac"] | "";
+            cMac.toLowerCase();
+            cMac.trim();
             if (cMac.length() > 0) {
                 bool found = false;
                 for (int p = 0; p < pcCount; p++) {

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 304;
+    const BUILD_VERSION = 307;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -432,7 +432,7 @@
         </button>
 
         <!-- Floating Presets Dropdown Menu -->
-        <div id="presetMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 250px; max-height: 260px; overflow: hidden; z-index: 10000; padding: 4px;">
+        <div id="presetMenu" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 250px; max-width: calc(100vw - 20px); max-height: 260px; overflow: hidden; z-index: 10000; padding: 4px;">
           <div class="preset-list" id="presetList" style="max-height: 252px; overflow-y: auto;">
             <!-- Populated dynamically from PRESET_RESOLUTIONS -->
           </div>
@@ -446,7 +446,7 @@
         </button>
 
         <!-- Floating Clients Dropdown Menu -->
-        <div id="clientsMenu" onclick="event.stopPropagation()" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 360px; max-height: 340px; overflow: hidden; z-index: 10000; padding: 6px;">
+        <div id="clientsMenu" onclick="event.stopPropagation()" style="display: none; position: absolute; top: 34px; left: 0; background: #0f172a; border: 1px solid var(--border-color); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.5); border-radius: 8px; width: 360px; max-width: calc(100vw - 20px); max-height: 340px; overflow: hidden; z-index: 10000; padding: 6px;">
           <div style="font-size: 11px; font-weight: 700; color: var(--primary); padding: 4px 6px; border-bottom: 1px solid var(--border-color); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
             <span>KVM Clients</span>
             <div style="display: flex; align-items: center; gap: 4px;">
@@ -970,18 +970,26 @@
       draw();
     }
 
+    const OS_WINDOWS = 0;
+    const OS_MACOS = 1;
+    const OS_ANDROID = 2;
+
     function detectOSValue() {
       const rawUA = navigator.userAgent || '';
       const ua = rawUA.toUpperCase();
       const platform = (navigator.platform || '').toUpperCase();
+      if (ua.includes('ANDROID') || (navigator.userAgentData && navigator.userAgentData.platform === 'Android')) {
+        return OS_ANDROID; // 2 = ANDROID
+      }
       const isMac = platform.includes('MAC') || ua.includes('MAC');
-      if (isMac) return 1; // 1 = MACOS
-      return 0;            // 0 = WINDOWS
+      if (isMac) return OS_MACOS; // 1 = MACOS
+      return OS_WINDOWS;          // 0 = WINDOWS
     }
 
     function getOSName(val) {
       const num = Number(val);
-      if (num === 1) return 'MACOS';
+      if (num === OS_MACOS) return 'MACOS';
+      if (num === OS_ANDROID) return 'ANDROID';
       return 'WINDOWS';    // 0 = WINDOWS
     }
 
@@ -1000,8 +1008,11 @@
 
     function cycleScreenOS(screen) {
       if (!screen) return;
-      const curOS = screen.os !== undefined ? Number(screen.os) : 0;
-      const nextOS = (curOS === 0) ? 1 : 0; // 0 = WINDOWS <-> 1 = MACOS
+      const curOS = screen.os !== undefined ? Number(screen.os) : OS_WINDOWS;
+      let nextOS = OS_WINDOWS;
+      if (curOS === OS_WINDOWS) nextOS = OS_MACOS;
+      else if (curOS === OS_MACOS) nextOS = OS_ANDROID;
+      else nextOS = OS_WINDOWS; // from OS_ANDROID back to OS_WINDOWS
 
       if (screen.group) {
         screens.forEach(s => {
@@ -1037,7 +1048,12 @@
         const btn = document.getElementById('btnScanBleMouse');
         if (btn) {
           const rect = btn.getBoundingClientRect();
-          modal.style.left = Math.max(10, rect.left) + 'px';
+          const modalW = 380;
+          let leftPos = Math.max(10, rect.left);
+          if (leftPos + modalW > window.innerWidth - 10) {
+            leftPos = Math.max(10, window.innerWidth - modalW - 10);
+          }
+          modal.style.left = leftPos + 'px';
           modal.style.top = (rect.bottom + 6) + 'px';
         }
         modal.style.display = 'block';
@@ -1102,7 +1118,7 @@
 
         container.innerHTML = newDevices.map(m => {
           const rssiText = m.rssi ? `${m.rssi} dBm` : '';
-          const devEscapedName = (m.name || 'Bluetooth Device').replace(/'/g, "\\'");
+          const devEscapedName = (m.name || 'Bluetooth Device').replace(/'/g, "\\'").replace(/"/g, '&quot;');
           const devType = m.type || 'unknown';
 
           let typeIconSvg = '';
@@ -1527,9 +1543,9 @@
       const container = document.getElementById('presetList');
       if (!container) return;
       container.innerHTML = PRESET_RESOLUTIONS.map(([w, h, name], idx) => {
-        const safeName = name.replace(/'/g, "\\'");
+        const safeName = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
         return `
-          <div class="preset-item preset-item-clickable" onclick="addScreen('${safeName}', ${w}, ${h})" style="padding: 3px 6px; border-radius: 4px; font-size: 10px;">
+          <div class="preset-item preset-item-clickable" id="presetItem_${idx}" onclick="addScreen('${safeName}', ${w}, ${h})" style="padding: 3px 6px; border-radius: 4px; font-size: 10px;">
             <span style="font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #38bdf8;">${w}x${h}</span>
             <span style="color: #94a3b8; font-size: 10px; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 140px;" title="${name}">${name}</span>
           </div>
@@ -2152,6 +2168,7 @@
           groupName: currentDeviceName,
           width: screenW,
           height: screenH,
+          os: isAndroid ? OS_ANDROID : (isIOS ? OS_ANDROID : detectOSValue()),
           layoutX: 0,
           layoutY: 0,
           x: 60,
@@ -2161,6 +2178,7 @@
           isLocked: true,
           isPrimary: true
         });
+        syncActiveLayoutScreens();
 
         const scale = 0.12;
         const baseCanvasX = 50;
@@ -2194,6 +2212,7 @@
             groupName: currentDeviceName,
             width: preset.width,
             height: preset.height,
+            os: detectOSValue(),
             x: 60,
             y: 140,
             color: getGroupColor(currentDeviceId),
@@ -2207,6 +2226,7 @@
             groupName: currentDeviceName,
             width: 1920,
             height: 1080,
+            os: detectOSValue(),
             x: 175,
             y: 20,
             color: getGroupColor(currentDeviceId),
@@ -2214,6 +2234,7 @@
             isLocked: true
           }
         ];
+        syncActiveLayoutScreens();
       } else {
         setDetectBoxHtml(`
           🎯 <span>Physical Resolution (${osLabel}):</span><br>
@@ -2228,12 +2249,14 @@
           groupName: currentDeviceName,
           width: preset.width,
           height: preset.height,
+          os: detectOSValue(),
           x: 60,
           y: 120,
           color: getGroupColor(currentDeviceId),
           isDetected: true,
           isLocked: true
         }];
+        syncActiveLayoutScreens();
       }
 
       saveProjectState();
@@ -2243,10 +2266,24 @@
     function togglePresetMenu(e) {
       if (e) e.stopPropagation();
       const menu = document.getElementById('presetMenu');
+      const btn = document.getElementById('btnPresetDropdown');
       if (!menu) return;
       const isOpen = menu.style.display === 'block';
-      menu.style.display = isOpen ? 'none' : 'block';
-      if (!isOpen) {
+      if (isOpen) {
+        menu.style.display = 'none';
+      } else {
+        if (btn) {
+          const rect = btn.getBoundingClientRect();
+          const menuWidth = 250;
+          if (rect.left + menuWidth > window.innerWidth - 10) {
+            menu.style.left = 'auto';
+            menu.style.right = '0px';
+          } else {
+            menu.style.left = '0px';
+            menu.style.right = 'auto';
+          }
+        }
+        menu.style.display = 'block';
         setTimeout(() => {
           const targetItem = document.getElementById('presetItem_34');
           if (targetItem) {
@@ -2259,12 +2296,24 @@
     function toggleClientsMenu(e) {
       if (e) e.stopPropagation();
       const menu = document.getElementById('clientsMenu');
+      const btn = document.getElementById('btnClientsDropdown');
       if (!menu) return;
       const isOpen = menu.style.display === 'block';
       if (isOpen) {
         cancelAllPendingClientEdits();
         menu.style.display = 'none';
       } else {
+        if (btn) {
+          const rect = btn.getBoundingClientRect();
+          const menuWidth = 360;
+          if (rect.left + menuWidth > window.innerWidth - 10) {
+            menu.style.left = 'auto';
+            menu.style.right = '0px';
+          } else {
+            menu.style.left = '0px';
+            menu.style.right = 'auto';
+          }
+        }
         menu.style.display = 'block';
       }
     }
@@ -2322,6 +2371,14 @@
       }
       const newLayoutY = 0;
 
+      let defaultOs = OS_WINDOWS;
+      const lowerName = (name || '').toLowerCase();
+      if (lowerName.includes('android') || lowerName.includes('pixel') || lowerName.includes('galaxy') || lowerName.includes('fold')) {
+        defaultOs = OS_ANDROID;
+      } else if (lowerName.includes('mac') || lowerName.includes('apple') || lowerName.includes('retina')) {
+        defaultOs = OS_MACOS;
+      }
+
       const newScreen = {
         id: Date.now(),
         name: name,
@@ -2334,11 +2391,12 @@
         x: 0,
         y: 0,
         color: COLOR_MANUAL,
-        os: 0,
+        os: defaultOs,
         isDetected: false,
         isLocked: false
       };
       screens.push(newScreen);
+      syncActiveLayoutScreens();
       saveProjectState();
       updateJSON();
       draw();
@@ -2625,7 +2683,7 @@
 
           s.osBadgeHitBox = { x: currentBadgeX - 4, y: s.y + sh - 26, w: osW + 8, h: 18, screen: s };
 
-          ctx.fillStyle = (osVal === 1) ? '#a855f7' : '#38bdf8';
+          ctx.fillStyle = (osVal === OS_MACOS) ? '#a855f7' : ((osVal === OS_ANDROID) ? '#10b981' : '#38bdf8');
           ctx.fillText(osText, currentBadgeX, badgeY);
 
           currentBadgeX += osW + 12;
@@ -2734,7 +2792,6 @@
 
       const config = {
         activeLayoutId: Number(layoutsData.activeLayoutId) || 1,
-        totalLayouts: layoutsData.layouts.length,
         layouts: layoutsData.layouts.map(l => {
           const sorted = [...l.screens].sort((a, b) => (a.layoutX !== undefined ? a.layoutX : a.x) - (b.layoutX !== undefined ? b.layoutX : b.x) || (b.layoutY !== undefined ? b.layoutY : b.y) - (a.layoutY !== undefined ? a.layoutY : a.y));
 
@@ -2753,7 +2810,6 @@
           return {
             id: Number(l.id) || 1,
             name: l.name,
-            totalScreens: sorted.length,
             screens: sorted.map((s, index) => {
               const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
               const rawGroup = (s.group !== undefined && s.group !== null && s.group !== '') ? s.group : (isDetected ? currentDeviceId : 1);

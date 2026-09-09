@@ -17,7 +17,6 @@ Preferences preferences;
 // NVS Flash Storage Constants
 const char* NVS_NAMESPACE = "kvm_config";
 const char* NVS_KEY_ACT_LAYOUT_ID = "actLayoutId";
-const char* NVS_KEY_TOTAL_LAYOUTS = "totalLayouts";
 const char* NVS_KEY_LAYOUTS       = "layouts";
 const char* NVS_KEY_CLIENTS       = "clients";
 const char* NVS_KEY_MOUSE_MAC     = "mouseMac";
@@ -27,10 +26,12 @@ const char* NVS_KEY_KB_NAME       = "keyboardName";
 
 enum os {
     OS_WINDOWS = 0,
-    OS_MAC = 1
+    OS_MAC = 1,
+    OS_ANDROID
 };
 static String firstConnectedPcMac = "";
 static bool isCalibrated = false;
+void saveKvmClientsToPreferences();
 // Structure to store monitor configuration
 struct MonitorConfig {
     int id = 1;
@@ -80,20 +81,18 @@ String calculateSha256(const String& input) {
     return String(hexStr);
 }
 
-// Active KVM Connections (Mac addresses of connected PCs)
-struct KVMClient {
-  uint16_t conn_id;
-  String mac;
-  String name;
-  bool active;
-  bool isTurbo;
-  bool isHandshaking;
-  uint32_t handshakeStartMs;
-  uint8_t ledState; // Saved keyboard LED state (Caps/Num/Scroll) for this PC
-};
 #define MAX_SUPPORTED_KVM_CLIENTS 6 // 6 PCs + 1 Mouse + 1 Keyboard + 1 Web = 9 max NimBLE connections
+struct KVMClient {
+  uint16_t conn_id = BLE_HS_CONN_HANDLE_NONE;
+  String mac = "";
+  String name = "";
+  bool active = false;
+  bool isTurbo = false;
+  bool isHandshaking = false;
+  uint32_t handshakeStartMs = 0;
+  uint8_t ledState = 0; // Saved keyboard LED state (Caps/Num/Scroll) for this PC
+};
 KVMClient kvmClients[MAX_SUPPORTED_KVM_CLIENTS];
-int maxKvmClients = 3; // Dynamic variable based on number of PCs in current configuration
 
 // Dedicated tracking for non-KVM / Web Bluetooth connections
 struct NonKvmClient {
@@ -326,11 +325,16 @@ bool isMacInActiveLayout(const String& mac) {
 
 bool isKnownKvmClient(const String& mac) {
     if (mac.length() == 0) return false;
+    if (targetMouseMac.length() > 0 && mac.equals(targetMouseMac)) return false;
+    if (targetKeyboardMac.length() > 0 && mac.equals(targetKeyboardMac)) return false;
     for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
         if (kvmClients[i].mac.equals(mac)) return true;
     }
     for (int i = 0; i < monitorCount; i++) {
         if (monitors[i].mac.equals(mac)) return true;
+    }
+    if (NimBLEDevice::isBonded(NimBLEAddress(mac.c_str()))) {
+        return true;
     }
     return false;
 }
@@ -410,8 +414,8 @@ void checkWebGracePeriod() {
     uint32_t now = millis();
     for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
         if (nonKvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) {
-            // Safety check: if device is actually a known KVM client, do NOT disconnect it!
-            if (isKnownKvmClient(nonKvmClients[i].mac)) {
+            // Safety check: if device is a known KVM client or is bonded/authenticated, do NOT disconnect it!
+            if (isKnownKvmClient(nonKvmClients[i].mac) || NimBLEDevice::isBonded(NimBLEAddress(nonKvmClients[i].mac.c_str()))) {
                 nonKvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
                 nonKvmClients[i].mac = "";
                 nonKvmClients[i].connectedTimeMs = 0;
@@ -419,8 +423,8 @@ void checkWebGracePeriod() {
                 continue;
             }
             uint32_t elapsed = now - nonKvmClients[i].connectedTimeMs;
-            if (!nonKvmClients[i].isWebConfig && elapsed >= 5000) {
-                logPrint("[BLE Server] ⛔ REJECTED: Unknown device %s is NOT a KVM client and no Web Config activity after 5s! Disconnecting...",
+            if (!nonKvmClients[i].isWebConfig && elapsed >= 45000) { // 45 seconds to allow user to enter PIN
+                logPrint("[BLE Server] ⛔ REJECTED: Unknown device %s is NOT a KVM client and no Web Config / Pairing activity after 45s! Disconnecting...",
                          nonKvmClients[i].mac.c_str());
                 pServer->disconnect(nonKvmClients[i].conn_id);
                 nonKvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
@@ -433,40 +437,6 @@ void checkWebGracePeriod() {
 }
 
 void checkAndLogPhyStatus(uint16_t connHandle, const char* deviceLabel);
-
-class SecurityCallbacks : public NimBLESecurityCallbacks {
-    uint32_t onPassKeyRequest() {
-        logPrint("[BLE Security] =========================================");
-        logPrint("[BLE Security] >>> onPassKeyRequest: RETURNING %06lu <<<", (unsigned long)BLE_PAIRING_PIN);
-        logPrint("[BLE Security] =========================================");
-        return BLE_PAIRING_PIN;
-    }
-    void onPassKeyNotify(uint32_t pass_key) {
-        logPrint("[BLE Security] =========================================");
-        logPrint("[BLE Security] >>> TYPE THIS PASSKEY ON KEYBOARD: %06lu <<<", (unsigned long)pass_key);
-        logPrint("[BLE Security] >>> AND PRESS ENTER ON MX KEYS S <<<");
-        logPrint("[BLE Security] =========================================");
-    }
-    bool onConfirmPIN(uint32_t pass_key) {
-        logPrint("[BLE Security] =========================================");
-        logPrint("[BLE Security] >>> onConfirmPIN: %06lu (auto-confirmed) <<<", (unsigned long)pass_key);
-        logPrint("[BLE Security] =========================================");
-        return true;
-    }
-    bool onSecurityRequest() {
-        logPrint("[BLE Security] onSecurityRequest -> Accepted");
-        return true;
-    }
-    void onAuthenticationComplete(ble_gap_conn_desc* desc) {
-        logPrint("[BLE Security] onAuthenticationComplete: conn=%d, enc=%d, auth=%d, bonded=%d",
-                 desc->conn_handle, desc->sec_state.encrypted, desc->sec_state.authenticated, desc->sec_state.bonded);
-        if (desc->sec_state.encrypted) {
-            ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
-            ble_svc_gatt_changed(0x0001, 0xffff);
-        }
-        checkAndResumeAdvertising();
-    }
-};
 
 // --- Asynchronous BLE Link Metrics & PHY Status Logger ---
 void checkAndLogPhyStatus(uint16_t connHandle, const char* deviceLabel) {
@@ -682,8 +652,6 @@ class KeyboardOutputCallbacks : public NimBLECharacteristicCallbacks {
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnUpdate(NimBLEServer* pServer, ble_gap_conn_desc* desc) override {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
-        peerMac.toLowerCase();
-        peerMac.trim();
         const char* mode = (desc->conn_itvl <= 16 && desc->conn_latency == 0) ? "ACTIVE TURBO (⚡)" : "BACKGROUND STANDBY (💤)";
         logPrint("[BLE Server] Connection Metrics Applied -> PC: %s (conn: %d) | Itvl: %.2f ms (itvl: %d) | Latency: %d | Timeout: %d ms -> %s",
                  peerMac.c_str(), desc->conn_handle,
@@ -717,8 +685,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                     ble_gap_conn_desc d;
                     if (ble_gap_conn_find(connId, &d) == 0 && d.conn_latency > 0) {
                         String pMac = NimBLEAddress(d.peer_ota_addr).toString().c_str();
-                        pMac.toLowerCase();
-                        pMac.trim();
                         int pcOs = OS_WINDOWS;
                         for (int m = 0; m < monitorCount; m++) {
                             if (monitors[m].mac.equals(pMac)) {
@@ -741,26 +707,31 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
     void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
-        peerMac.toLowerCase();
-        peerMac.trim();
-        logPrint("[BLE Server] PC Connected! MAC: %s (conn_handle: %d | itvl: %d | latency: %d | timeout: %d)",
-                  peerMac.c_str(), desc->conn_handle, desc->conn_itvl, desc->conn_latency, desc->supervision_timeout);
+        NimBLEAddress idAddr(desc->peer_id_addr);
+        String idMac = idAddr.toString().c_str();
+        String effectiveMac = (idMac.length() > 0 && idMac != "00:00:00:00:00:00") ? idMac : peerMac;
+
+        logPrint("[BLE Server] PC Connected! MAC: %s (ID: %s, conn_handle: %d | itvl: %d | latency: %d | timeout: %d)",
+                  peerMac.c_str(), effectiveMac.c_str(), desc->conn_handle, desc->conn_itvl, desc->conn_latency, desc->supervision_timeout);
 
         // Save connection
-        bool isLayoutPc = (monitorCount == 0) || isMacInActiveLayout(peerMac);
-        bool isKnownPc = isLayoutPc || isKnownKvmClient(peerMac);
+        bool isBondedPeer = NimBLEDevice::isBonded(NimBLEAddress(desc->peer_ota_addr)) ||
+                            NimBLEDevice::isBonded(NimBLEAddress(desc->peer_id_addr));
+        bool isLayoutPc = (monitorCount == 0) || isMacInActiveLayout(peerMac) || isMacInActiveLayout(effectiveMac);
+        bool isKnownPc = isLayoutPc || isKnownKvmClient(peerMac) || isKnownKvmClient(effectiveMac) || isBondedPeer;
 
         // Request BLE 5.0 2M PHY (2 Mbps ultra-low latency) for KVM PCs (active layout or known background)
         if (isKnownPc) {
             ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
-            checkAndLogPhyStatus(desc->conn_handle, peerMac.c_str());
+            checkAndLogPhyStatus(desc->conn_handle, effectiveMac.c_str());
         }
 
         if (isKnownPc) {
             bool updated = false;
             for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-                if (kvmClients[i].mac.equals(peerMac)) {
+                if (kvmClients[i].mac.equals(effectiveMac) || kvmClients[i].mac.equals(peerMac)) {
                     kvmClients[i].conn_id = desc->conn_handle;
+                    kvmClients[i].mac = effectiveMac;
                     kvmClients[i].active = true;
                     kvmClients[i].isTurbo = false;
                     updated = true;
@@ -769,10 +740,10 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
             if (!updated) {
                 for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-                    if (!kvmClients[i].active && kvmClients[i].mac.length() == 0) {
+                    if (kvmClients[i].mac.length() == 0) {
                         kvmClients[i].conn_id = desc->conn_handle;
-                        kvmClients[i].mac = peerMac;
-                        kvmClients[i].name = ""; // Always reset name to prevent leaking stale name from previous device
+                        kvmClients[i].mac = effectiveMac;
+                        kvmClients[i].name = "Paired Device";
                         kvmClients[i].active = true;
                         kvmClients[i].isTurbo = false;
                         break;
@@ -780,8 +751,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 }
             }
             if (!isLayoutPc) {
-                logPrint("[BLE Server] 💤 Background KVM PC %s (conn: %d) connected (not in active layout). Staying in Standby.",
-                         peerMac.c_str(), desc->conn_handle);
+                logPrint("[BLE Server] 💤 Background KVM PC %s (conn: %d) connected (not in active layout). Staying in Standby.", effectiveMac.c_str(), desc->conn_handle);
             }
         } else {
             // Non-KVM Client (Candidate Web Bluetooth Configurator) - do NOT pollute kvmClients!
@@ -802,16 +772,15 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 nonKvmClients[0].connectedTimeMs = millis();
                 nonKvmClients[0].isWebConfig = false;
             }
-            logPrint("[BLE Server] ⏳ Non-KVM Client %s (conn: %d) connected. Starting 5s Web Config Grace Period...", 
-                     peerMac.c_str(), desc->conn_handle);
+            logPrint("[BLE Server] ⏳ Non-KVM Client %s (conn: %d) connected. Starting 45s Web Config & Pairing Grace Period...", effectiveMac.c_str(), desc->conn_handle);
         }
 
         int activeLayoutConnectedCount = 0;
         for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
             if (kvmClients[i].active && isMacInActiveLayout(kvmClients[i].mac)) activeLayoutConnectedCount++;
         }
-        if (activeLayoutConnectedCount == 1 && isMacInActiveLayout(peerMac)) {
-            firstConnectedPcMac = peerMac;
+        if (activeLayoutConnectedCount == 1 && (isMacInActiveLayout(peerMac) || isMacInActiveLayout(effectiveMac))) {
+            firstConnectedPcMac = isMacInActiveLayout(effectiveMac) ? effectiveMac : peerMac;
             isCalibrated = false;
             scheduleBootCalibration();
         }
@@ -822,8 +791,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
     void onDisconnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
-        peerMac.toLowerCase();
-        peerMac.trim();
         logPrint("[BLE Server] PC Disconnected! MAC: %s (conn_handle: %d)", peerMac.c_str(), desc->conn_handle);
 
         isWebBleAuthenticated = false; // Reset Web Bluetooth authorization on client disconnect
@@ -870,29 +837,101 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         updateKvmPowerAndRateProfiles(isCalibrated ? firstConnectedPcMac : "");
         checkAndResumeAdvertising();
     }
+};
 
-    void onAuthenticationComplete(ble_gap_conn_desc* desc) {
+class SecurityCallbacks : public NimBLESecurityCallbacks {
+    uint32_t onPassKeyRequest() override {
+        logPrint("[BLE Security] =========================================");
+        logPrint("[BLE Security] >>> onPassKeyRequest: RETURNING %06lu <<<", (unsigned long)BLE_PAIRING_PIN);
+        logPrint("[BLE Security] =========================================");
+        return BLE_PAIRING_PIN;
+    }
+    void onPassKeyNotify(uint32_t pass_key) override {
+        logPrint("[BLE Security] =========================================");
+        logPrint("[BLE Security] >>> TYPE THIS PASSKEY ON KEYBOARD: %06lu <<<", (unsigned long)pass_key);
+        logPrint("[BLE Security] >>> AND PRESS ENTER ON MX KEYS S <<<");
+        logPrint("[BLE Security] =========================================");
+    }
+    bool onConfirmPIN(uint32_t pass_key) override {
+        logPrint("[BLE Security] =========================================");
+        logPrint("[BLE Security] >>> onConfirmPIN: %06lu (auto-confirmed) <<<", (unsigned long)pass_key);
+        logPrint("[BLE Security] =========================================");
+        return true;
+    }
+    bool onSecurityRequest() override {
+        logPrint("[BLE Security] onSecurityRequest -> Accepted");
+        return true;
+    }
+    void onAuthenticationComplete(ble_gap_conn_desc* desc) override {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
-        peerMac.toLowerCase();
-        peerMac.trim();
-        logPrint("[BLE Server] Auth Complete for %s | Encrypted: %d | Bonded: %d | KeySize: %d",
-                  peerMac.c_str(), desc->sec_state.encrypted, desc->sec_state.bonded, desc->sec_state.key_size);
+        logPrint("[BLE Security] Auth Complete for %s (conn: %d) | Encrypted: %d | Authenticated: %d | Bonded: %d",
+                  peerMac.c_str(), desc->conn_handle, desc->sec_state.encrypted, desc->sec_state.authenticated, desc->sec_state.bonded);
+
         if (!desc->sec_state.bonded) {
-            logPrint("[BLE Server] Bonding incomplete (Bonded: 0) for %s! Clearing stale bond key to allow fresh pairing...", peerMac.c_str());
+            logPrint("[BLE Security] Bonding incomplete (Bonded: 0) for %s! Clearing stale bond key to allow fresh pairing...", peerMac.c_str());
             NimBLEDevice::deleteBond(desc->peer_ota_addr);
         } else {
+            NimBLEAddress idAddr(desc->peer_id_addr);
+            String idMac = idAddr.toString().c_str();
+            String effectiveMac = (idMac.length() > 0 && idMac != "00:00:00:00:00:00") ? idMac : peerMac;
+
+            // Automatically register newly paired device into kvmClients!
+            bool alreadyKvm = false;
+            for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                if (kvmClients[i].mac.equals(effectiveMac) || kvmClients[i].mac.equals(peerMac)) {
+                    kvmClients[i].conn_id = desc->conn_handle;
+                    kvmClients[i].mac = effectiveMac;
+                    kvmClients[i].active = true;
+                    alreadyKvm = true;
+                    break;
+                }
+            }
+            if (!alreadyKvm) {
+                for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                    if (kvmClients[i].mac.length() == 0) {
+                        kvmClients[i].conn_id = desc->conn_handle;
+                        kvmClients[i].mac = effectiveMac;
+                        kvmClients[i].name = "Paired Device";
+                        kvmClients[i].active = true;
+                        kvmClients[i].isTurbo = false;
+                        logPrint("[BLE Security] 📱 Newly paired device %s registered into kvmClients (slot %d)!", effectiveMac.c_str(), i);
+                        saveKvmClientsToPreferences();
+                        break;
+                    }
+                }
+            }
+
+            // Remove from nonKvmClients if it was placed there during initial onConnect
+            for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
+                if (nonKvmClients[i].conn_id == desc->conn_handle || 
+                    nonKvmClients[i].mac.equals(peerMac) || 
+                    nonKvmClients[i].mac.equals(effectiveMac)) {
+                    nonKvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
+                    nonKvmClients[i].mac = "";
+                    nonKvmClients[i].connectedTimeMs = 0;
+                    nonKvmClients[i].isWebConfig = false;
+                    break;
+                }
+            }
+
             int activeLayoutConnectedCount = 0;
             for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
                 if (kvmClients[i].active && isMacInActiveLayout(kvmClients[i].mac)) activeLayoutConnectedCount++;
             }
-            if (activeLayoutConnectedCount == 1 && isMacInActiveLayout(peerMac)) {
-                firstConnectedPcMac = peerMac;
+            if (activeLayoutConnectedCount == 1 && isMacInActiveLayout(effectiveMac)) {
+                firstConnectedPcMac = effectiveMac;
                 isCalibrated = false;
                 scheduleBootCalibration();
             }
             // Connection is securely bonded and link layer is stable: apply rate profile safely!
-            updateKvmPowerAndRateProfiles(peerMac, true);
+            updateKvmPowerAndRateProfiles(effectiveMac, true);
         }
+
+        if (desc->sec_state.encrypted) {
+            ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
+            ble_svc_gatt_changed(0x0001, 0xffff);
+        }
+        checkAndResumeAdvertising();
     }
 };
 
@@ -1459,15 +1498,12 @@ bool connectToKeyboard();
 void sendConfigResponse(const String& response);
 void saveMouseToNvsLayout(String mac, String name);
 void saveKeyboardToNvsLayout(String mac, String name);
-String loadLayoutJsonFromNVS();
 static JsonDocument scannedMiceDoc;
 static TaskHandle_t reconnTaskHandle = NULL;
 
 class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
         String devMac = advertisedDevice->getAddress().toString().c_str();
-        devMac.toLowerCase();
-        devMac.trim();
 
         String devName = advertisedDevice->getName().c_str();
         int rssi = advertisedDevice->getRSSI();
@@ -1882,7 +1918,6 @@ bool connectToMouse() {
             for (int i = 0; i < results.getCount(); i++) {
                 NimBLEAdvertisedDevice dev = results.getDevice(i);
                 String devMac = dev.getAddress().toString().c_str();
-                devMac.toLowerCase();
                 String devName = dev.getName().c_str();
                 if (devMac == targetMouseMac) {
                     advDevice = new NimBLEAdvertisedDevice(dev);
@@ -2051,31 +2086,70 @@ static String readNvsBlob(Preferences& pref, const char* key, const String& fall
 void saveMouseToNvsLayout(String mac, String name) {
     targetMouseMac = mac;
     targetMouseName = name;
-
     preferences.begin(NVS_NAMESPACE, false);
     preferences.putString(NVS_KEY_MOUSE_MAC, targetMouseMac);
     preferences.putString(NVS_KEY_MOUSE_NAME, targetMouseName);
     preferences.end();
-
     logPrint("[NVS] Persisted mouse (%s, '%s') to granular NVS keys.", targetMouseMac.c_str(), targetMouseName.c_str());
 }
 
 void saveKeyboardToNvsLayout(String mac, String name) {
     targetKeyboardMac = mac;
     targetKeyboardName = name;
-
     preferences.begin(NVS_NAMESPACE, false);
     preferences.putString(NVS_KEY_KB_MAC, targetKeyboardMac);
     preferences.putString(NVS_KEY_KB_NAME, targetKeyboardName);
     preferences.end();
-
     logPrint("[NVS] Persisted keyboard (%s, '%s') to granular NVS keys.", targetKeyboardMac.c_str(), targetKeyboardName.c_str());
+}
+
+void saveKvmClientsToPreferences() {
+    preferences.begin(NVS_NAMESPACE, false);
+    JsonDocument doc;
+    JsonArray docClients = doc.to<JsonArray>();
+
+    for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+        String mac = kvmClients[i].mac;
+        if (mac.length() == 0) continue;
+        JsonObject client = docClients.add<JsonObject>();
+        client["mac"] = mac;
+        client["name"] = (kvmClients[i].name.length() > 0) ? kvmClients[i].name : "Paired Device";
+    }
+
+    String clientsJson;
+    serializeJson(doc, clientsJson);
+    preferences.remove(NVS_KEY_CLIENTS);
+    preferences.putBytes(NVS_KEY_CLIENTS, clientsJson.c_str(), clientsJson.length() + 1);
+    preferences.end();
+
+    logPrint("[NVS] 💾 Successfully saved %d KVM client(s) to preferences (%d bytes): %s",
+             docClients.size(), clientsJson.length() + 1, clientsJson.c_str());
+}
+
+void syncOrphanBonds() {
+    int numBonds = NimBLEDevice::getNumBonds();
+    for (int b = numBonds - 1; b >= 0; b--) {
+        NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(b);
+        String mac = bondAddr.toString().c_str();
+        if (targetMouseMac.length() > 0 && mac.equals(targetMouseMac)) continue;
+        if (targetKeyboardMac.length() > 0 && mac.equals(targetKeyboardMac)) continue;
+        bool found = false;
+        for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+            if (kvmClients[k].mac.equals(mac)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            NimBLEDevice::deleteBond(bondAddr);
+            logPrint("[BLE SYNC]   -> Deleted orphan bond: %s", mac.c_str());
+        }
+    }
 }
 
 String buildConfigJson() {
     preferences.begin(NVS_NAMESPACE, true);
-    int activeLayoutId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 3);
-    int totalLayouts = preferences.getInt(NVS_KEY_TOTAL_LAYOUTS, 3);
+    int activeLayoutId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 1);
     String mouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, targetMouseMac);
     String mouseName = preferences.getString(NVS_KEY_MOUSE_NAME, targetMouseName);
     String kbMac = preferences.getString(NVS_KEY_KB_MAC, targetKeyboardMac);
@@ -2086,8 +2160,6 @@ String buildConfigJson() {
 
     JsonDocument doc;
     doc["activeLayoutId"] = activeLayoutId;
-    doc["totalLayouts"] = totalLayouts;
-
     deserializeJson(doc["layouts"], layoutsJson);
     if (!doc["layouts"].is<JsonArray>()) {
         doc["layouts"].to<JsonArray>();
@@ -2099,9 +2171,9 @@ String buildConfigJson() {
     }
 
     doc["mouseMac"] = mouseMac;
-    doc["mouseName"] = mouseName.length() > 0 ? mouseName : (mouseMac.length() > 0 ? "BLE Mouse" : "");
+    doc["mouseName"] = mouseName;
     doc["keyboardMac"] = kbMac;
-    doc["keyboardName"] = kbName.length() > 0 ? kbName : (kbMac.length() > 0 ? "BLE Keyboard" : "");
+    doc["keyboardName"] = kbName;
 
     // Update connected status for clients based on live kvmClients[]
     JsonArray clientsArr = doc["clients"].as<JsonArray>();
@@ -2134,25 +2206,14 @@ String buildConfigJson() {
     return unifiedJson;
 }
 
-String loadLayoutJsonFromNVS() {
-    return buildConfigJson();
-}
-
 void loadConfiguration() {
     preferences.begin(NVS_NAMESPACE, true);
     targetMouseMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
-    targetMouseMac.toLowerCase();
-    targetMouseMac.trim();
     targetMouseName = preferences.getString(NVS_KEY_MOUSE_NAME, "");
     targetKeyboardMac = preferences.getString(NVS_KEY_KB_MAC, "");
-    targetKeyboardMac.toLowerCase();
-    targetKeyboardMac.trim();
-    if (targetKeyboardMac.length() > 0 && targetKeyboardMac == targetMouseMac) {
-        targetKeyboardMac = "";
-        targetKeyboardName = "";
-    }
+    targetKeyboardName = preferences.getString(NVS_KEY_KB_NAME, "");
 
-    int targetId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 1);
+    int activeLayoutId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 1);
     String layoutsJson = readNvsBlob(preferences, NVS_KEY_LAYOUTS, "[]");
     String clientsJson = readNvsBlob(preferences, NVS_KEY_CLIENTS, "[]");
     preferences.end();
@@ -2160,119 +2221,80 @@ void loadConfiguration() {
     JsonDocument docLayouts;
     deserializeJson(docLayouts, layoutsJson);
 
-    JsonArray arr;
+    JsonArray screens;
     if (docLayouts.is<JsonArray>() && docLayouts.size() > 0) {
         JsonObject activeLayout = docLayouts[0].as<JsonObject>();
         for (JsonObject l : docLayouts.as<JsonArray>()) {
             int lId = l["id"] | 0;
-            if (lId == targetId || (l["id"].as<String>() == String(targetId))) {
+            if (lId == activeLayoutId) {
                 activeLayout = l;
                 break;
             }
         }
-        arr = activeLayout["screens"].as<JsonArray>();
+        screens = activeLayout["screens"].as<JsonArray>();
     }
 
     monitorCount = 0;
-    if (arr) {
-        for (JsonObject repo : arr) {
+    if (screens) {
+        for (JsonObject screen : screens) {
             int defId = monitorCount + 1;
-            String defName = "Monitor #" + String(defId);
-            monitors[monitorCount].id = repo["id"] | defId;
-            monitors[monitorCount].name = repo["name"] | defName;
-            monitors[monitorCount].x = repo["x"] | 0;
-            monitors[monitorCount].y = repo["y"] | 0;
-            monitors[monitorCount].width = repo["width"] | 1920;
-            monitors[monitorCount].height = repo["height"] | 1080;
-            String mMac = repo["mac"] | "";
-            mMac.toLowerCase();
-            mMac.trim();
-            monitors[monitorCount].mac = mMac;
-            monitors[monitorCount].os = repo["os"] | OS_WINDOWS;
-            monitors[monitorCount].scale = repo["scale"] | 100;
-            monitors[monitorCount].isPrimary = repo["isPrimary"] | false;
-            monitors[monitorCount].keepAlive = repo["keepAlive"] | 0;
+            monitors[monitorCount].id = screen["id"] | defId;
+            monitors[monitorCount].name = screen["name"] | "";
+            monitors[monitorCount].x = screen["x"] | 0;
+            monitors[monitorCount].y = screen["y"] | 0;
+            monitors[monitorCount].width = screen["width"] | 1920;
+            monitors[monitorCount].height = screen["height"] | 1080;
+            monitors[monitorCount].mac = screen["mac"] | "";
+            monitors[monitorCount].os = screen["os"] | OS_WINDOWS;
+            monitors[monitorCount].scale = screen["scale"] | 100;
+            monitors[monitorCount].isPrimary = screen["isPrimary"] | false;
+            monitors[monitorCount].keepAlive = screen["keepAlive"] | 0;
             monitorCount++;
-        }
-    }
-
-    // Calculate distinct PCs from the loaded layout screens
-    int pcCount = 0;
-    String uniquePcMacs[MAX_SUPPORTED_KVM_CLIENTS];
-    for (int i = 0; i < monitorCount; i++) {
-        String mMac = monitors[i].mac;
-        if (mMac.length() > 0) {
-            bool found = false;
-            for (int p = 0; p < pcCount; p++) {
-                if (uniquePcMacs[p].equals(mMac)) {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found && pcCount < MAX_SUPPORTED_KVM_CLIENTS) {
-                uniquePcMacs[pcCount++] = mMac;
-            }
         }
     }
 
     JsonDocument docClients;
     deserializeJson(docClients, clientsJson);
 
-    // Also include docClients if present
+    int clientCount = 0;
     if (docClients.is<JsonArray>()) {
-        for (JsonObject client : docClients.as<JsonArray>()) {
-            String cMac = client["mac"] | "";
-            cMac.toLowerCase();
-            cMac.trim();
-            if (cMac.length() > 0) {
-                bool found = false;
-                for (int p = 0; p < pcCount; p++) {
-                    if (uniquePcMacs[p].equals(cMac)) {
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found && pcCount < MAX_SUPPORTED_KVM_CLIENTS) {
-                    uniquePcMacs[pcCount++] = cMac;
-                }
-            }
-        }
-    }
+        KVMClient kvmClientsOld[MAX_SUPPORTED_KVM_CLIENTS];
+        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) kvmClientsOld[i] = kvmClients[i];
 
-    // Dynamically update maxKvmClients based on current configuration
-    maxKvmClients = (pcCount > 0) ? pcCount : 2;
-
-    // Populate / update kvmClients array while preserving existing active connection handles
-    if (docClients.is<JsonArray>()) {
-        int clientCount = 0;
-        for (JsonObject client : docClients.as<JsonArray>()) {
-            if (clientCount >= maxKvmClients) break;
+        for (JsonObject client : docClients.as<JsonArray>()) { 
+            if (clientCount >= MAX_SUPPORTED_KVM_CLIENTS) break;
             String mac = client["mac"] | "";
-            mac.toLowerCase();
-            mac.trim();
-            if (mac.length() > 0) {
-                bool alreadyConnected = false;
-                uint16_t existingConn = BLE_HS_CONN_HANDLE_NONE;
-                for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
-                    if (kvmClients[k].mac.equals(mac) && kvmClients[k].active) {
-                        alreadyConnected = true;
-                        existingConn = kvmClients[k].conn_id;
-                        break;
-                    }
+            uint16_t conn_id = BLE_HS_CONN_HANDLE_NONE;
+            bool active = false;
+            bool isTurbo = false;
+            for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+                if (kvmClientsOld[k].mac.equals(mac)) {
+                    conn_id = kvmClientsOld[k].conn_id;
+                    active = kvmClientsOld[k].active;
+                    isTurbo = kvmClientsOld[k].isTurbo;
+                    break;
                 }
-                kvmClients[clientCount].mac = mac;
-                kvmClients[clientCount].name = client["name"] | "Unknown PC";
-                kvmClients[clientCount].conn_id = existingConn;
-                kvmClients[clientCount].active = alreadyConnected;
-                clientCount++;
             }
+            kvmClients[clientCount].mac = mac;
+            kvmClients[clientCount].name = client["name"] | "";
+            kvmClients[clientCount].conn_id = conn_id;
+            kvmClients[clientCount].active = active;
+            kvmClients[clientCount].isTurbo = isTurbo;
+            clientCount++;
+        }
+        int i = clientCount;
+        while (i < MAX_SUPPORTED_KVM_CLIENTS) {
+            kvmClients[i].mac = "";
+            kvmClients[i].name = "";
+            kvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
+            kvmClients[i].active = false;
+            kvmClients[i].isTurbo = false;
+            i++;
         }
     }
-
-    logPrint("Loaded %d monitors, %d KVM PC clients (maxKvmClients = %d) from granular NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
-             monitorCount, pcCount, maxKvmClients, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
-
-    checkAndResumeAdvertising();
+    for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) logPrint("    -> %s PC", kvmClients[k].mac.c_str());
+    logPrint("Loaded %d monitors, %d KVM PC clients from granular NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
+             monitorCount, clientCount, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
 }
 
 void saveConfiguration(const String& jsonString) {
@@ -2286,10 +2308,6 @@ void saveConfiguration(const String& jsonString) {
     int actId = doc["activeLayoutId"] | 0;
     if (actId > 0) {
         preferences.putInt(NVS_KEY_ACT_LAYOUT_ID, actId);
-    }
-    int totLay = doc["totalLayouts"] | 0;
-    if (totLay > 0) {
-        preferences.putInt(NVS_KEY_TOTAL_LAYOUTS, totLay);
     }
     if (doc["layouts"].is<JsonArray>()) {
         String layoutsJson;
@@ -2339,6 +2357,7 @@ void executePendingSave() {
         if (!deserializeJson(doc, pendingSaveJson)) {
             saveConfiguration(pendingSaveJson);
             loadConfiguration();
+            syncOrphanBonds();
             Serial.println("OK_SAVE");
             if (configTxChar) {
                 String resp = "OK_SAVE\n";
@@ -2351,188 +2370,187 @@ void executePendingSave() {
 }
 
 void processCommand(String input, bool isBleSource = false) {
-  input.trim();
-  if (input.length() == 0) return;
+    input.trim();
+    if (input.length() == 0) return;
 
-  lastConfigActivityTime = millis();
+    lastConfigActivityTime = millis();
 
-  // Web Bluetooth Authorization Check (Challenge-Response SHA-256)
-  if (isBleSource) {
-    if (input.equalsIgnoreCase("GET_CHALLENGE") || input.equalsIgnoreCase("AUTH_CHALLENGE")) {
-      char nonceBuf[17];
-      uint32_t r1 = esp_random();
-      uint32_t r2 = esp_random();
-      snprintf(nonceBuf, sizeof(nonceBuf), "%08lx%08lx", (unsigned long)r1, (unsigned long)r2);
-      currentAuthNonce = String(nonceBuf);
-      logPrint("[BLE AUTH] Issued new Challenge Nonce: %s", currentAuthNonce.c_str());
-      sendConfigResponse("CHALLENGE " + currentAuthNonce);
-      return;
-    }
-
-    if (input.startsWith("AUTH_RESPONSE ") || input.startsWith("AUTH_HASH ")) {
-      String clientHash = input.substring(input.indexOf(' ') + 1);
-      clientHash.trim();
-      clientHash.toLowerCase();
-
-      if (currentAuthNonce.length() > 0) {
-        String expectedHash = calculateSha256(String(WEB_BLE_AUTH_PASSPHRASE) + ":" + currentAuthNonce);
-        expectedHash.toLowerCase();
-
-        if (String(WEB_BLE_AUTH_PASSPHRASE).length() == 0 || clientHash.equals(expectedHash)) {
-          isWebBleAuthenticated = true;
-          currentAuthNonce = ""; // Invalidate nonce immediately to prevent replay attacks
-          logPrint("[BLE AUTH] Challenge-Response SHA-256 verified successfully!");
-          sendConfigResponse("OK_AUTH " WEB_BLE_AUTH_PASSPHRASE);
-          return;
-        } else {
-          isWebBleAuthenticated = false;
-          currentAuthNonce = "";
-          logPrint("[BLE AUTH ERROR] Signature verification failed (Received: %s, Expected: %s)", clientHash.c_str(), expectedHash.c_str());
-          sendConfigResponse("ERROR_AUTH Invalid signature");
-          return;
-        }
-      } else {
-        logPrint("[BLE AUTH ERROR] Received AUTH_RESPONSE without active challenge nonce");
-        sendConfigResponse("ERROR_AUTH No active challenge. Send 'GET_CHALLENGE'");
+    // Web Bluetooth Authorization Check (Challenge-Response SHA-256)
+    if (isBleSource) {
+        if (input.equalsIgnoreCase("GET_CHALLENGE") || input.equalsIgnoreCase("AUTH_CHALLENGE")) {
+        char nonceBuf[17];
+        uint32_t r1 = esp_random();
+        uint32_t r2 = esp_random();
+        snprintf(nonceBuf, sizeof(nonceBuf), "%08lx%08lx", (unsigned long)r1, (unsigned long)r2);
+        currentAuthNonce = String(nonceBuf);
+        logPrint("[BLE AUTH] Issued new Challenge Nonce: %s", currentAuthNonce.c_str());
+        sendConfigResponse("CHALLENGE " + currentAuthNonce);
         return;
-      }
+        }
+
+        if (input.startsWith("AUTH_RESPONSE ") || input.startsWith("AUTH_HASH ")) {
+        String clientHash = input.substring(input.indexOf(' ') + 1);
+        clientHash.trim();
+        clientHash.toLowerCase();
+
+        if (currentAuthNonce.length() > 0) {
+            String expectedHash = calculateSha256(String(WEB_BLE_AUTH_PASSPHRASE) + ":" + currentAuthNonce);
+            expectedHash.toLowerCase();
+
+            if (String(WEB_BLE_AUTH_PASSPHRASE).length() == 0 || clientHash.equals(expectedHash)) {
+            isWebBleAuthenticated = true;
+            currentAuthNonce = ""; // Invalidate nonce immediately to prevent replay attacks
+            logPrint("[BLE AUTH] Challenge-Response SHA-256 verified successfully!");
+            sendConfigResponse("OK_AUTH " WEB_BLE_AUTH_PASSPHRASE);
+            return;
+            } else {
+            isWebBleAuthenticated = false;
+            currentAuthNonce = "";
+            logPrint("[BLE AUTH ERROR] Signature verification failed (Received: %s, Expected: %s)", clientHash.c_str(), expectedHash.c_str());
+            sendConfigResponse("ERROR_AUTH Invalid signature");
+            return;
+            }
+        } else {
+            logPrint("[BLE AUTH ERROR] Received AUTH_RESPONSE without active challenge nonce");
+            sendConfigResponse("ERROR_AUTH No active challenge. Send 'GET_CHALLENGE'");
+            return;
+        }
+        }
+
+        if (input.equalsIgnoreCase("AUTH_STATUS")) {
+        sendConfigResponse(isWebBleAuthenticated ? "AUTH_OK" : "AUTH_REQUIRED");
+        return;
+        }
+
+        if (!isWebBleAuthenticated) {
+        logPrint("[BLE AUTH] Rejected unauthorized command '%s'. Authentication required.", input.c_str());
+        sendConfigResponse("ERROR_UNAUTHORIZED Authentication required. Request challenge via 'GET_CHALLENGE'");
+        return;
+        }
     }
 
-    if (input.equalsIgnoreCase("AUTH_STATUS")) {
-      sendConfigResponse(isWebBleAuthenticated ? "AUTH_OK" : "AUTH_REQUIRED");
-      return;
-    }
+    if (input.startsWith("SAVE_CONFIG ")) {
+        String payload = input.substring(12);
+        payload.trim();
+        
+        int expectedLen = -1;
+        String jsonStr = payload;
 
-    if (!isWebBleAuthenticated) {
-      logPrint("[BLE AUTH] Rejected unauthorized command '%s'. Authentication required.", input.c_str());
-      sendConfigResponse("ERROR_UNAUTHORIZED Authentication required. Request challenge via 'GET_CHALLENGE'");
-      return;
-    }
-  }
+        int spaceIdx = payload.indexOf(' ');
+        if (spaceIdx > 0 && !payload.startsWith("{") && !payload.startsWith("[")) {
+        String lenHeader = payload.substring(0, spaceIdx);
+        expectedLen = lenHeader.toInt();
+        jsonStr = payload.substring(spaceIdx + 1);
+        jsonStr.trim();
+        }
 
-  if (input.startsWith("SAVE_CONFIG ")) {
-    String payload = input.substring(12);
-    payload.trim();
-    
-    int expectedLen = -1;
-    String jsonStr = payload;
+        if (expectedLen > 0 && (int)jsonStr.length() != expectedLen) {
+        logPrint("[SAVE CONFIG ERROR] Content-Length mismatch: received %d, expected %d", (int)jsonStr.length(), expectedLen);
+        sendConfigResponse("ERROR_SAVE Content-Length mismatch");
+        return;
+        }
 
-    int spaceIdx = payload.indexOf(' ');
-    if (spaceIdx > 0 && !payload.startsWith("{") && !payload.startsWith("[")) {
-      String lenHeader = payload.substring(0, spaceIdx);
-      expectedLen = lenHeader.toInt();
-      jsonStr = payload.substring(spaceIdx + 1);
-      jsonStr.trim();
-    }
+        if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
+        pendingSaveJson = jsonStr;
+        doSaveConfig = true;
+        }
+    } else if (input == "GET_CONFIG") {
+        String unifiedJson = buildConfigJson();
+        sendConfigResponse("CONFIG " + String(unifiedJson.length()) + " " + unifiedJson);
+    } else if (input == "SCAN_MICE" || input == "SCAN_KEYBOARDS" || input == "SCAN_DEVICES") {
+        scannedMiceDoc.clear();
+        scannedMiceDoc.to<JsonArray>();
 
-    if (expectedLen > 0 && (int)jsonStr.length() != expectedLen) {
-      logPrint("[SAVE CONFIG ERROR] Content-Length mismatch: received %d, expected %d", (int)jsonStr.length(), expectedLen);
-      sendConfigResponse("ERROR_SAVE Content-Length mismatch");
-      return;
-    }
+        isScanningForMice = true;
 
-    if (jsonStr.startsWith("{") || jsonStr.startsWith("[")) {
-      pendingSaveJson = jsonStr;
-      doSaveConfig = true;
-    }
-  } else if (input == "GET_CONFIG") {
-    String unifiedJson = buildConfigJson();
-    sendConfigResponse("CONFIG " + String(unifiedJson.length()) + " " + unifiedJson);
-  } else if (input == "SCAN_MICE" || input == "SCAN_KEYBOARDS" || input == "SCAN_DEVICES") {
-    scannedMiceDoc.clear();
-    scannedMiceDoc.to<JsonArray>();
+        if (pClient && pClient->isConnected()) {
+        pClient->disconnect();
+        }
+        if (pKbClient && pKbClient->isConnected()) {
+        pKbClient->disconnect();
+        }
+        delay(200);
 
-    isScanningForMice = true;
+        NimBLEScan* pScan = NimBLEDevice::getScan();
+        if (pScan) {
+        if (pScan->isScanning()) {
+            pScan->stop();
+            delay(100);
+        }
+        pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), true);
+        pScan->setActiveScan(true);
+        pScan->setInterval(100);
+        pScan->setWindow(99);
 
-    if (pClient && pClient->isConnected()) {
-      pClient->disconnect();
-    }
-    if (pKbClient && pKbClient->isConnected()) {
-      pKbClient->disconnect();
-    }
-    delay(200);
+        logPrint("[BLE Scan] Starting 5-second active discovery scan for devices...");
+        pScan->start(5, false);
+        pScan->clearResults();
+        }
+        isScanningForMice = false;
+        logPrint("[BLE Scan] Discovery scan complete! Discovered %d BLE devices.", (int)scannedMiceDoc.as<JsonArray>().size());
 
-    NimBLEScan* pScan = NimBLEDevice::getScan();
-    if (pScan) {
-      if (pScan->isScanning()) {
-        pScan->stop();
-        delay(100);
-      }
-      pScan->setAdvertisedDeviceCallbacks(new ScanCallbacks(), true);
-      pScan->setActiveScan(true);
-      pScan->setInterval(100);
-      pScan->setWindow(99);
+        String jsonStr;
+        serializeJson(scannedMiceDoc, jsonStr);
+        sendConfigResponse("MICE " + jsonStr);
+    } else if (input.startsWith("BIND_MOUSE ")) {
+        String param = input.substring(11);
+        param.trim();
+        String mac = param;
+        String name = "BLE Mouse";
+        int spaceIdx = param.indexOf(' ');
+        if (spaceIdx != -1) {
+        mac = param.substring(0, spaceIdx);
+        name = param.substring(spaceIdx + 1);
+        name.trim();
+        }
+        saveMouseToNvsLayout(mac, name);
+        sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
 
-      logPrint("[BLE Scan] Starting 5-second active discovery scan for devices...");
-      pScan->start(5, false);
-      pScan->clearResults();
-    }
-    isScanningForMice = false;
-    logPrint("[BLE Scan] Discovery scan complete! Discovered %d BLE devices.", (int)scannedMiceDoc.as<JsonArray>().size());
+        if (pClient && pClient->isConnected()) {
+        pClient->disconnect();
+        }
+        if (targetMouseMac.length() > 0) {
+        doConnectMouse = true;
+        }
+    } else if (input == "UNBIND_MOUSE") {
+        saveMouseToNvsLayout("", "");
+        if (pClient && pClient->isConnected()) {
+        pClient->disconnect();
+        }
+        sendConfigResponse("OK_UNBIND_MOUSE");
+    } else if (input == "GET_TARGET_MOUSE") {
+        sendConfigResponse("TARGET_MOUSE " + targetMouseMac);
+    } else if (input.startsWith("BIND_KEYBOARD ")) {
+        String param = input.substring(14);
+        param.trim();
+        String mac = param;
+        String name = "Logitech MX Keys S";
+        int spaceIdx = param.indexOf(' ');
+        if (spaceIdx != -1) {
+            mac = param.substring(0, spaceIdx);
+            name = param.substring(spaceIdx + 1);
+            name.trim();
+        }
+        saveKeyboardToNvsLayout(mac, name);
+        sendConfigResponse("OK_BIND_KEYBOARD " + targetKeyboardMac);
 
-    String jsonStr;
-    serializeJson(scannedMiceDoc, jsonStr);
-    sendConfigResponse("MICE " + jsonStr);
-  } else if (input.startsWith("BIND_MOUSE ")) {
-    String param = input.substring(11);
-    param.trim();
-    String mac = param;
-    String name = "BLE Mouse";
-    int spaceIdx = param.indexOf(' ');
-    if (spaceIdx != -1) {
-      mac = param.substring(0, spaceIdx);
-      name = param.substring(spaceIdx + 1);
-      name.trim();
-    }
-    saveMouseToNvsLayout(mac, name);
-    sendConfigResponse("OK_BIND_MOUSE " + targetMouseMac);
-
-    if (pClient && pClient->isConnected()) {
-      pClient->disconnect();
-    }
-    if (targetMouseMac.length() > 0) {
-      doConnectMouse = true;
-    }
-  } else if (input == "UNBIND_MOUSE") {
-    saveMouseToNvsLayout("", "");
-    if (pClient && pClient->isConnected()) {
-      pClient->disconnect();
-    }
-    sendConfigResponse("OK_UNBIND_MOUSE");
-  } else if (input == "GET_TARGET_MOUSE") {
-    sendConfigResponse("TARGET_MOUSE " + targetMouseMac);
-  } else if (input.startsWith("BIND_KEYBOARD ")) {
-    String param = input.substring(14);
-    param.trim();
-    String mac = param;
-    String name = "Logitech MX Keys S";
-    int spaceIdx = param.indexOf(' ');
-    if (spaceIdx != -1) {
-      mac = param.substring(0, spaceIdx);
-      name = param.substring(spaceIdx + 1);
-      name.trim();
-    }
-    saveKeyboardToNvsLayout(mac, name);
-    sendConfigResponse("OK_BIND_KEYBOARD " + targetKeyboardMac);
-
-    if (pKbClient && pKbClient->isConnected()) {
-      pKbClient->disconnect();
-    }
-    if (targetKeyboardMac.length() > 0) {
-      doConnectKeyboard = true;
-    }
-  } else if (input == "UNBIND_KEYBOARD") {
-    saveKeyboardToNvsLayout("", "");
-    if (pKbClient && pKbClient->isConnected()) {
-      pKbClient->disconnect();
-    }
-    sendConfigResponse("OK_UNBIND_KEYBOARD");
-  } else if (input == "GET_TARGET_KEYBOARD") {
-    sendConfigResponse("TARGET_KEYBOARD " + targetKeyboardMac);
+        if (pKbClient && pKbClient->isConnected()) {
+            pKbClient->disconnect();
+        }
+        if (targetKeyboardMac.length() > 0) {
+            doConnectKeyboard = true;
+        }
+    } else if (input == "UNBIND_KEYBOARD") {
+        saveKeyboardToNvsLayout("", "");
+        if (pKbClient && pKbClient->isConnected()) {
+            pKbClient->disconnect();
+        }
+        sendConfigResponse("OK_UNBIND_KEYBOARD");
+    } else if (input == "GET_TARGET_KEYBOARD") {
+        sendConfigResponse("TARGET_KEYBOARD " + targetKeyboardMac);
     } else if (input == "DUMP_FLASH") {
         preferences.begin(NVS_NAMESPACE, true);
         int actId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 1);
-        int totLay = preferences.getInt(NVS_KEY_TOTAL_LAYOUTS, 1);
         String mMac = preferences.getString(NVS_KEY_MOUSE_MAC, "");
         String mName = preferences.getString(NVS_KEY_MOUSE_NAME, "");
         String kMac = preferences.getString(NVS_KEY_KB_MAC, "");
@@ -2544,13 +2562,12 @@ void processCommand(String input, bool isBleSource = false) {
         logPrint("--- [NVS FLASH DUMP] ---");
         logPrint("Namespace: '%s'", NVS_NAMESPACE);
         logPrint("  %s: %d", NVS_KEY_ACT_LAYOUT_ID, actId);
-        logPrint("  %s: %d", NVS_KEY_TOTAL_LAYOUTS, totLay);
         logPrint("  %s: '%s' (%s)", NVS_KEY_MOUSE_MAC, mMac.c_str(), mName.c_str());
         logPrint("  %s: '%s' (%s)", NVS_KEY_KB_MAC, kMac.c_str(), kName.c_str());
         logPrint("  %s (len %d): %s", NVS_KEY_LAYOUTS, layJson.length(), layJson.c_str());
         logPrint("  %s (len %d): %s", NVS_KEY_CLIENTS, cliJson.length(), cliJson.c_str());
         logPrint("--- [END NVS FLASH DUMP] ---");
-    } else if (input == "CLEAR_BONDS" || input == "CLEAR_BLE_BONDS") {
+    } else if (input == "CLEAR_BONDS") {
         int count = NimBLEDevice::getNumBonds();
         NimBLEDevice::deleteAllBonds();
         logPrint("[BLE] Deleted %d bonded devices from NVS. Fresh pairing required for all PCs.", count);
@@ -2608,8 +2625,9 @@ void setup() {
 
     NimBLEDevice::init(BLE_DEVICE_NAME);
     NimBLEDevice::setMTU(512);
-    NimBLEDevice::setSecurityAuth(true, false, true); // (bonding=true, mitm=false -> Just Works, sc=true)
-    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT); // Standard Combo IO Capability
+    NimBLEDevice::setSecurityAuth(true, true, true); // (bonding=true, mitm=true -> Enforces 6-digit PIN passkey 123456, sc=true)
+    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY); // Display Only: Prompts PC/Smartphone for PIN entry
+    NimBLEDevice::setSecurityPasskey(BLE_PAIRING_PIN);
     NimBLEDevice::setSecurityCallbacks(new SecurityCallbacks());
     NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
@@ -2625,6 +2643,7 @@ void setup() {
         NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(i);
         logPrint("  -> Bonded Device #%d: MAC %s", i + 1, bondAddr.toString().c_str());
     }
+    syncOrphanBonds();
     
     // Setup BLE Server (Peripheral)
     pServer = NimBLEDevice::createServer();

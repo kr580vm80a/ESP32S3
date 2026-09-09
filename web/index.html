@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <script>
-    const BUILD_VERSION = 307;
+    const BUILD_VERSION = 308;
     document.write('<title>ESP32 Bluetooth KVM Switcher v' + BUILD_VERSION + ' - Configuration Center</title>');
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -482,6 +482,17 @@
       <button class="icon-btn icon-btn-danger" onclick="clearScreens()" title="Clear Active Layout Screens">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
       </button>
+
+      <div style="width: 1px; height: 18px; background: var(--border-color); margin: 0 2px;"></div>
+
+      <!-- Copy & Paste PC Across Layouts -->
+      <button class="icon-btn" onclick="copySelectedPC()" title="Copy Selected PC (Ctrl+C)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="14" height="14" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+      </button>
+
+      <button class="icon-btn" onclick="pastePC()" title="Paste PC to Active Layout (Ctrl+V)">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg>
+      </button>
     </div>
   </div>
 
@@ -844,7 +855,7 @@
       const newName = nameInput.value.trim();
 
       if (!newMac) {
-        showToast('⚠️ Please enter a MAC address!', 'error', 3000);
+        showToast('Please enter a MAC address!', 'error', 3000);
         macInput.focus();
         return;
       }
@@ -1036,7 +1047,7 @@
     async function toggleBleMouseModal(e) {
       if (e) e.stopPropagation();
       if (activeConnectionType === 'none') {
-        showToast('⚠️ Please connect to ESP32 via USB or Bluetooth first!', 'error', 3500);
+        showToast('Please connect to ESP32 via USB or Bluetooth first!', 'error', 3500);
         return;
       }
       const modal = document.getElementById('bleMouseModal');
@@ -1177,7 +1188,7 @@
       sendESP32Command(`BIND_MOUSE ${mac} ${mName}\n`);
       setBoundMouseStatus(mac, mName);
       closeBleMouseModal();
-      showToast(`✓ Locked Mouse: ${mName} (${mac})`, 'success', 2500);
+      showToast(`Locked Mouse: ${mName} (${mac})`, 'success', 2500);
     }
 
     function unbindTargetMouse() {
@@ -1192,7 +1203,7 @@
       sendESP32Command(`BIND_KEYBOARD ${mac} ${kName}\n`);
       setBoundKeyboardStatus(mac, kName);
       closeBleMouseModal();
-      showToast(`✓ Locked Keyboard: ${kName} (${mac})`, 'success', 2500);
+      showToast(`Locked Keyboard: ${kName} (${mac})`, 'success', 2500);
     }
 
     function unbindTargetKeyboard() {
@@ -1657,22 +1668,22 @@
         try {
           await sendESP32Command(`SAVE_CONFIG ${minifiedJson.length} ${minifiedJson}\n`);
           console.log('[SAVE CONFIG SUCCESS] Config sent over BLE!');
-          showToast('✅ Configuration saved to ESP32 Flash memory over Bluetooth!', 'success', 3500);
+          showToast('Configuration saved to ESP32 Flash memory over Bluetooth!', 'success', 3500);
         } catch (e) {
           console.error('[SAVE CONFIG ERROR BLE]:', e);
-          showToast('❌ Bluetooth transmission error: ' + e.message, 'error', 4000);
+          showToast('Bluetooth transmission error: ' + e.message, 'error', 4000);
         }
       } else if (activeConnectionType === 'usb' && window.esp32SerialPort && window.esp32SerialPort.writable) {
         try {
           await sendESP32Command(`SAVE_CONFIG ${minifiedJson.length} ${minifiedJson}\n`);
           console.log('[SAVE CONFIG SUCCESS] Config sent over USB Serial!');
-          showToast('✅ Configuration saved to ESP32 Flash memory over USB!', 'success', 3500);
+          showToast('Configuration saved to ESP32 Flash memory over USB!', 'success', 3500);
         } catch (e) {
           console.error('[SAVE CONFIG ERROR USB]:', e);
-          showToast('❌ Data transmission error to ESP32: ' + e.message, 'error', 4000);
+          showToast('Data transmission error to ESP32: ' + e.message, 'error', 4000);
         }
       } else {
-        showToast('⚠️ ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
+        showToast('ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
       }
     }
 
@@ -1844,7 +1855,7 @@
 
     function deleteCurrentLayout() {
       if (layoutsData.layouts.length <= 1) {
-        showToast('⚠️ Cannot delete the only layout!', 'error', 3000);
+        showToast('Cannot delete the only layout!', 'error', 3000);
         return;
       }
       const active = getActiveLayout();
@@ -1910,7 +1921,7 @@
       const isIOS = ua.includes('IPHONE') || ua.includes('IPAD') || ua.includes('IPOD') || (platform.includes('MACINTEL') && navigator.maxTouchPoints > 1);
       const isAndroid = ua.includes('ANDROID') || (navigator.userAgentData && navigator.userAgentData.platform === 'Android');
       const isMac = platform.includes('MAC');
-      const osLabel = isIOS ? 'iOS 📱' : (isAndroid ? 'Android 🤖' : (isMac ? 'macOS 🍏' : 'Windows 🪟'));
+      const osLabel = isIOS ? 'iOS' : (isAndroid ? 'Android' : (isMac ? 'macOS' : 'Windows'));
 
       const getDetailsFn = window.getScreenDetails || window.getScreenDetails;
 
@@ -1921,7 +1932,7 @@
 
       if (!window.isSecureContext && !isMobile) {
         setDetectBoxHtml(`
-          ⚠️ <span>HTTPS Required (${osLabel}):</span><br>
+          <span>HTTPS Required (${osLabel}):</span><br>
           • Chrome requires HTTPS or localhost for Multi-Screen Detection.<br>
           • Please open via HTTPS or use Presets below.
         `);
@@ -1944,7 +1955,7 @@
             isInternal: s.isInternal
           })));
 
-          let infoHtml = `🎯 <span>Detected ${detectedScreens.length} display(s) for ${currentDeviceName} (${osLabel}):</span><br>`;
+          let infoHtml = `<span>Detected ${detectedScreens.length} display(s) for ${currentDeviceName} (${osLabel}):</span><br>`;
 
           const parsed = detectedScreens.map((s, idx) => {
             const ratio = s.devicePixelRatio || window.devicePixelRatio || 1;
@@ -2150,7 +2161,7 @@
         const screenH = (preset && Math.abs(preset.height - physH) < 120) ? preset.height : (physH > 0 ? physH : rawH);
 
         setDetectBoxHtml(`
-          🎯 <span>Smartphone/Tablet (${osLabel}):</span><br>
+          <span>Smartphone/Tablet (${osLabel}):</span><br>
           • Device: <b>${currentDeviceName}</b><br>
           • Screen Size: <b>${screenW} × ${screenH} px</b><br>
           • Viewport: <sup>${rawW}×${rawH} (DPR: ${ratio.toFixed(1)})</sup>
@@ -2199,7 +2210,7 @@
 
       if (isMultiMonitor) {
         setDetectBoxHtml(`
-          🎯 <span>Detected 2 displays (${osLabel}):</span><br>
+          <span>Detected 2 displays (${osLabel}):</span><br>
           • Primary: <b>${preset.width}x${preset.height} px</b><br>
           • Secondary: <b>1920x1080 px</b>
         `);
@@ -2237,7 +2248,7 @@
         syncActiveLayoutScreens();
       } else {
         setDetectBoxHtml(`
-          🎯 <span>Physical Resolution (${osLabel}):</span><br>
+          <span>Physical Resolution (${osLabel}):</span><br>
           • Device: <b>${currentDeviceName}</b><br>
           • Preset: <b>${preset.width} x ${preset.height} px</b>
         `);
@@ -2434,6 +2445,136 @@
       updateJSON();
       draw();
     }
+
+    // --- Cross-Layout PC Copy & Paste ---
+    let pcClipboard = null;
+
+    function copySelectedPC() {
+      if (!selectedScreen) {
+        showToast("Please select a computer monitor to copy first", 'warning', 2500);
+        return;
+      }
+
+      let pcScreens = [];
+      if (selectedScreen.group) {
+        pcScreens = screens.filter(s => s.group === selectedScreen.group);
+      }
+      if (pcScreens.length === 0) {
+        pcScreens = [selectedScreen];
+      }
+
+      const minX = Math.min(...pcScreens.map(s => (s.layoutX !== undefined ? s.layoutX : (s.x || 0))));
+      const minY = Math.min(...pcScreens.map(s => (s.layoutY !== undefined ? s.layoutY : (s.y || 0))));
+      const gName = selectedScreen.groupName || selectedScreen.name || 'PC';
+
+      pcClipboard = {
+        groupName: gName,
+        screens: pcScreens.map(s => ({
+          name: s.name || '',
+          width: s.width || 1920,
+          height: s.height || 1080,
+          scale: s.scale || 100,
+          os: s.os !== undefined ? Number(s.os) : 0,
+          mac: s.mac || '',
+          isPrimary: !!s.isPrimary,
+          keepAlive: s.keepAlive !== undefined ? Number(s.keepAlive) : 0,
+          relX: (s.layoutX !== undefined ? s.layoutX : (s.x || 0)) - minX,
+          relY: (s.layoutY !== undefined ? s.layoutY : (s.y || 0)) - minY,
+          isDetected: s.isDetected !== undefined ? s.isDetected : true,
+          isLocked: s.isLocked !== undefined ? s.isLocked : true
+        }))
+      };
+
+      const count = pcClipboard.screens.length;
+      const countLabel = count === 1 ? '1 display' : `${count} displays`;
+      showToast(`Copied PC: ${gName} (${countLabel})`, 'success', 2500);
+    }
+
+    function pastePC() {
+      if (!pcClipboard || !pcClipboard.screens || pcClipboard.screens.length === 0) {
+        showToast('Clipboard is empty! Copy a PC first (Ctrl+C)', 'warning', 2500);
+        return;
+      }
+
+      let insertX = 0;
+      let insertY = 0;
+      if (screens.length > 0) {
+        let maxRight = 0;
+        screens.forEach(s => {
+          const lx = s.layoutX !== undefined ? s.layoutX : (s.x || 0);
+          const w = s.width || 1920;
+          if (lx + w > maxRight) {
+            maxRight = lx + w;
+          }
+        });
+        insertX = maxRight + 60;
+        insertY = Math.min(...screens.map(s => (s.layoutY !== undefined ? s.layoutY : (s.y || 0))));
+      }
+
+      const newGroupId = 'device_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+      const newColor = getGroupColor(newGroupId);
+      const hasPrimary = pcClipboard.screens.some(s => s.isPrimary);
+
+      const addedScreens = [];
+      pcClipboard.screens.forEach((s, idx) => {
+        const newScreen = {
+          id: Date.now() + idx * 10 + Math.floor(Math.random() * 10),
+          name: s.name || ('Monitor #' + (screens.length + idx + 1)),
+          group: newGroupId,
+          groupName: pcClipboard.groupName || '',
+          mac: s.mac || '',
+          width: s.width,
+          height: s.height,
+          scale: s.scale,
+          os: s.os,
+          isPrimary: hasPrimary ? s.isPrimary : (idx === 0),
+          keepAlive: s.keepAlive,
+          layoutX: insertX + s.relX,
+          layoutY: insertY + s.relY,
+          x: insertX + s.relX,
+          y: insertY + s.relY,
+          color: newColor,
+          isDetected: s.isDetected,
+          isLocked: s.isLocked
+        };
+        screens.push(newScreen);
+        addedScreens.push(newScreen);
+      });
+
+      syncActiveLayoutScreens();
+      saveProjectState();
+      updateLayoutSelectorUI();
+      updateJSON();
+
+      if (addedScreens.length > 0) {
+        selectedScreen = addedScreens[0];
+      }
+      draw();
+
+      const count = addedScreens.length;
+      const countLabel = count === 1 ? '1 display' : `${count} displays`;
+      showToast(`Pasted PC: ${pcClipboard.groupName} (${countLabel})`, 'success', 2500);
+    }
+
+    window.addEventListener('keydown', (e) => {
+      const activeTag = document.activeElement ? document.activeElement.tagName.toUpperCase() : '';
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || (document.activeElement && document.activeElement.isContentEditable)) {
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        if (e.key === 'c' || e.key === 'C') {
+          if (selectedScreen) {
+            e.preventDefault();
+            copySelectedPC();
+          }
+        } else if (e.key === 'v' || e.key === 'V') {
+          if (pcClipboard) {
+            e.preventDefault();
+            pastePC();
+          }
+        }
+      }
+    });
 
     function draw() {
       if (!canvas.width || canvas.width === 0 || !canvas.height || canvas.height === 0) {
@@ -3405,7 +3546,7 @@
     // Load configuration from ESP32 Button handler
     document.getElementById('btnLoadESP32').addEventListener('click', async () => {
       if (activeConnectionType === 'none') {
-        showToast('⚠️ ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
+        showToast('ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
         return;
       }
       console.log(`[LOAD CONFIG LOG] Requesting unified GET_CONFIG over ${activeConnectionType.toUpperCase()}...`);
@@ -3429,12 +3570,12 @@
     // Dump Flash Diagnostic Button handler
     document.getElementById('btnDumpFlash').addEventListener('click', async () => {
       if (activeConnectionType === 'none') {
-        showToast('⚠️ ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
+        showToast('ESP32 is not connected! Please connect via USB or Bluetooth first.', 'error', 3500);
         return;
       }
       console.log(`[DUMP FLASH LOG] Requesting DUMP_FLASH over ${activeConnectionType.toUpperCase()}...`);
       await sendESP32Command('DUMP_FLASH\n');
-      showToast('🔍 DUMP_FLASH request sent! Open browser console (F12) or Serial Monitor to view Flash NVS contents.', 'info', 4000);
+      showToast('DUMP_FLASH request sent! Open browser console (F12) or Serial Monitor to view Flash NVS contents.', 'info', 4000);
     });
 
     // Backup Layout JSON to local device file (Using native Save File Picker with kvm_config.json)
@@ -3500,7 +3641,7 @@
       reader.onload = (event) => {
         const content = event.target.result;
         parseESP32ConfigResponse(content);
-        showToast(`✅ Configuration restored from ${file.name}!`, 'success', 3500);
+        showToast(`Configuration restored from ${file.name}!`, 'success', 3500);
       };
       reader.readAsText(file);
       e.target.value = '';
@@ -3726,7 +3867,7 @@
         disconnectAllChannels();
         if (line.includes('Invalid signature') || line.includes('ERROR_AUTH')) {
           localStorage.removeItem('esp32_ble_password');
-          showToast('❌ Incorrect ESP32 access password! Disconnected.', 'error', 3500);
+          showToast('Incorrect ESP32 access password! Disconnected.', 'error', 3500);
         }
       }
     }
@@ -4053,7 +4194,7 @@
           updateConnectionUI('none');
         }
       } else {
-        showToast('❌ Web Serial API is not supported in this browser.', 'error', 4000);
+        showToast('Web Serial API is not supported in this browser.', 'error', 4000);
       }
     });
 
@@ -4094,7 +4235,7 @@
             service = await server.getPrimaryService(CONFIG_SERVICE_UUID);
           } catch(serviceErr) {
             console.warn('[BLE] Config service not found:', serviceErr);
-            showToast('⚠️ Config Service not found on ESP32!\n1. Flash firmware via PlatformIO.\n2. Remove device from OS Bluetooth settings and pair again.', 'error', 5000);
+            showToast('Config Service not found on ESP32!\n1. Flash firmware via PlatformIO.\n2. Remove device from OS Bluetooth settings and pair again.', 'error', 5000);
             updateConnectionUI('none');
             return;
           }
@@ -4121,7 +4262,7 @@
           updateConnectionUI('none');
         }
       } else {
-        showToast('❌ Web Bluetooth API is not supported in this browser.', 'error', 4000);
+        showToast('Web Bluetooth API is not supported in this browser.', 'error', 4000);
       }
     });
 

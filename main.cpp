@@ -1141,10 +1141,101 @@ void sendAbsoluteCoordinatesMacOs(uint16_t connHandle, int monIndex, long target
              contextLabel, targetMon.mac.c_str(), targetGlobalX, targetGlobalY, relX, relY, absX, absY, targetMon.id, targetMon.name.c_str());
 }
 
+// --- Smart Edge Reset & Positioning Function for Android ---
+void sendAbsoluteCoordinatesAndroid(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
+    MonitorConfig& targetMon = monitors[monIndex];
+    long relX = constrain(targetGlobalX - targetMon.x, 0, targetMon.width - 1);
+    long relY = constrain(targetGlobalY - targetMon.y, 0, targetMon.height - 1);
+    float scaleFactor = (targetMon.scale > 0) ? (targetMon.scale / 100.0f) : 1.0f;
+
+    if (strcmp(contextLabel, "BOOT POSITION") == 0) {
+        // Center position calibration
+        sendRelative12Bit(connHandle, -6000, -6000);
+        int32_t moveX = (int32_t)round(((float)targetMon.width / 2.0f) / scaleFactor);
+        int32_t moveY = (int32_t)round(((float)targetMon.height / 2.0f) / scaleFactor);
+        sendRelative12Bit(connHandle, moveX, moveY);
+        logPrint("[%s] Android centered: rel (%ld, %ld), moved (%ld, %ld) on Mon #%d (%s)",
+                 contextLabel, relX, relY, moveX, moveY, targetMon.id, targetMon.name.c_str());
+        return;
+    }
+
+    // Determine entry border by finding the closest edge in the target monitor
+    long distLeft   = relX;
+    long distRight  = (targetMon.width - 1) - relX;
+    long distTop    = relY;
+    long distBottom = (targetMon.height - 1) - relY;
+
+    long minDist = distLeft;
+    const char* border = "LEFT";
+    if (distRight < minDist) {
+        minDist = distRight;
+        border = "RIGHT";
+    }
+    if (distTop < minDist) {
+        minDist = distTop;
+        border = "TOP";
+    }
+    if (distBottom < minDist) {
+        minDist = distBottom;
+        border = "BOTTOM";
+    }
+
+    if (strcmp(border, "RIGHT") == 0) {
+        // Entered from the RIGHT edge: pin X to right bezel, traverse Y from nearest corner
+        if (relY <= targetMon.height / 2) {
+            sendRelative12Bit(connHandle, 6000, -6000); // Top-Right corner
+            int32_t moveY = (int32_t)round((float)relY / scaleFactor);
+            sendRelative12Bit(connHandle, 100, moveY);
+        } else {
+            sendRelative12Bit(connHandle, 6000, 6000);  // Bottom-Right corner
+            int32_t moveY = -(int32_t)round((float)distBottom / scaleFactor);
+            sendRelative12Bit(connHandle, 100, moveY);
+        }
+    } else if (strcmp(border, "LEFT") == 0) {
+        // Entered from the LEFT edge: pin X to left bezel, traverse Y from nearest corner
+        if (relY <= targetMon.height / 2) {
+            sendRelative12Bit(connHandle, -6000, -6000); // Top-Left corner
+            int32_t moveY = (int32_t)round((float)relY / scaleFactor);
+            sendRelative12Bit(connHandle, -100, moveY);
+        } else {
+            sendRelative12Bit(connHandle, -6000, 6000);  // Bottom-Left corner
+            int32_t moveY = -(int32_t)round((float)distBottom / scaleFactor);
+            sendRelative12Bit(connHandle, -100, moveY);
+        }
+    } else if (strcmp(border, "TOP") == 0) {
+        // Entered from the TOP edge: pin Y to top bezel, traverse X from nearest corner
+        if (relX <= targetMon.width / 2) {
+            sendRelative12Bit(connHandle, -6000, -6000); // Top-Left corner
+            int32_t moveX = (int32_t)round((float)relX / scaleFactor);
+            sendRelative12Bit(connHandle, moveX, -100);
+        } else {
+            sendRelative12Bit(connHandle, 6000, -6000);  // Top-Right corner
+            int32_t moveX = -(int32_t)round((float)distRight / scaleFactor);
+            sendRelative12Bit(connHandle, moveX, -100);
+        }
+    } else { // BOTTOM
+        // Entered from the BOTTOM edge: pin Y to bottom bezel, traverse X from nearest corner
+        if (relX <= targetMon.width / 2) {
+            sendRelative12Bit(connHandle, -6000, 6000);  // Bottom-Left corner
+            int32_t moveX = (int32_t)round((float)relX / scaleFactor);
+            sendRelative12Bit(connHandle, moveX, 100);
+        } else {
+            sendRelative12Bit(connHandle, 6000, 6000);   // Bottom-Right corner
+            int32_t moveX = -(int32_t)round((float)distRight / scaleFactor);
+            sendRelative12Bit(connHandle, moveX, 100);
+        }
+    }
+
+    logPrint("[%s] Android edge reset via %s border: rel (%ld, %ld) on Mon #%d (%s)",
+             contextLabel, border, relX, relY, targetMon.id, targetMon.name.c_str());
+}
+
 // --- Absolute HID Positioning Function ---
 void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
     if (monitors[monIndex].os == OS_MAC) {
         sendAbsoluteCoordinatesMacOs(connHandle, monIndex, targetGlobalX, targetGlobalY, contextLabel);
+    // } else if (monitors[monIndex].os == OS_ANDROID) {
+    //     sendAbsoluteCoordinatesAndroid(connHandle, monIndex, targetGlobalX, targetGlobalY, contextLabel);
     } else {
         sendAbsoluteCoordinatesWindows(connHandle, monIndex, targetGlobalX, targetGlobalY, contextLabel);
     }
@@ -1279,10 +1370,10 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
     if (y & 0x800) y |= 0xF000; // Sign extend to 16-bit
     int8_t scroll = (int8_t)pData[5];
     int8_t hScroll = (length > 6) ? (int8_t)pData[6] : 0;
-    // logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%d (%s)",
-    //             pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
-    //             buttons, x, y, scroll, hScroll, virtualX, virtualY,
-    //             monitors[currentMonitorIndex].id, monitors[currentMonitorIndex].name.c_str());
+    logPrint("[DECODE] Raw: %02X %02X %02X %02X %02X %02X %02X -> Btn: 0x%02X, dX: %d, dY: %d, VS: %d, HS: %d | Pos: (%ld, %ld) Mon #%d (%s)",
+                pData[0], pData[1], pData[2], pData[3], pData[4], pData[5], (length > 6 ? pData[6] : 0),
+                buttons, x, y, scroll, hScroll, virtualX, virtualY,
+                monitors[currentMonitorIndex].id, monitors[currentMonitorIndex].name.c_str());
     updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
 }
 

@@ -21,6 +21,9 @@ static volatile bool s_ctrl_busy = false;
 
 static bool s_is_mouse_connected = false;
 static bool s_is_kb_connected = false;
+static bool s_is_unifying = false;
+static uint16_t s_mouse_mps = 64;
+static uint16_t s_kb_mps = 64;
 
 static void usb_ctrl_transfer_cb(usb_transfer_t *transfer) {
     s_ctrl_busy = false;
@@ -46,7 +49,58 @@ bool logi_bolt_is_keyboard_connected() {
     return s_is_kb_connected;
 }
 
-static void processUsbMouseReport(uint8_t *pData, size_t length) {
+static void processUnifyingMouseReport(uint8_t *pData, size_t length) {
+    if (!pData || length < 3) return;
+
+    int16_t batchDx = 0;
+    int16_t batchDy = 0;
+    int8_t batchScroll = 0;
+    int8_t batchHScroll = 0;
+    uint8_t batchButtons = s_buttons;
+    bool hasMovement = false;
+
+    // Logitech Unifying batches up to eight 8-byte sub-reports in 64-byte USB transfers:
+    // [0]: Report ID (0x02)
+    // [1]: Buttons (Bits 0..4: Left, Right, Middle, Back, Forward)
+    // [2]: Buttons high / padding (0x00)
+    // [3]: X low 8 bits
+    // [4]: (X high 4 bits & 0x0F) | ((Y low 4 bits & 0x0F) << 4)
+    // [5]: Y high 8 bits
+    // [6]: Vertical scroll (signed 8-bit)
+    // [7]: Horizontal scroll (signed 8-bit)
+    for (size_t offset = 0; offset + 8 <= length; offset += 8) {
+        const uint8_t* r = pData + offset;
+        if (r[0] != 0x02) continue;
+
+        batchButtons = r[1] & 0x1F;
+
+        int16_t x = (int16_t)(r[3] | ((r[4] & 0x0F) << 8));
+        if (x & 0x800) x |= 0xF000;
+
+        int16_t y = (int16_t)(((r[4] >> 4) & 0x0F) | (r[5] << 4));
+        if (y & 0x800) y |= 0xF000;
+
+        batchDx += x;
+        batchDy += y;
+        batchScroll += (int8_t)r[6];
+        batchHScroll += (int8_t)r[7];
+        hasMovement = true;
+    }
+
+    if (hasMovement) {
+        portENTER_CRITICAL(&s_mouse_mux);
+        s_accum_dx += batchDx;
+        s_accum_dy += batchDy;
+        s_accum_scroll += batchScroll;
+        s_accum_hscroll += batchHScroll;
+        s_buttons = batchButtons;
+        s_has_pending_data = true;
+        portEXIT_CRITICAL(&s_mouse_mux);
+        return;
+    }
+}
+
+static void processBoltMouseReport(uint8_t *pData, size_t length) {
     if (!pData || length < 3) return;
 
     uint8_t buttons = 0;
@@ -68,6 +122,7 @@ static void processUsbMouseReport(uint8_t *pData, size_t length) {
             x = (int8_t)pData[2];
             y = (int8_t)pData[3];
             scroll = (length >= 5) ? (int8_t)pData[4] : 0;
+            hScroll = (length >= 6) ? (int8_t)pData[5] : 0;
         }
     } else if (pData[0] == 0x01 && length >= 4) {
         buttons = pData[1] & 0x1F;
@@ -95,9 +150,14 @@ static void processUsbMouseReport(uint8_t *pData, size_t length) {
 
 static void usb_mouse_transfer_cb(usb_transfer_t *transfer) {
     if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0) {
-        processUsbMouseReport(transfer->data_buffer, transfer->actual_num_bytes);
+        if (s_is_unifying) {
+            processUnifyingMouseReport(transfer->data_buffer, transfer->actual_num_bytes);
+        } else {
+            processBoltMouseReport(transfer->data_buffer, transfer->actual_num_bytes);
+        }
     }
     if (s_usb_dev_hdl != NULL && transfer->status != USB_TRANSFER_STATUS_NO_DEVICE) {
+        transfer->num_bytes = s_mouse_mps;
         usb_host_transfer_submit(transfer);
     }
 }
@@ -125,55 +185,91 @@ static void usb_kb_transfer_cb(usb_transfer_t *transfer) {
         }
     }
     if (s_usb_dev_hdl != NULL && transfer->status != USB_TRANSFER_STATUS_NO_DEVICE) {
+        transfer->num_bytes = s_kb_mps;
         usb_host_transfer_submit(transfer);
     }
 }
 
 static void usb_host_client_event_cb(const usb_host_client_event_msg_t *event_msg, void *arg) {
     if (event_msg->event == USB_HOST_CLIENT_EVENT_NEW_DEV) {
-        logPrint("[BOLT] *** NEW USB DEVICE DETECTED! Address: %d ***", event_msg->new_dev.address);
+        logPrint("[USB HOST] *** NEW USB DEVICE DETECTED! Address: %d ***", event_msg->new_dev.address);
         esp_err_t err = usb_host_device_open(s_usb_client_hdl, event_msg->new_dev.address, &s_usb_dev_hdl);
         if (err == ESP_OK && s_usb_dev_hdl != NULL) {
             const usb_device_desc_t *dev_desc = NULL;
             err = usb_host_get_device_descriptor(s_usb_dev_hdl, &dev_desc);
             if (err == ESP_OK && dev_desc) {
-                logPrint("[BOLT] Device Opened! VID: 0x%04X, PID: 0x%04X", dev_desc->idVendor, dev_desc->idProduct);
-                if (dev_desc->idVendor == 0x046D && dev_desc->idProduct == 0xC548) {
-                    logPrint("[BOLT] Logi Bolt Receiver Confirmed!");
+                logPrint("[USB HOST] Device Opened! VID: 0x%04X, PID: 0x%04X", dev_desc->idVendor, dev_desc->idProduct);
+                if (dev_desc->idVendor == 0x046D) {
+                    if (dev_desc->idProduct == 0xC548) {
+                        s_is_unifying = false;
+                        logPrint("[USB HOST] Logi Bolt Receiver (0xC548) Confirmed!");
+                    } else if (dev_desc->idProduct == 0xC52B || dev_desc->idProduct == 0xC532 ||
+                               dev_desc->idProduct == 0xC534 || dev_desc->idProduct == 0xC52F) {
+                        s_is_unifying = true;
+                        logPrint("[USB HOST] Logitech Unifying/Nano Receiver (0x%04X) Confirmed!", dev_desc->idProduct);
+                    } else {
+                        s_is_unifying = false;
+                        logPrint("[USB HOST] Logitech Receiver (PID: 0x%04X) Detected!", dev_desc->idProduct);
+                    }
                 }
             }
             
+            // Automatically detect endpoint MPS (Max Packet Size) from active configuration descriptor
+            const usb_config_desc_t *config_desc = NULL;
+            err = usb_host_get_active_config_descriptor(s_usb_dev_hdl, &config_desc);
+            if (err == ESP_OK && config_desc) {
+                int offset = 0;
+                const usb_ep_desc_t *ep = usb_parse_endpoint_descriptor_by_address(config_desc, 1, 0, 0x82, &offset);
+                if (ep) {
+                    s_mouse_mps = ep->wMaxPacketSize;
+                    logPrint("[USB HOST] Mouse EP 0x82 MPS: %d", s_mouse_mps);
+                } else {
+                    s_mouse_mps = 64;
+                }
+                offset = 0;
+                ep = usb_parse_endpoint_descriptor_by_address(config_desc, 0, 0, 0x81, &offset);
+                if (ep) {
+                    s_kb_mps = ep->wMaxPacketSize;
+                    logPrint("[USB HOST] Keyboard EP 0x81 MPS: %d", s_kb_mps);
+                } else {
+                    s_kb_mps = 64;
+                }
+            } else {
+                s_mouse_mps = 64;
+                s_kb_mps = 64;
+            }
+
             // Claim Interface 1 (Mouse: EP 0x82 IN)
             err = usb_host_interface_claim(s_usb_client_hdl, s_usb_dev_hdl, 1, 0);
             if (err == ESP_OK) {
-                logPrint("[BOLT] Interface 1 (Mouse) claimed successfully!");
+                logPrint("[USB HOST] Interface 1 (Mouse) claimed successfully!");
                 err = usb_host_transfer_alloc(64, 0, &s_mouse_transfer);
                 if (err == ESP_OK) {
                     s_mouse_transfer->device_handle = s_usb_dev_hdl;
                     s_mouse_transfer->bEndpointAddress = 0x82; // EP 2 IN
                     s_mouse_transfer->callback = usb_mouse_transfer_cb;
                     s_mouse_transfer->context = NULL;
-                    s_mouse_transfer->num_bytes = 64;
+                    s_mouse_transfer->num_bytes = s_mouse_mps;
                     esp_err_t sub_err = usb_host_transfer_submit(s_mouse_transfer);
-                    logPrint("[BOLT] Mouse transfer submitted (rc=%d)! Ready for motion", sub_err);
-                    s_is_mouse_connected = true;
+                    logPrint("[USB HOST] Mouse transfer submitted (rc=%d)! Ready for motion", sub_err);
+                    s_is_mouse_connected = (sub_err == ESP_OK);
                 }
             }
 
             // Claim Interface 0 (Keyboard: EP 0x81 IN)
             err = usb_host_interface_claim(s_usb_client_hdl, s_usb_dev_hdl, 0, 0);
             if (err == ESP_OK) {
-                logPrint("[BOLT] Interface 0 (Keyboard) claimed successfully!");
+                logPrint("[USB HOST] Interface 0 (Keyboard) claimed successfully!");
                 err = usb_host_transfer_alloc(64, 0, &s_kb_transfer);
                 if (err == ESP_OK) {
                     s_kb_transfer->device_handle = s_usb_dev_hdl;
                     s_kb_transfer->bEndpointAddress = 0x81; // EP 1 IN
                     s_kb_transfer->callback = usb_kb_transfer_cb;
                     s_kb_transfer->context = NULL;
-                    s_kb_transfer->num_bytes = 64;
+                    s_kb_transfer->num_bytes = s_kb_mps;
                     esp_err_t sub_err = usb_host_transfer_submit(s_kb_transfer);
-                    logPrint("[BOLT] Keyboard transfer submitted (rc=%d)! Ready for typing", sub_err);
-                    s_is_kb_connected = true;
+                    logPrint("[USB HOST] Keyboard transfer submitted (rc=%d)! Ready for typing", sub_err);
+                    s_is_kb_connected = (sub_err == ESP_OK);
                 }
                 // Allocate control transfer for keyboard LEDs (SET_REPORT)
                 err = usb_host_transfer_alloc(sizeof(usb_setup_packet_t) + 8, 0, &s_ctrl_transfer);
@@ -186,9 +282,12 @@ static void usb_host_client_event_cb(const usb_host_client_event_msg_t *event_ms
             scheduleBootCalibration();
         }
     } else if (event_msg->event == USB_HOST_CLIENT_EVENT_DEV_GONE) {
-        logPrint("[BOLT] USB Device Disconnected!");
+        logPrint("[USB HOST] *** USB Device Disconnected! ***");
         s_is_mouse_connected = false;
         s_is_kb_connected = false;
+        s_is_unifying = false;
+        s_mouse_mps = 64;
+        s_kb_mps = 64;
         if (s_mouse_transfer) {
             usb_host_transfer_free(s_mouse_transfer);
             s_mouse_transfer = NULL;
@@ -234,11 +333,11 @@ static void usb_client_task(void *arg) {
     };
     esp_err_t err = usb_host_client_register(&client_config, &s_usb_client_hdl);
     if (err != ESP_OK) {
-        logPrint("[BOLT] Failed to register client: %s", esp_err_to_name(err));
+        logPrint("[USB HOST] Failed to register client: %s", esp_err_to_name(err));
         vTaskDelete(NULL);
         return;
     }
-    logPrint("[BOLT] USB Host Client Registered. Polling for Logi Bolt...");
+    logPrint("[USB HOST] USB Host Client Registered. Polling for Logi Bolt...");
     while (1) {
         usb_host_client_handle_events(s_usb_client_hdl, pdMS_TO_TICKS(10));
         taskYIELD();
@@ -246,17 +345,17 @@ static void usb_client_task(void *arg) {
 }
 
 void logi_bolt_init() {
-    logPrint("[BOLT] Initializing ESP32-S3 USB Host stack...");
+    logPrint("[USB HOST] Initializing ESP32-S3 USB Host stack...");
     usb_host_config_t host_config = {
         .skip_phy_setup = false,
         .intr_flags = ESP_INTR_FLAG_LEVEL1,
     };
     esp_err_t err = usb_host_install(&host_config);
     if (err != ESP_OK) {
-        logPrint("[BOLT] usb_host_install failed: %s", esp_err_to_name(err));
+        logPrint("[USB HOST] usb_host_install failed: %s", esp_err_to_name(err));
         return;
     }
-    logPrint("[BOLT] usb_host_install OK! Starting USB Host tasks on Core 1...");
+    logPrint("[USB HOST] usb_host_install OK! Starting USB Host tasks on Core 1...");
     xTaskCreatePinnedToCore(usb_lib_task, "usb_lib", 4096, NULL, 3, NULL, 1);
     xTaskCreatePinnedToCore(usb_client_task, "usb_client", 4096, NULL, 3, NULL, 1);
 }
@@ -296,11 +395,11 @@ void logi_bolt_loop() {
 
 void logi_bolt_set_keyboard_leds(uint8_t leds) {
     if (!s_usb_dev_hdl || !s_ctrl_transfer || !s_is_kb_connected) {
-        logPrint("[BOLT LED] Not ready: dev=%p ctrl=%p kb=%d", s_usb_dev_hdl, s_ctrl_transfer, s_is_kb_connected);
+        logPrint("[USB HOST LED] Not ready: dev=%p ctrl=%p kb=%d", s_usb_dev_hdl, s_ctrl_transfer, s_is_kb_connected);
         return;
     }
     if (s_ctrl_busy) {
-        logPrint("[BOLT LED] Busy, skipping");
+        logPrint("[USB HOST LED] Busy, skipping");
         return;
     }
 
@@ -322,9 +421,9 @@ void logi_bolt_set_keyboard_leds(uint8_t leds) {
     esp_err_t err = usb_host_transfer_submit_control(s_usb_client_hdl, s_ctrl_transfer);
     if (err != ESP_OK) {
         s_ctrl_busy = false;
-        logPrint("[BOLT LED] SET_REPORT submit error rc=%d", err);
+        logPrint("[USB HOST LED] SET_REPORT submit error rc=%d", err);
     } else {
-        logPrint("[BOLT LED] SET_REPORT submitted: 0x%02X (Caps: %d)", leds, (leds & 0x02) ? 1 : 0);
+        logPrint("[USB HOST LED] SET_REPORT submitted: 0x%02X (Caps: %d)", leds, (leds & 0x02) ? 1 : 0);
     }
 }
 

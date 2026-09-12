@@ -75,21 +75,13 @@ uint32_t lastConfigActivityTime = 0;
 
 void logPrint(const char* format, ...) {
     unsigned long ms = millis();
-    unsigned long seconds = ms / 1000;
-    unsigned long millisec = ms % 1000;
-    unsigned long minutes = (seconds / 60) % 60;
-    unsigned long hours = (seconds / 3600) % 24;
-    
-    char timeStr[24];
-    snprintf(timeStr, sizeof(timeStr), "[%02lu:%02lu:%02lu.%03lu] ", hours, minutes, seconds % 60, millisec);
-    
-    char buffer[384];
+    char buffer[408];
+    snprintf(buffer, sizeof(buffer), "[%02lu:%02lu:%02lu.%03lu] ", (ms / 3600000) % 24, (ms / 60000) % 60, (ms / 1000) % 60, ms % 1000);
+    size_t offset = strlen(buffer);
     va_list args;
     va_start(args, format);
-    vsnprintf(buffer, sizeof(buffer), format, args);
+    vsnprintf(buffer + offset, sizeof(buffer) - offset, format, args);
     va_end(args);
-
-    Serial.print(timeStr);
     Serial.println(buffer);
 }
 

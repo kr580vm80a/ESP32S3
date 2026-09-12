@@ -131,11 +131,7 @@ static void processBoltMouseReport(uint8_t *pData, size_t length) {
         scroll = (length > 4) ? (int8_t)pData[4] : 0;
         hScroll = (length > 5) ? (int8_t)pData[5] : 0;
     } else {
-        buttons = pData[0] & 0x1F;
-        x = (int8_t)pData[1];
-        y = (int8_t)pData[2];
-        scroll = (length > 3) ? (int8_t)pData[3] : 0;
-        hScroll = (length > 4) ? (int8_t)pData[4] : 0;
+        return; // Non-mouse packet: ignore here
     }
 
     portENTER_CRITICAL(&s_mouse_mux);
@@ -150,10 +146,18 @@ static void processBoltMouseReport(uint8_t *pData, size_t length) {
 
 static void usb_mouse_transfer_cb(usb_transfer_t *transfer) {
     if (transfer->status == USB_TRANSFER_STATUS_COMPLETED && transfer->actual_num_bytes > 0) {
-        if (s_is_unifying) {
-            processUnifyingMouseReport(transfer->data_buffer, transfer->actual_num_bytes);
-        } else {
-            processBoltMouseReport(transfer->data_buffer, transfer->actual_num_bytes);
+        uint8_t* pData = transfer->data_buffer;
+        size_t len = transfer->actual_num_bytes;
+
+        if (pData[0] == 0x03 || pData[0] == 0x04) {
+            // Consumer Control / Media / Calculator report arriving on EP 0x82!
+            keyboardNotifyCallback(nullptr, pData, len, false);
+        } else if (s_is_unifying) {
+            processUnifyingMouseReport(pData, len);
+        } else if (pData[0] == 0x02 || (pData[0] == 0x01 && len >= 4)) {
+            processBoltMouseReport(pData, len);
+        } else if (len == 7 || len == 8 || len == 9 || (len >= 15 && len <= 17)) {
+            keyboardNotifyCallback(nullptr, pData, len, false);
         }
     }
     if (s_usb_dev_hdl != NULL && transfer->status != USB_TRANSFER_STATUS_NO_DEVICE) {

@@ -47,6 +47,7 @@ extern int monitorCount;
 #define BLE_PAIRING_PIN             123456           // Static 6-digit PIN code for PC Bluetooth pairing
 #define WEB_BLE_AUTH_PASSPHRASE     "esp32s3"        // Passphrase required for Web Bluetooth browser access
 
+#define CONN_HANDLE_USB_DEVICE      0xFFFE           // Virtual connection handle for wired USB-C PC/Mac
 #define MAX_SUPPORTED_KVM_CLIENTS 6 // 6 PCs + 1 Mouse + 1 Keyboard + 1 Web = 9 max NimBLE connections
 struct KVMClient {
     uint16_t conn_id = BLE_HS_CONN_HANDLE_NONE;

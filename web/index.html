@@ -643,6 +643,10 @@
       if (!input) return;
 
       const rawVal = input.value;
+      if (rawVal.trim().toUpperCase().startsWith('USB')) {
+        input.value = rawVal.trim().toUpperCase();
+        return;
+      }
       const cursorStart = input.selectionStart || 0;
 
       // Count how many valid hex digits were before cursor

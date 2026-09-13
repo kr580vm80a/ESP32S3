@@ -1,6 +1,8 @@
 #include "cursor_engine.h"
 #include "keyboard_engine.h"
 #include "logi_bolt.h"
+#include "usb_manager.h"
+#include "usb_device_engine.h"
 #include <cmath>
 
 static float subpixelX = 0.0f;
@@ -39,6 +41,10 @@ void sendAbsPosWindows(uint16_t connHandle, uint16_t absX, uint16_t absY) {
 }
 
 void sendRelative12Bit(uint16_t connHandle, int32_t dx, int32_t dy, uint8_t buttons, int8_t scroll, int8_t hScroll) {
+    if (connHandle == CONN_HANDLE_USB_DEVICE) {
+        usb_device_send_mouse(buttons, dx, dy, scroll, hScroll);
+        return;
+    }
     do {
         int16_t curDx = (int16_t)constrain(dx, -2047, 2047);
         int16_t curDy = (int16_t)constrain(dy, -2047, 2047);
@@ -424,7 +430,12 @@ bool isPcSwitchAllowed(uint8_t mouseButtons) {
 
 void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t scroll, int8_t hScroll) {
 
-    if (monitorCount == 0) return;
+    if (monitorCount == 0) {
+        if (usb_manager_is_pc_connected()) {
+            usb_device_send_mouse(buttons, dx, dy, scroll, hScroll);
+        }
+        return;
+    }
 
     MonitorConfig& currentMon = monitors[currentMonitorIndex];
     uint16_t connHandle = getTargetConnHandle(currentMon.mac);
@@ -505,7 +516,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                         sendHidReport(keyboardInputChar, connHandle, keyRelease, sizeof(keyRelease));
                     }
                     currentMonitorIndex = newMonitorIndex;
-                    logPrint("[PC SWITCH] Cursor saved at (%ld, %ld)", virtualX, virtualY);
+                    logPrint("[PC SWITCH] Cursor saved at (%ld, %ld) -> Target: %s",
+                             virtualX, virtualY, targetConn == CONN_HANDLE_USB_DEVICE ? "USB-C (1000Hz HID)" : String(targetConn).c_str());
                     updateKvmPowerAndRateProfiles(monitors[newMonitorIndex].mac, true);
                     syncPhysicalKeyboardLedsForPc(monitors[newMonitorIndex].mac);
                     sendAbsoluteCoordinates(targetConn, newMonitorIndex, virtualX, virtualY, "PC SWITCH");

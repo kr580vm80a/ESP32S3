@@ -1,15 +1,30 @@
 #include "keyboard_engine.h"
 #include "logi_bolt.h"
+#include "usb_manager.h"
+#include "usb_device_engine.h"
 
 static bool s_capsLockLedState = false;
+static uint8_t s_usbClientLedState = 0;
+
+void handleUsbDeviceKeyboardLed(uint8_t leds) {
+    s_usbClientLedState = leds;
+    String activeMac = (monitorCount > 0) ? monitors[currentMonitorIndex].mac : "";
+    if (activeMac.equalsIgnoreCase("USB") || activeMac.equalsIgnoreCase("USB-C") || getTargetConnHandle(activeMac) == CONN_HANDLE_USB_DEVICE || activeMac.length() == 0) {
+        syncPhysicalKeyboardLedsForPc(activeMac.length() > 0 ? activeMac : "USB");
+    }
+}
 
 void syncPhysicalKeyboardLedsForPc(const String& targetMac) {
     if (targetMac.length() == 0) return;
     uint8_t targetLeds = 0;
-    for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
-        if (kvmClients[k].active && kvmClients[k].mac.equals(targetMac)) {
-            targetLeds = kvmClients[k].ledState;
-            break;
+    if (targetMac.equalsIgnoreCase("USB") || targetMac.equalsIgnoreCase("USB-C") || getTargetConnHandle(targetMac) == CONN_HANDLE_USB_DEVICE) {
+        targetLeds = s_usbClientLedState;
+    } else {
+        for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+            if (kvmClients[k].active && kvmClients[k].mac.equals(targetMac)) {
+                targetLeds = kvmClients[k].ledState;
+                break;
+            }
         }
     }
     s_capsLockLedState = (targetLeds & 0x02) ? true : false;
@@ -44,13 +59,18 @@ void checkAndSyncCapsLock(const uint8_t* rep8) {
     }
     if (currentCapsLockPressed && !s_lastCapsLockPressed) {
         String activeMac = (monitorCount > 0) ? monitors[currentMonitorIndex].mac : "";
-        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-            if (kvmClients[i].active && kvmClients[i].mac.equals(activeMac)) {
-                kvmClients[i].ledState ^= 0x02; // Toggle CapsLock bit for currently active PC
-                break;
+        if (activeMac.equalsIgnoreCase("USB") || activeMac.equalsIgnoreCase("USB-C")) {
+            s_usbClientLedState ^= 0x02;
+            syncPhysicalKeyboardLedsForPc("USB");
+        } else {
+            for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                if (kvmClients[i].active && kvmClients[i].mac.equals(activeMac)) {
+                    kvmClients[i].ledState ^= 0x02; // Toggle CapsLock bit for currently active PC
+                    break;
+                }
             }
+            syncPhysicalKeyboardLedsForPc(activeMac);
         }
-        syncPhysicalKeyboardLedsForPc(activeMac);
     }
     s_lastCapsLockPressed = currentCapsLockPressed;
 }
@@ -595,22 +615,27 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
     uint16_t charHandle = pBLERemoteCharacteristic ? pBLERemoteCharacteristic->getHandle() : 0;
     logPrint("[KEYBOARD RX RAW] %s (len: %d, hdl: 0x%04X)", hexDump.c_str(), length, charHandle);
 
-    if (monitorCount == 0) return;
-
-    uint16_t targetConn = getTargetConnHandle(monitors[currentMonitorIndex].mac);
+    uint16_t targetConn = BLE_HS_CONN_HANDLE_NONE;
+    if (monitorCount > 0 && currentMonitorIndex < monitorCount) {
+        targetConn = getTargetConnHandle(monitors[currentMonitorIndex].mac);
+    }
     if (targetConn == BLE_HS_CONN_HANDLE_NONE) {
-        // Fallback to any active connected PC if current monitor target is not matched
-        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-            if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && isMacInActiveLayout(kvmClients[i].mac)) {
-                targetConn = kvmClients[i].conn_id;
-                break;
+        if (usb_manager_is_pc_connected()) {
+            targetConn = CONN_HANDLE_USB_DEVICE;
+        } else {
+            // Fallback to any active connected PC if current monitor target is not matched
+            for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && isMacInActiveLayout(kvmClients[i].mac)) {
+                    targetConn = kvmClients[i].conn_id;
+                    break;
+                }
             }
         }
     }
     if (targetConn == BLE_HS_CONN_HANDLE_NONE) return;
 
     int targetOs = OS_WINDOWS;
-    if (currentMonitorIndex < monitorCount) {
+    if (monitorCount > 0 && currentMonitorIndex < monitorCount) {
         targetOs = monitors[currentMonitorIndex].os;
     }
 

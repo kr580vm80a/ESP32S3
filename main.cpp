@@ -12,6 +12,7 @@
 #include "ble_server.h"
 #include "ble_central.h"
 #include "logi_bolt.h"
+#include "usb_manager.h"
 
 Preferences preferences;
 
@@ -91,7 +92,7 @@ void setup() {
     delay(2000);
     
     logPrint("--- ESP32 KVM Switcher Started ---");
-    logi_bolt_init();
+    usb_manager_init();
     loadConfiguration();
     
     initBleServer();
@@ -101,7 +102,7 @@ void setup() {
 }
 
 void loop() {
-    logi_bolt_loop();
+    usb_manager_loop();
     checkWindowsCtrlShiftDwell();
 
     // Continuous Advertising Watchdog: ensures ESP32 is discoverable without log spam

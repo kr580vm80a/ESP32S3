@@ -6,6 +6,8 @@
 #include "keyboard_engine.h"
 #include "cmd_processor.h"
 #include "logi_bolt.h"
+#include "usb_manager.h"
+#include "usb_device_engine.h"
 #include <esp_mac.h>
 #include "nimble/nimble/host/services/gatt/include/services/gatt/ble_svc_gatt.h"
 
@@ -567,10 +569,21 @@ int getActiveClientOs() {
 }
 
 uint16_t getTargetConnHandle(const String& targetMac) {
+    if (targetMac.equalsIgnoreCase("USB") || targetMac.equalsIgnoreCase("USB-C")) {
+        if (usb_manager_is_pc_connected()) {
+            return CONN_HANDLE_USB_DEVICE;
+        }
+        return BLE_HS_CONN_HANDLE_NONE;
+    }
+    // 1. First check if target MAC has an active BLE connection
     for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active && kvmClients[i].mac.equals(targetMac)) {
+        if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && kvmClients[i].mac.equals(targetMac)) {
             return kvmClients[i].conn_id;
         }
+    }
+    // 2. If target is not connected via BLE, but USB-C PC is connected:
+    if (usb_manager_is_pc_connected()) {
+        return CONN_HANDLE_USB_DEVICE;
     }
     return BLE_HS_CONN_HANDLE_NONE;
 }
@@ -578,6 +591,19 @@ uint16_t getTargetConnHandle(const String& targetMac) {
 // Send HID report directly to target connection handle
 void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8_t* report, size_t length) {
     if (!pChar || !report || length == 0 || connHandle == BLE_HS_CONN_HANDLE_NONE) return;
+    if (connHandle == CONN_HANDLE_USB_DEVICE) {
+        if (pChar == keyboardInputChar && length >= 8) {
+            usb_device_send_keyboard(report);
+        } else if (pChar == mediaInputChar && length > 0) {
+            uint16_t usage = (length >= 2) ? (uint16_t)(report[0] | (report[1] << 8)) : (uint16_t)report[0];
+            usb_device_send_consumer(usage);
+        } else if (pChar == macAbsInputChar && length >= 5) {
+            usb_device_send_mac_abs(report);
+        } else if (pChar == absInputChar && length >= 4) {
+            usb_device_send_win_abs(report);
+        }
+        return;
+    }
     os_mbuf *om = ble_hs_mbuf_from_flat(report, length);
     if (!om) return;
     int rc = ble_gatts_notify_custom(connHandle, pChar->getHandle(), om);

@@ -14,7 +14,6 @@ void sendAbsPosWindows(uint16_t connHandle, uint16_t absX, uint16_t absY);
 void sendRelative12Bit(uint16_t connHandle, int32_t dx, int32_t dy, uint8_t buttons = 0, int8_t scroll = 0, int8_t hScroll = 0);
 void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel);
 void sendAbsoluteCoordinatesMacOs(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel);
-void sendAbsoluteCoordinatesMacOs1(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel);
 void sendAbsoluteCoordinatesAndroid(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel);
 void sendAbsoluteCoordinates(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel);
 void calibrateFirstConnectedPcToCenter(String targetMac);

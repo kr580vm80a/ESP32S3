@@ -4,6 +4,9 @@
 #include "usb/usb_host.h"
 #include "usb/usb_helpers.h"
 #include <NimBLEDevice.h>
+#include "usb_manager.h"
+#include "driver/periph_ctrl.h"
+#include "soc/periph_defs.h"
 
 // Forward declarations of existing KVM functions in main.cpp
 void logPrint(const char* format, ...);
@@ -18,6 +21,10 @@ static usb_transfer_t *s_mouse_transfer = NULL;
 static usb_transfer_t *s_kb_transfer = NULL;
 static usb_transfer_t *s_ctrl_transfer = NULL;
 static volatile bool s_ctrl_busy = false;
+
+static TaskHandle_t s_usb_lib_task_hdl = NULL;
+static TaskHandle_t s_usb_client_task_hdl = NULL;
+static volatile bool s_usb_host_running = false;
 
 static bool s_is_mouse_connected = false;
 static bool s_is_kb_connected = false;
@@ -312,11 +319,12 @@ static void usb_host_client_event_cb(const usb_host_client_event_msg_t *event_ms
             s_usb_dev_hdl = NULL;
         }
         updateKvmPowerAndRateProfiles("", true);
+        usb_manager_notify_host_dev_gone();
     }
 }
 
 static void usb_lib_task(void *arg) {
-    while (1) {
+    while (s_usb_host_running) {
         uint32_t event_flags;
         esp_err_t err = usb_host_lib_handle_events(pdMS_TO_TICKS(10), &event_flags);
         if (event_flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
@@ -324,6 +332,7 @@ static void usb_lib_task(void *arg) {
         }
         vTaskDelay(pdMS_TO_TICKS(1)); // Yield to allow IDLE task to feed watchdog
     }
+    vTaskDelete(NULL);
 }
 
 static void usb_client_task(void *arg) {
@@ -342,13 +351,15 @@ static void usb_client_task(void *arg) {
         return;
     }
     logPrint("[USB HOST] USB Host Client Registered. Polling for Logi Bolt...");
-    while (1) {
+    while (s_usb_host_running) {
         usb_host_client_handle_events(s_usb_client_hdl, pdMS_TO_TICKS(10));
         taskYIELD();
     }
+    vTaskDelete(NULL);
 }
 
 void logi_bolt_init() {
+    if (s_usb_host_running) return;
     logPrint("[USB HOST] Initializing ESP32-S3 USB Host stack...");
     usb_host_config_t host_config = {
         .skip_phy_setup = false,
@@ -359,9 +370,55 @@ void logi_bolt_init() {
         logPrint("[USB HOST] usb_host_install failed: %s", esp_err_to_name(err));
         return;
     }
+    s_usb_host_running = true;
     logPrint("[USB HOST] usb_host_install OK! Starting USB Host tasks on Core 1...");
-    xTaskCreatePinnedToCore(usb_lib_task, "usb_lib", 4096, NULL, 3, NULL, 1);
-    xTaskCreatePinnedToCore(usb_client_task, "usb_client", 4096, NULL, 3, NULL, 1);
+    xTaskCreatePinnedToCore(usb_lib_task, "usb_lib", 4096, NULL, 3, &s_usb_lib_task_hdl, 1);
+    xTaskCreatePinnedToCore(usb_client_task, "usb_client", 4096, NULL, 3, &s_usb_client_task_hdl, 1);
+}
+
+void logi_bolt_deinit() {
+    if (!s_usb_host_running) return;
+    logPrint("[USB HOST] Deinitializing USB Host stack...");
+    s_usb_host_running = false;
+
+    if (s_usb_dev_hdl && s_usb_client_hdl) {
+        usb_host_interface_release(s_usb_client_hdl, s_usb_dev_hdl, 0);
+        usb_host_interface_release(s_usb_client_hdl, s_usb_dev_hdl, 1);
+        usb_host_device_close(s_usb_client_hdl, s_usb_dev_hdl);
+        s_usb_dev_hdl = NULL;
+    }
+    if (s_mouse_transfer) {
+        usb_host_transfer_free(s_mouse_transfer);
+        s_mouse_transfer = NULL;
+    }
+    if (s_kb_transfer) {
+        usb_host_transfer_free(s_kb_transfer);
+        s_kb_transfer = NULL;
+    }
+    if (s_ctrl_transfer) {
+        usb_host_transfer_free(s_ctrl_transfer);
+        s_ctrl_transfer = NULL;
+        s_ctrl_busy = false;
+    }
+
+    if (s_usb_client_hdl) {
+        usb_host_client_deregister(s_usb_client_hdl);
+        s_usb_client_hdl = NULL;
+    }
+    if (s_usb_client_task_hdl) {
+        vTaskDelete(s_usb_client_task_hdl);
+        s_usb_client_task_hdl = NULL;
+    }
+    if (s_usb_lib_task_hdl) {
+        vTaskDelete(s_usb_lib_task_hdl);
+        s_usb_lib_task_hdl = NULL;
+    }
+
+    usb_host_uninstall();
+    periph_module_reset(PERIPH_USB_MODULE);
+    s_is_mouse_connected = false;
+    s_is_kb_connected = false;
+    logPrint("[USB HOST] USB Host stack deinitialized successfully.");
 }
 
 void logi_bolt_loop() {

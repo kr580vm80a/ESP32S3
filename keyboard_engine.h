@@ -14,6 +14,7 @@ void checkCtrlShiftGlobeTrigger(uint8_t rawMods, const uint8_t* rep8, int target
 void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify);
 void checkAndSyncCapsLock(const uint8_t* rep8);
 void syncPhysicalKeyboardLedsForPc(const String& targetMac);
+void handleUsbDeviceKeyboardLed(uint8_t leds);
 bool isAnyKeyboardKeyPressed();
 void resetKeyboardPressedState();
 void checkWindowsCtrlShiftDwell();

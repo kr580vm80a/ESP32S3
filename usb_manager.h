@@ -13,3 +13,5 @@ UsbKvmMode usb_manager_get_mode();
 bool usb_manager_is_pc_connected();
 bool usb_manager_is_bolt_connected();
 void usb_manager_notify_host_dev_gone();
+void usb_manager_set_preferred_mode(const String& mode);
+String usb_manager_get_preferred_mode();

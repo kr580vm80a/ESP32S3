@@ -381,6 +381,9 @@ void logi_bolt_deinit() {
     logPrint("[USB HOST] Deinitializing USB Host stack...");
     s_usb_host_running = false;
 
+    // Allow background tasks to notice s_usb_host_running == false and exit gracefully
+    vTaskDelay(pdMS_TO_TICKS(50));
+
     if (s_usb_dev_hdl && s_usb_client_hdl) {
         usb_host_interface_release(s_usb_client_hdl, s_usb_dev_hdl, 0);
         usb_host_interface_release(s_usb_client_hdl, s_usb_dev_hdl, 1);
@@ -405,17 +408,15 @@ void logi_bolt_deinit() {
         usb_host_client_deregister(s_usb_client_hdl);
         s_usb_client_hdl = NULL;
     }
-    if (s_usb_client_task_hdl) {
-        vTaskDelete(s_usb_client_task_hdl);
-        s_usb_client_task_hdl = NULL;
-    }
-    if (s_usb_lib_task_hdl) {
-        vTaskDelete(s_usb_lib_task_hdl);
-        s_usb_lib_task_hdl = NULL;
-    }
+    s_usb_client_task_hdl = NULL;
+    s_usb_lib_task_hdl = NULL;
 
-    usb_host_uninstall();
+    esp_err_t err = usb_host_uninstall();
+    logPrint("[USB HOST] usb_host_uninstall: %s", esp_err_to_name(err));
+
     periph_module_reset(PERIPH_USB_MODULE);
+    periph_module_enable(PERIPH_USB_MODULE);
+
     s_is_mouse_connected = false;
     s_is_kb_connected = false;
     logPrint("[USB HOST] USB Host stack deinitialized successfully.");

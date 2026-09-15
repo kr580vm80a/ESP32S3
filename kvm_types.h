@@ -126,6 +126,7 @@ void checkAndResumeAdvertising();
 void markClientAsWebConfig(uint16_t connHandle);
 void checkWebGracePeriod();
 void checkKeepAlive();
+extern volatile uint32_t g_lastUserActivityMs;
 void syncPhysicalKeyboardLedsForPc(const String& targetMac);
 
 // BLE Host / Central helpers

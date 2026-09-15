@@ -217,8 +217,10 @@ void updateKvmPowerAndRateProfiles(String activeMac, bool force) {
             // DUAL-MODE SMART POWER & BANDWIDTH ALLOCATION:
             // 1. With Logi Bolt (USB): Radio has NO BLE mouse traffic -> ALL connected PCs stay in PERMANENT TURBO (0ms switch lag!)
             // 2. With BLE Mouse: Active PC gets TURBO, background PCs get STANDBY (frees 90% radio bandwidth for BLE mouse!)
+            // 3. Wired USB-C Host: All HID traffic routes through 1000Hz USB wire -> BLE link stays in STANDBY (never needs Turbo!)
+            bool isUsbHost = (usb_device_is_connected() && clientMac.length() > 0 && clientMac.equalsIgnoreCase(usb_device_get_bound_mac()));
             bool isCurrentActivePc = (activeMac.length() > 0 && clientMac.equals(activeMac));
-            bool shouldBeTurbo = isMouseActive && (boltActive || isCurrentActivePc);
+            bool shouldBeTurbo = !isUsbHost && isMouseActive && (boltActive || isCurrentActivePc);
 
             bool wasTurbo = kvmClients[i].isTurbo;
             if (force || wasTurbo != shouldBeTurbo) {
@@ -243,7 +245,9 @@ void updateKvmPowerAndRateProfiles(String activeMac, bool force) {
                         logPrint("[BLE Server] Enforcing Windows PERMANENT TURBO for PC: %s (Target: 7.50..10.00 ms, Latency: 0, ⚡)", kvmClients[i].mac.c_str());
                     }
                 } else {
-                    // Safe idle standby only when no mouse is active at all
+                    if (hasDesc && desc.conn_latency == 4) {
+                        continue; // Already in Standby!
+                    }
                     if (clientOs == OS_MAC) {
                         pServer->updateConnParams(kvmClients[i].conn_id, 12, 12, 4, 216);
                         logPrint("[BLE Server] Idle Standby for macOS PC: %s (Latency: 4, 💤)", kvmClients[i].mac.c_str());
@@ -274,8 +278,9 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         bool boltActive = logi_bolt_is_mouse_connected();
         bool isMouseActive = mouseConnected || boltActive;
         String activeMac = (monitorCount > 0 && currentMonitorIndex < monitorCount) ? monitors[currentMonitorIndex].mac : "";
+        bool isUsbHost = (usb_device_is_connected() && peerMac.length() > 0 && peerMac.equalsIgnoreCase(usb_device_get_bound_mac()));
         bool isCurrentActivePc = (activeMac.length() > 0 && peerMac.equals(activeMac));
-        bool shouldBeTurbo = isMouseActive && (boltActive || isCurrentActivePc);
+        bool shouldBeTurbo = !isUsbHost && isMouseActive && (boltActive || isCurrentActivePc);
 
         static uint32_t lastReassertTime[MAX_SUPPORTED_KVM_CLIENTS] = {0};
         uint16_t handle = desc->conn_handle;
@@ -368,6 +373,16 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             if (!isLayoutPc) {
                 logPrint("[BLE Server] 💤 Background KVM PC %s (conn: %d) connected (not in active layout). Staying in Standby.", effectiveMac.c_str(), desc->conn_handle);
             }
+
+            // Check if this newly connected PC resolves USB host binding
+            int pcOs = OS_WINDOWS;
+            for (int m = 0; m < monitorCount; m++) {
+                if (monitors[m].mac.equalsIgnoreCase(effectiveMac) || monitors[m].mac.equalsIgnoreCase(peerMac)) {
+                    pcOs = monitors[m].os;
+                    break;
+                }
+            }
+            usb_device_on_ble_connect(effectiveMac, pcOs);
         } else {
             // Non-KVM Client (Candidate Web Bluetooth Configurator) - do NOT pollute kvmClients!
             bool slotted = false;
@@ -575,15 +590,28 @@ uint16_t getTargetConnHandle(const String& targetMac) {
         }
         return BLE_HS_CONN_HANDLE_NONE;
     }
-    // 1. First check if target MAC has an active BLE connection
+
+    // 1. If physical USB-C cable is connected, check if targetMac is bound to USB
+    if (usb_manager_is_pc_connected()) {
+        String boundMac = usb_device_get_bound_mac();
+        if (boundMac.length() > 0 && boundMac.equalsIgnoreCase(targetMac)) {
+            return CONN_HANDLE_USB_DEVICE;
+        }
+    }
+
+    // 2. First check if target MAC has an active BLE connection
     for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && kvmClients[i].mac.equals(targetMac)) {
+        if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && kvmClients[i].mac.equalsIgnoreCase(targetMac)) {
             return kvmClients[i].conn_id;
         }
     }
-    // 2. If target is not connected via BLE, but USB-C PC is connected:
+
+    // 3. Fallback: If target is not connected via BLE, but USB-C PC is connected (and no other PC is bound)
     if (usb_manager_is_pc_connected()) {
-        return CONN_HANDLE_USB_DEVICE;
+        String boundMac = usb_device_get_bound_mac();
+        if (boundMac.length() == 0) {
+            return CONN_HANDLE_USB_DEVICE;
+        }
     }
     return BLE_HS_CONN_HANDLE_NONE;
 }
@@ -614,7 +642,7 @@ void sendHidReport(NimBLECharacteristic* pChar, uint16_t connHandle, const uint8
 
 void checkKeepAlive() {
     static uint32_t lastKeepAliveCheck = 0;
-    if (millis() - lastKeepAliveCheck < 60000) return;
+    if (millis() - lastKeepAliveCheck < 30000) return;
     lastKeepAliveCheck = millis();
 
     String currentActiveMac = "";
@@ -629,15 +657,30 @@ void checkKeepAlive() {
         if (monitors[i].keepAlive && monitors[i].mac.length() > 0) {
             String targetMac = monitors[i].mac;
 
-            // Do not send keepAlive if cursor is currently on this PC!
-            if (currentActiveMac.length() > 0 && targetMac.equals(currentActiveMac)) {
+            // Do not send keepAlive if cursor is on this PC and user was active within last 30s
+            bool isCurrentActive = false;
+            if (currentActiveMac.length() > 0) {
+                if (targetMac.equalsIgnoreCase(currentActiveMac)) {
+                    isCurrentActive = true;
+                } else if (usb_manager_is_pc_connected()) {
+                    String boundMac = usb_device_get_bound_mac();
+                    if (boundMac.length() > 0) {
+                        if ((targetMac.equalsIgnoreCase("USB") || targetMac.equalsIgnoreCase("USB-C")) && currentActiveMac.equalsIgnoreCase(boundMac)) {
+                            isCurrentActive = true;
+                        } else if ((currentActiveMac.equalsIgnoreCase("USB") || currentActiveMac.equalsIgnoreCase("USB-C")) && targetMac.equalsIgnoreCase(boundMac)) {
+                            isCurrentActive = true;
+                        }
+                    }
+                }
+            }
+            if (isCurrentActive && (millis() - g_lastUserActivityMs < 30000)) {
                 continue;
             }
 
             // Check if we already handled this MAC in this cycle
             bool alreadyDone = false;
             for (int h = 0; h < handledCount; h++) {
-                if (handledMacs[h].equals(targetMac)) {
+                if (handledMacs[h].equalsIgnoreCase(targetMac)) {
                     alreadyDone = true;
                     break;
                 }
@@ -649,8 +692,9 @@ void checkKeepAlive() {
 
             uint16_t connHandle = getTargetConnHandle(targetMac);
             if (connHandle != BLE_HS_CONN_HANDLE_NONE) {
-                logPrint("[KeepAlive] Sending 60s micro-jiggle to %s (conn: %d)", targetMac.c_str(), connHandle);
+                logPrint("[KeepAlive] Sending 30s micro-jiggle to %s (conn: %d%s)", targetMac.c_str(), connHandle, isCurrentActive ? ", Active Idle" : "");
                 sendRelative12Bit(connHandle, 1, 0);
+                delay(10); // Allow host OS to register +1 before sending -1 compensation
                 sendRelative12Bit(connHandle, -1, 0);
             }
         }

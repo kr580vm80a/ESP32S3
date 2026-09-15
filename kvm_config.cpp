@@ -1,4 +1,5 @@
 #include "kvm_config.h"
+#include "usb_device_engine.h"
 
 static String pendingSaveJson = "";
 static bool doSaveConfig = false;
@@ -236,6 +237,7 @@ void loadConfiguration() {
     for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) logPrint("    -> %s PC", kvmClients[k].mac.c_str());
     logPrint("Loaded %d monitors, %d KVM PC clients from granular NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
              monitorCount, clientCount, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
+    usb_device_check_detection();
 }
 
 void saveConfiguration(const String& jsonString) {

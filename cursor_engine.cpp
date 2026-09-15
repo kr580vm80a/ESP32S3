@@ -17,6 +17,7 @@ void resetSubpixelAccumulators() {
     effectiveSubpixelX = 0.0f;
     effectiveSubpixelY = 0.0f;
 }
+volatile uint32_t g_lastUserActivityMs = 0;
 
 MonitorConfig& primaryMonitor(const String& targetMac) {
     int primaryIndex = 0;
@@ -429,6 +430,7 @@ bool isPcSwitchAllowed(uint8_t mouseButtons) {
 }
 
 void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t scroll, int8_t hScroll) {
+    g_lastUserActivityMs = millis();
 
     if (monitorCount == 0) {
         if (usb_manager_is_pc_connected()) {

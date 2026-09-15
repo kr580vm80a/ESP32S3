@@ -96,6 +96,10 @@ void KeyboardOutputCallbacks::onWrite(NimBLECharacteristic* pCharacteristic, ble
         logPrint("[KEYBOARD LED] PC %s (conn %d) sent LED state: 0x%02X (Caps: %d, Active: %s)",
                  senderMac.c_str(), connHandle, leds, (leds & 0x02) ? 1 : 0, isActivePc ? "YES" : "NO");
         
+        if (senderMac.length() > 0) {
+            usb_device_on_ble_led_report(senderMac, leds);
+        }
+        
         if (isActivePc || senderMac.length() == 0) {
             syncPhysicalKeyboardLedsForPc(activeMac.length() > 0 ? activeMac : senderMac);
         }
@@ -599,6 +603,7 @@ static uint16_t translateConsumerUsage(uint16_t rawUsage) {
 // Callback when HID data is received from the keyboard (Follow-the-Mouse)
 void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
     if (!pData || length == 0) return;
+    g_lastUserActivityMs = millis();
 
     // Track whether any keyboard key or modifier is currently held
     if (length != 19 && pData[0] != 0xFF) {

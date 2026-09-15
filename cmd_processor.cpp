@@ -1,5 +1,6 @@
-﻿#include "cmd_processor.h"
+#include "cmd_processor.h"
 #include "kvm_config.h"
+#include "usb_manager.h"
 #include <ArduinoJson.h>
 #include "mbedtls/sha256.h"
 
@@ -220,5 +221,17 @@ void processCommand(String input, bool isBleSource) {
         NimBLEDevice::deleteAllBonds();
         logPrint("[BLE] Deleted %d bonded devices from NVS. Fresh pairing required for all PCs.", count);
         sendConfigResponse("OK_CLEAR_BONDS " + String(count));
+    } else if (input.startsWith("SET_USB_MODE ")) {
+        String mode = input.substring(13);
+        mode.trim();
+        mode.toLowerCase();
+        if (mode == "pc" || mode == "bolt" || mode == "auto") {
+            sendConfigResponse("OK_USB_MODE " + mode);
+            usb_manager_set_preferred_mode(mode);
+        } else {
+            sendConfigResponse("ERROR_USB_MODE Invalid mode (use 'auto', 'pc' or 'bolt')");
+        }
+    } else if (input == "GET_USB_MODE") {
+        sendConfigResponse("USB_MODE " + usb_manager_get_preferred_mode());
     }
 }

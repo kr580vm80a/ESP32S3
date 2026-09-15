@@ -6,161 +6,119 @@
 #include "driver/periph_ctrl.h"
 #include "soc/periph_defs.h"
 #include "soc/usb_wrap_reg.h"
+#include "soc/usb_serial_jtag_reg.h"
 #include "soc/soc.h"
 #include "driver/gpio.h"
+#include <Preferences.h>
 
 void logPrint(const char* format, ...);
 
 static UsbKvmMode s_currentMode = USB_KVM_MODE_NONE;
 static volatile bool s_boltDevGone = false;
-static uint32_t s_lastCheckMs = 0;
-static uint32_t s_deviceDisconnectTimer = 0;
 
-static bool s_pcMountedOnce = false;
+static void usb_manager_switch_to(UsbKvmMode newMode) {
+    if (s_currentMode == newMode) return;
+    s_currentMode = newMode;
 
-static UsbKvmMode probe_usb_lines() {
-    REG_CLR_BIT(USB_WRAP_OTG_CONF_REG, USB_WRAP_USB_PAD_ENABLE);
+    if (newMode == USB_KVM_MODE_HOST_BOLT) {
+        logPrint("[USB MGR] >>> Mode: USB Host (Logitech Bolt / Peripheral) <<<");
+        logi_bolt_init();
+    } else {
+        logPrint("[USB MGR] >>> Mode: USB Device (Wired PC / MacBook HID 1000Hz) <<<");
+        extern void handleUsbDeviceKeyboardLed(uint8_t leds);
+        usb_device_set_led_callback(handleUsbDeviceKeyboardLed);
+        usb_device_init();
+    }
+}
+
+// Hardware line probe that overrides ESP32-S3 internal pull-ups
+static UsbKvmMode probe_usb_hardware() {
+    // 1. Force-disable internal pullups/pulldowns from USB Serial/JTAG controller
+    SET_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_PAD_PULL_OVERRIDE);
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_USB_PAD_ENABLE);
+    CLEAR_PERI_REG_MASK(USB_SERIAL_JTAG_CONF0_REG, USB_SERIAL_JTAG_DP_PULLUP | 
+                                                   USB_SERIAL_JTAG_DM_PULLUP | 
+                                                   USB_SERIAL_JTAG_DP_PULLDOWN | 
+                                                   USB_SERIAL_JTAG_DM_PULLDOWN);
+
+    // 2. Force-disable internal pullups/pulldowns from USB_WRAP PHY
+    CLEAR_PERI_REG_MASK(USB_WRAP_OTG_CONF_REG, USB_WRAP_USB_PAD_ENABLE);
+    SET_PERI_REG_MASK(USB_WRAP_OTG_CONF_REG, USB_WRAP_PAD_PULL_OVERRIDE);
+    CLEAR_PERI_REG_MASK(USB_WRAP_OTG_CONF_REG, USB_WRAP_DP_PULLUP | 
+                                               USB_WRAP_DM_PULLUP | 
+                                               USB_WRAP_DP_PULLDOWN | 
+                                               USB_WRAP_DM_PULLDOWN);
+
+    // 3. Reset GPIO 19 and 20 into clean GPIO mode
     gpio_reset_pin(GPIO_NUM_20); // D+
     gpio_reset_pin(GPIO_NUM_19); // D-
 
-    // 1. Test for Full-Speed USB Device (Logi Bolt, Mouse, Keyboard):
-    // Full-Speed devices have hardware 1.5k pullup to 3.3V on D+.
-    // Under internal pulldown (45k), D+ stays HIGH (~3.19V).
     pinMode(20, INPUT_PULLDOWN);
     pinMode(19, INPUT_PULLDOWN);
-    delay(5);
+    delay(10); // Allow line capacitance to settle through 45k pulldowns
+
     int dp_pd = digitalRead(20);
-
-    if (dp_pd == HIGH) {
-        pinMode(20, INPUT);
-        pinMode(19, INPUT);
-        return USB_KVM_MODE_HOST_BOLT;
-    }
-
-    // 2. Test for USB Host (PC / MacBook) vs Open Circuit (Nothing connected):
-    // USB Hosts have 15k pulldowns to GND on BOTH D+ and D-.
-    // Open Circuit (nothing plugged in) has NO connection to GND,
-    // so internal pullup holds BOTH lines at 3.3V (HIGH).
-    pinMode(20, INPUT_PULLUP);
-    pinMode(19, INPUT_PULLUP);
-    delay(5);
-    int dp_pu = digitalRead(20);
-    int dm_pu = digitalRead(19);
+    int dm_pd = digitalRead(19);
 
     pinMode(20, INPUT);
     pinMode(19, INPUT);
 
-    // If PC Host (15k to GND on both lines) is connected:
-    // Voltage divider 45k pullup vs 15k pulldown produces ~0.825V (LOW) on both D+ and D-.
-    if (dp_pu == LOW && dm_pu == LOW) {
-        return USB_KVM_MODE_DEVICE_PC;
+    logPrint("[USB MGR] Hardware probe: D+=%d, D-=%d", dp_pd, dm_pd);
+
+    if (dp_pd == HIGH && dm_pd == LOW) {
+        logPrint("[USB MGR] -> Detected Full-Speed USB Device (Logitech Bolt Receiver)");
+        return USB_KVM_MODE_HOST_BOLT;
     }
 
-    // Open circuit: both lines are pulled HIGH by internal pullups
-    return USB_KVM_MODE_NONE;
+    logPrint("[USB MGR] -> No peripheral detected (Wired PC / MacBook HID 1000Hz mode)");
+    return USB_KVM_MODE_DEVICE_PC;
 }
 
-static bool s_tinyUsbEverInitialized = false;
-static bool s_usbHostEverInitialized = false;
+void usb_manager_set_preferred_mode(const String& mode) {
+    Preferences prefs;
+    prefs.begin("kvm_usb", false);
+    prefs.putString("mode", mode);
+    prefs.end();
+    logPrint("[USB MGR] Preferred USB mode saved: %s. Rebooting to apply...", mode.c_str());
+    delay(100);
+    esp_restart();
+}
 
-static void usb_manager_switch_to(UsbKvmMode newMode) {
-    if (s_currentMode == newMode) return;
-
-    // Check if hardware role swap requires clean ESP32 reboot:
-    // ESP-IDF hardware USB PHY interrupts cannot be dynamically swapped between Host and Device
-    if ((newMode == USB_KVM_MODE_HOST_BOLT && s_tinyUsbEverInitialized) ||
-        (newMode == USB_KVM_MODE_DEVICE_PC && s_usbHostEverInitialized)) {
-        logPrint("[USB MGR] Hardware USB role swap requested (Host <-> Device). Rebooting ESP32-S3 cleanly...");
-        delay(100);
-        esp_restart();
-    }
-
-    // Teardown current mode
-    if (s_currentMode == USB_KVM_MODE_HOST_BOLT) {
-        logPrint("[USB MGR] Stopping USB Host stack (Logi Bolt)...");
-        logi_bolt_deinit();
-    } else if (s_currentMode == USB_KVM_MODE_DEVICE_PC) {
-        logPrint("[USB MGR] Stopping USB Device stack (PC HID)...");
-        usb_device_stop();
-        REG_CLR_BIT(USB_WRAP_OTG_CONF_REG, USB_WRAP_USB_PAD_ENABLE);
-        gpio_reset_pin(GPIO_NUM_20);
-        gpio_reset_pin(GPIO_NUM_19);
-    }
-
-    s_currentMode = USB_KVM_MODE_NONE;
-    s_boltDevGone = false;
-    s_deviceDisconnectTimer = 0;
-    s_pcMountedOnce = false;
-
-    // Start target mode
-    if (newMode == USB_KVM_MODE_HOST_BOLT) {
-        logPrint("[USB MGR] >>> Mode: USB Host (Logitech Bolt / Peripheral) <<<");
-        s_usbHostEverInitialized = true;
-        s_currentMode = USB_KVM_MODE_HOST_BOLT;
-        logi_bolt_init();
-    } else if (newMode == USB_KVM_MODE_DEVICE_PC) {
-        logPrint("[USB MGR] >>> Mode: USB Device (Wired PC / MacBook HID 1000Hz) <<<");
-        s_tinyUsbEverInitialized = true;
-        s_currentMode = USB_KVM_MODE_DEVICE_PC;
-        extern void handleUsbDeviceKeyboardLed(uint8_t leds);
-        usb_device_set_led_callback(handleUsbDeviceKeyboardLed);
-        usb_device_init();
-    } else {
-        logPrint("[USB MGR] >>> Mode: Pure BLE (Port empty / idle) <<<");
-        s_currentMode = USB_KVM_MODE_NONE;
-    }
+String usb_manager_get_preferred_mode() {
+    Preferences prefs;
+    prefs.begin("kvm_usb", true);
+    String m = prefs.getString("mode", "auto");
+    prefs.end();
+    return m;
 }
 
 void usb_manager_init() {
-    logPrint("[USB MGR] Probing USB port electrical state...");
-    UsbKvmMode initial = probe_usb_lines();
-    usb_manager_switch_to(initial);
+    String pref = usb_manager_get_preferred_mode();
+    if (pref.equalsIgnoreCase("bolt")) {
+        logPrint("[USB MGR] NVS Override: Logitech Bolt / Host");
+        usb_manager_switch_to(USB_KVM_MODE_HOST_BOLT);
+    } else if (pref.equalsIgnoreCase("pc")) {
+        logPrint("[USB MGR] NVS Override: Wired PC / MacBook HID");
+        usb_manager_switch_to(USB_KVM_MODE_DEVICE_PC);
+    } else {
+        logPrint("[USB MGR] Auto-probing USB port hardware state...");
+        UsbKvmMode detected = probe_usb_hardware();
+        usb_manager_switch_to(detected);
+    }
 }
 
 void usb_manager_loop() {
     if (s_currentMode == USB_KVM_MODE_HOST_BOLT) {
         logi_bolt_loop();
-    } else if (s_currentMode == USB_KVM_MODE_DEVICE_PC) {
-        usb_device_loop();
-    }
-
-    uint32_t now = millis();
-    if (now - s_lastCheckMs < 500) return;
-    s_lastCheckMs = now;
-
-    if (s_currentMode == USB_KVM_MODE_NONE) {
-        UsbKvmMode detected = probe_usb_lines();
-        if (detected != USB_KVM_MODE_NONE) {
-            logPrint("[USB MGR] Hot-plug detected connection: %s",
-                     detected == USB_KVM_MODE_HOST_BOLT ? "Logi Bolt / Peripheral" : "PC / MacBook");
-            usb_manager_switch_to(detected);
-        }
-    } else if (s_currentMode == USB_KVM_MODE_HOST_BOLT) {
         if (s_boltDevGone) {
             s_boltDevGone = false;
-            logPrint("[USB MGR] Bolt disconnect confirmed -> switching to NONE");
-            usb_manager_switch_to(USB_KVM_MODE_NONE);
+            logPrint("[USB MGR] Bolt disconnected. Switching cleanly to USB Device (PC/Mac) & BLE...");
+            logi_bolt_deinit();
+            delay(50);
+            esp_restart();
         }
     } else if (s_currentMode == USB_KVM_MODE_DEVICE_PC) {
-        bool connected = usb_device_is_connected();
-        if (connected) {
-            s_pcMountedOnce = true;
-            s_deviceDisconnectTimer = 0;
-        } else {
-            if (s_deviceDisconnectTimer == 0) {
-                s_deviceDisconnectTimer = now;
-            } else {
-                // If previously mounted, wait 10s before disconnect (gives time for macOS screen lock/wake).
-                // If not yet mounted, wait up to 120s for user to click "Allow accessory to connect" on macOS!
-                uint32_t timeout = s_pcMountedOnce ? 10000 : 120000;
-                if (now - s_deviceDisconnectTimer > timeout) {
-                    s_deviceDisconnectTimer = 0;
-                    s_pcMountedOnce = false;
-                    logPrint("[USB MGR] PC disconnected from USB-C -> switching to NONE");
-                    usb_manager_switch_to(USB_KVM_MODE_NONE);
-                }
-            }
-        }
+        usb_device_loop();
     }
 }
 

@@ -653,8 +653,10 @@ void checkKeepAlive() {
     String handledMacs[MAX_SUPPORTED_KVM_CLIENTS];
     int handledCount = 0;
 
+    int keepAliveCandidates = 0;
     for (int i = 0; i < monitorCount; i++) {
         if (monitors[i].keepAlive && monitors[i].mac.length() > 0) {
+            keepAliveCandidates++;
             String targetMac = monitors[i].mac;
 
             // Do not send keepAlive if cursor is on this PC and user was active within last 30s
@@ -697,6 +699,14 @@ void checkKeepAlive() {
                 delay(10); // Allow host OS to register +1 before sending -1 compensation
                 sendRelative12Bit(connHandle, -1, 0);
             }
+        }
+    }
+
+    if (keepAliveCandidates == 0 && monitorCount > 0) {
+        static uint32_t lastNoticeMs = 0;
+        if (millis() - lastNoticeMs > 60000 || lastNoticeMs == 0) {
+            lastNoticeMs = millis();
+            logPrint("[KeepAlive] Inactive: All %d monitors have KeepAlive DISABLED (0). Turn ON coffee cup icon in Web UI or send 'SET_KEEPALIVE 1'", monitorCount);
         }
     }
 }

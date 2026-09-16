@@ -237,6 +237,15 @@ void loadConfiguration() {
     for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) logPrint("    -> %s PC", kvmClients[k].mac.c_str());
     logPrint("Loaded %d monitors, %d KVM PC clients from granular NVS. Mouse: %s (%s) | Keyboard: %s (%s)",
              monitorCount, clientCount, targetMouseMac.c_str(), targetMouseName.c_str(), targetKeyboardMac.c_str(), targetKeyboardName.c_str());
+    for (int m = 0; m < monitorCount; m++) {
+        logPrint("    -> Mon #%d [%s]: MAC=%s, OS=%s, KeepAlive=%s%s",
+                 monitors[m].id,
+                 monitors[m].name.length() > 0 ? monitors[m].name.c_str() : "Display",
+                 monitors[m].mac.c_str(),
+                 monitors[m].os == OS_WINDOWS ? "Win" : (monitors[m].os == OS_MAC ? "Mac" : "Android"),
+                 monitors[m].keepAlive ? "ON (30s)" : "OFF",
+                 monitors[m].isPrimary ? " [Primary]" : "");
+    }
     usb_device_check_detection();
 }
 

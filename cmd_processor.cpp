@@ -233,5 +233,54 @@ void processCommand(String input, bool isBleSource) {
         }
     } else if (input == "GET_USB_MODE") {
         sendConfigResponse("USB_MODE " + usb_manager_get_preferred_mode());
+    } else if (input.startsWith("SET_KEEPALIVE ")) {
+        String arg = input.substring(14);
+        arg.trim();
+        int val = 0;
+        if (arg.equalsIgnoreCase("true") || arg.equalsIgnoreCase("on") || arg == "1") val = 1;
+        else if (arg.equalsIgnoreCase("false") || arg.equalsIgnoreCase("off") || arg == "0") val = 0;
+        else val = arg.toInt() ? 1 : 0;
+
+        for (int m = 0; m < monitorCount; m++) {
+            monitors[m].keepAlive = val;
+        }
+
+        // Persist to active layout in NVS
+        preferences.begin(NVS_NAMESPACE, false);
+        int activeLayoutId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 1);
+        String layoutsJson = readNvsBlob(preferences, NVS_KEY_LAYOUTS, "[]");
+        JsonDocument doc;
+        deserializeJson(doc, layoutsJson);
+        if (doc.is<JsonArray>()) {
+            for (JsonObject l : doc.as<JsonArray>()) {
+                if ((l["id"] | 0) == activeLayoutId && l["screens"].is<JsonArray>()) {
+                    for (JsonObject scr : l["screens"].as<JsonArray>()) {
+                        scr["keepAlive"] = val;
+                    }
+                    break;
+                }
+            }
+            String updatedLayouts;
+            serializeJson(doc, updatedLayouts);
+            preferences.remove(NVS_KEY_LAYOUTS);
+            preferences.putBytes(NVS_KEY_LAYOUTS, updatedLayouts.c_str(), updatedLayouts.length() + 1);
+        }
+        preferences.end();
+
+        logPrint("[KeepAlive] Set KeepAlive=%d (%s) for all %d monitors in active layout & saved to NVS.",
+                 val, val ? "ENABLED" : "OFF", monitorCount);
+        sendConfigResponse("OK_KEEPALIVE " + String(val));
+    } else if (input == "GET_KEEPALIVE") {
+        logPrint("--- [KEEPALIVE STATUS] ---");
+        for (int m = 0; m < monitorCount; m++) {
+            logPrint("  Mon #%d [%s]: MAC=%s, KeepAlive=%s%s",
+                     monitors[m].id,
+                     monitors[m].name.length() > 0 ? monitors[m].name.c_str() : "Display",
+                     monitors[m].mac.c_str(),
+                     monitors[m].keepAlive ? "ON (30s)" : "OFF",
+                     monitors[m].isPrimary ? " [Primary]" : "");
+        }
+        logPrint("--- [END KEEPALIVE STATUS] ---");
+        sendConfigResponse("OK_GET_KEEPALIVE");
     }
 }

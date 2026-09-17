@@ -2118,7 +2118,6 @@
               y: 0,
               color: getGroupColor(currentDeviceId),
               isDetected: true,
-              isLocked: true,
               isPrimary: !!d.isPrimary
             });
           });
@@ -2145,137 +2144,23 @@
 
         } catch (err) {
           console.warn('getScreenDetails permission denied or canceled:', err);
+          showToast('Window Management permission denied or canceled.', 'warning', 4000);
+          setDetectBoxHtml(`
+            <span>Detection Unavailable (${osLabel}):</span><br>
+            • Permission for Window Management API was denied or canceled.<br>
+            • Please grant permission or select a resolution preset manually below.
+          `);
+          return;
         }
-      }
-
-      // Fallback (If getScreenDetails fails, permission denied, or on Smartphone/Tablet)
-      const ratio = window.devicePixelRatio || 1;
-      const rawW = window.screen.width;
-      const rawH = window.screen.height;
-      const isMultiMonitor = window.screen.isExtended;
-
-      console.log('[OS Fallback Raw Response]:', { width: rawW, height: rawH, devicePixelRatio: ratio, isExtended: isMultiMonitor, isMobile: isMobile });
-
-      if (isMobile) {
-        const physW = Math.round(rawW * ratio);
-        const physH = Math.round(rawH * ratio);
-        const preset = getClosestPresetResolution(rawW, rawH, ratio);
-
-        const screenW = (preset && Math.abs(preset.width - physW) < 120) ? preset.width : (physW > 0 ? physW : rawW);
-        const screenH = (preset && Math.abs(preset.height - physH) < 120) ? preset.height : (physH > 0 ? physH : rawH);
-
+      } else {
+        showToast('Multi-Screen Detection API is not supported in this browser context (requires HTTPS or localhost in Chrome/Edge).', 'warning', 5000);
         setDetectBoxHtml(`
-          <span>Smartphone/Tablet (${osLabel}):</span><br>
-          • Device: <b>${currentDeviceName}</b><br>
-          • Screen Size: <b>${screenW} × ${screenH} px</b><br>
-          • Viewport: <sup>${rawW}×${rawH} (DPR: ${ratio.toFixed(1)})</sup>
+          <span>Detection Unavailable (${osLabel}):</span><br>
+          • Chrome/Edge requires HTTPS or localhost for Multi-Screen Detection API.<br>
+          • Please open via HTTPS or select a resolution preset manually below.
         `);
-
-        const pcInput = document.getElementById('pcNameInput');
-        if (pcInput) pcInput.value = currentDeviceName;
-
-        screens = screens.filter(s => s.group !== currentDeviceId);
-
-        screens.push({
-          id: Date.now(),
-          name: `${currentDeviceName}`,
-          group: currentDeviceId,
-          groupName: currentDeviceName,
-          width: screenW,
-          height: screenH,
-          os: isAndroid ? OS_ANDROID : (isIOS ? OS_ANDROID : detectOSValue()),
-          layoutX: 0,
-          layoutY: 0,
-          x: 60,
-          y: 120,
-          color: getGroupColor(currentDeviceId),
-          isDetected: true,
-          isLocked: true,
-          isPrimary: true
-        });
-        syncActiveLayoutScreens();
-
-        const scale = 0.12;
-        const baseCanvasX = 50;
-        const maxLayoutY = Math.max(...screens.map(s => (s.layoutY !== undefined ? s.layoutY : 0) + s.height));
-        const baseCanvasBottomY = 120 + Math.round(maxLayoutY * scale);
-
-        screens.forEach(s => {
-          const ly = s.layoutY !== undefined ? s.layoutY : 0;
-          const lx = s.layoutX !== undefined ? s.layoutX : Math.round((s.x - 50) / scale);
-          s.x = baseCanvasX + Math.round(lx * scale);
-          s.y = baseCanvasBottomY - Math.round((ly + s.height) * scale);
-        });
-
-        saveProjectState();
-        draw();
         return;
       }
-
-      if (isMultiMonitor) {
-        setDetectBoxHtml(`
-          <span>Detected 2 displays (${osLabel}):</span><br>
-          • Primary: <b>${preset.width}x${preset.height} px</b><br>
-          • Secondary: <b>1920x1080 px</b>
-        `);
-
-        screens = [
-          {
-            id: Date.now(),
-            name: isMac ? 'MacBook Display (Primary)' : `${currentDeviceName} (Primary)`,
-            group: currentDeviceId,
-            groupName: currentDeviceName,
-            width: preset.width,
-            height: preset.height,
-            os: detectOSValue(),
-            x: 60,
-            y: 140,
-            color: getGroupColor(currentDeviceId),
-            isDetected: true,
-            isLocked: true
-          },
-          {
-            id: Date.now() + 1,
-            name: 'DELL P2425HE (Display 2)',
-            group: currentDeviceId,
-            groupName: currentDeviceName,
-            width: 1920,
-            height: 1080,
-            os: detectOSValue(),
-            x: 175,
-            y: 20,
-            color: getGroupColor(currentDeviceId),
-            isDetected: true,
-            isLocked: true
-          }
-        ];
-        syncActiveLayoutScreens();
-      } else {
-        setDetectBoxHtml(`
-          <span>Physical Resolution (${osLabel}):</span><br>
-          • Device: <b>${currentDeviceName}</b><br>
-          • Preset: <b>${preset.width} x ${preset.height} px</b>
-        `);
-
-        screens = [{
-          id: Date.now(),
-          name: isMac ? 'MacBook Display' : (currentDeviceName || 'DELL P2425HE'),
-          group: currentDeviceId,
-          groupName: currentDeviceName,
-          width: preset.width,
-          height: preset.height,
-          os: detectOSValue(),
-          x: 60,
-          y: 120,
-          color: getGroupColor(currentDeviceId),
-          isDetected: true,
-          isLocked: true
-        }];
-        syncActiveLayoutScreens();
-      }
-
-      saveProjectState();
-      draw();
     });
 
     function togglePresetMenu(e) {
@@ -2407,8 +2292,7 @@
         y: 0,
         color: COLOR_MANUAL,
         os: defaultOs,
-        isDetected: false,
-        isLocked: false
+        isDetected: false
       };
       screens.push(newScreen);
       syncActiveLayoutScreens();
@@ -2421,12 +2305,12 @@
       const target = screens.find(s => s.id === id);
       if (!target) return;
 
-      if ((target.isDetected || target.isLocked) && target.group) {
+      if (target.isDetected && target.group) {
         // Delete all screens in this specific computer group
         screens = screens.filter(s => s.group !== target.group);
-      } else if (target.isDetected || target.isLocked) {
+      } else if (target.isDetected) {
         // Delete all un-grouped auto-detected screens
-        screens = screens.filter(s => !(s.isDetected || s.isLocked));
+        screens = screens.filter(s => !s.isDetected);
       } else {
         // Delete only this specific manual screen
         screens = screens.filter(s => s.id !== id);
@@ -2484,8 +2368,7 @@
           keepAlive: s.keepAlive !== undefined ? Number(s.keepAlive) : 0,
           relX: (s.layoutX !== undefined ? s.layoutX : (s.x || 0)) - minX,
           relY: (s.layoutY !== undefined ? s.layoutY : (s.y || 0)) - minY,
-          isDetected: s.isDetected !== undefined ? s.isDetected : true,
-          isLocked: s.isLocked !== undefined ? s.isLocked : true
+          isDetected: !!s.isDetected
         }))
       };
 
@@ -2538,8 +2421,7 @@
           x: insertX + s.relX,
           y: insertY + s.relY,
           color: newColor,
-          isDetected: s.isDetected,
-          isLocked: s.isLocked
+          isDetected: s.isDetected
         };
         screens.push(newScreen);
         addedScreens.push(newScreen);
@@ -2603,7 +2485,7 @@
       const topLeftPerGroup = {};
       const groups = [...new Set(screens.map(s => s.group).filter(Boolean))];
       groups.forEach(grp => {
-        const grpScreens = screens.filter(s => s.group === grp && (s.isDetected || s.isLocked));
+        const grpScreens = screens.filter(s => s.group === grp && s.isDetected);
         if (grpScreens.length > 0) {
           const sortedGrp = [...grpScreens].sort((a, b) => a.y - b.y || a.x - b.x);
           topLeftPerGroup[grp] = sortedGrp[0];
@@ -2680,7 +2562,7 @@
 
         const sw = s.width * scale;
         const sh = s.height * scale;
-        const isDetected = s.isDetected || s.isLocked;
+        const isDetected = !!s.isDetected;
         const color = getGroupColor(s.group);
 
         const relX = Math.round(lx - minLayoutX);
@@ -2956,7 +2838,7 @@
             id: Number(l.id) || 1,
             name: l.name,
             screens: sorted.map((s, index) => {
-              const isDetected = !!(s.isDetected || s.isLocked || (s.group && s.group !== 'manual'));
+              const isDetected = !!s.isDetected;
               const rawGroup = (s.group !== undefined && s.group !== null && s.group !== '') ? s.group : (isDetected ? currentDeviceId : 1);
               let groupIndex = distinctGroups.indexOf(rawGroup);
               const numericGroup = groupIndex >= 0 ? (groupIndex + 1) : 1;
@@ -3098,7 +2980,7 @@
 
       for (let i = screens.length - 1; i >= 0; i--) {
         const s = screens[i];
-        const isDetected = s.isDetected || s.isLocked;
+        const isDetected = !!s.isDetected;
 
         // Check Click on Delete Button
         if (s.deleteBtn) {
@@ -3244,7 +3126,7 @@
       let hoveringScreen = false;
 
       screens.forEach(s => {
-        const isDetected = s.isDetected || s.isLocked;
+        const isDetected = !!s.isDetected;
 
         if (s.deleteBtn && Math.hypot(mx - s.deleteBtn.x, my - s.deleteBtn.y) <= s.deleteBtn.r + 4) {
           hoveringDelete = true;
@@ -3304,7 +3186,7 @@
       }
 
       // Handle Preset-Snapping Resize Stretch (Only for manual screens)
-      if (isResizing && resizeScreen && !(resizeScreen.isDetected || resizeScreen.isLocked)) {
+      if (isResizing && resizeScreen && !resizeScreen.isDetected) {
         const rawDraggedWidth = (mx - resizeScreen.x) / activeScale;
         const rawDraggedHeight = (my - resizeScreen.y) / activeScale;
 
@@ -3692,18 +3574,15 @@
             id: (typeof l.id === 'number') ? l.id : (parseInt(l.id, 10) || (lIdx + 1)),
             name: l.name || ('Layout ' + (lIdx + 1)),
             screens: (l.screens || []).map((s, sIdx) => {
-              const grp = s.group || 'manual';
-              const grpName = s.groupName || 'Manual Group';
               const posX = (s.x !== undefined) ? s.x : (s.layoutX !== undefined ? s.layoutX : 0);
               const posY = (s.y !== undefined) ? s.y : (s.layoutY !== undefined ? s.layoutY : 0);
-              const isDet = (s.isDetected !== undefined) ? s.isDetected : true;
-              const isPrim = (s.isPrimary !== undefined) ? s.isPrimary : false;
+              const group = s.group || 'manual';
 
               return {
                 id: (typeof s.id === 'number') ? s.id : (parseInt(s.id, 10) || (sIdx + 1)),
                 name: s.name || ('Monitor #' + (sIdx + 1)),
-                group: grp,
-                groupName: grpName,
+                group: group,
+                groupName: s.groupName || 'Manual Group',
                 mac: s.mac || '',
                 x: posX,
                 y: posY,
@@ -3713,10 +3592,9 @@
                 height: s.height || 1080,
                 scale: s.scale || 100,
                 os: (s.os !== undefined ? Number(s.os) : 0),
-                color: s.color || getGroupColor(grp),
-                isDetected: isDet,
-                isLocked: isDet,
-                isPrimary: isPrim,
+                color: s.color || getGroupColor(group),
+                isDetected: !!s.isDetected,
+                isPrimary: !!s.isPrimary,
                 keepAlive: (s.keepAlive !== undefined) ? Number(s.keepAlive) : 0
               };
             })
@@ -4227,7 +4105,7 @@
               { services: [CONFIG_SERVICE_UUID] },
               { namePrefix: 'ESP32' }
             ],
-            optionalServices: [CONFIG_SERVICE_UUID, 0x1812]
+            optionalServices: [CONFIG_SERVICE_UUID]
           });
           window.esp32BleDevice = device;
           device.removeEventListener('gattserverdisconnected', onGattDisconnected);
@@ -4279,13 +4157,13 @@
 
       // Smart Grid Snapping for imported JSON layout items (Fixes 1075->1080, 15->0, 1917->1920 on page reload)
       const items = layoutArray.map(item => {
-        const w = item.width || ((item.x_max !== undefined && item.x_min !== undefined && item.x_max > item.x_min) ? (item.x_max - item.x_min) : 1920);
+        const w = item.width || 1920;
         const h = item.height || 1080;
         return {
           ...item,
           width: w,
           height: h,
-          x: item.x !== undefined ? item.x : (item.x_min !== undefined ? item.x_min : 0),
+          x: item.x !== undefined ? item.x : 0,
           y: item.y !== undefined ? item.y : 0
         };
       });
@@ -4340,10 +4218,10 @@
 
         currentX = Math.max(currentX + sw + 15, posX + sw + 15);
 
-        const isDetected = !!(item.is_detected || (item.group && item.group !== 'manual'));
+        const isDetected = !!item.isDetected;
         const groupKey = item.group || (isDetected ? 'PC_DETECTED' : 'manual');
-        const groupName = item.group_name || item.group || (isDetected ? 'Detected PC' : 'Manual Preset');
-        const isPrimary = !!(item.is_primary || (item.name && item.name.includes('Primary')));
+        const groupName = item.groupName || item.group || (isDetected ? 'Detected PC' : 'Manual Preset');
+        const isPrimary = !!(item.isPrimary || (item.name && item.name.includes('Primary')));
 
         return {
           id: Date.now() + idx,
@@ -4359,7 +4237,6 @@
           y: posY,
           color: getGroupColor(groupKey),
           isDetected: isDetected,
-          isLocked: isDetected,
           isPrimary: isPrimary
         };
       });

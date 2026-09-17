@@ -706,7 +706,7 @@ void checkKeepAlive() {
         static uint32_t lastNoticeMs = 0;
         if (millis() - lastNoticeMs > 60000 || lastNoticeMs == 0) {
             lastNoticeMs = millis();
-            logPrint("[KeepAlive] Inactive: All %d monitors have KeepAlive DISABLED (0). Turn ON coffee cup icon in Web UI or send 'SET_KEEPALIVE 1'", monitorCount);
+            logPrint("[KeepAlive] Inactive: All %d monitors have KeepAlive DISABLED (0). Turn ON coffee cup icon in Web UI", monitorCount);
         }
     }
 }

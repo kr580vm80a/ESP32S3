@@ -144,10 +144,12 @@ void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targ
     uint16_t absX = (uint16_t)round(((float)(jumpX - primaryMon.x) / (float)primaryMon.width) * 32767.0f);
     uint16_t absY = (uint16_t)round(((float)(jumpY - primaryMon.y) / (float)primaryMon.height) * 32767.0f);
     sendAbsPosWindows(connHandle, absX, absY);
+    delay(5);
     logPrint("Window jump position at (%ld, %ld)", jumpX, jumpY);
 
     if (step1X != 0 || step1Y != 0) {
         sendRelative12Bit(connHandle, step1X, step1Y);
+        delay(5);
         logPrint("Window step position at (%ld, %ld)", step1X, step1Y);
     }
 
@@ -157,78 +159,288 @@ void sendAbsoluteCoordinatesWindows(uint16_t connHandle, int monIndex, long targ
     sendRelative12Bit(connHandle, deltaX, deltaY);
 }
 
-// --- Simplified Absolute HID Positioning Function for macOS (MacBook at bottom) ---
-void sendAbsoluteCoordinatesMacOs(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
-    uint8_t absReport1[5] = { 0x01, 0x00, 0x40, 0x00, 0x40 };
-    sendHidReport(macAbsInputChar, connHandle, absReport1, sizeof(absReport1));
-    absReport1[0] = 0x00; // In Range = OFF
-    sendHidReport(macAbsInputChar, connHandle, absReport1, sizeof(absReport1));
+// =========================================================================
+// --- macOS Edge List & Multi-Monitor Transitions ---
+// =========================================================================
+struct Transition {
+    uint16_t exitX;
+    uint16_t exitY;
+    int16_t stepX;
+    int16_t stepY;
+};
 
-    MonitorConfig& targetMon = monitors[monIndex];
-    int shiftX = 0, shiftY = 0;
-    if (targetMon.isPrimary) {
-        shiftY = targetMon.height / 2 + 100;
-    } else {
-        shiftY = -targetMon.height / 2 - 100;
+struct SharedBorder {
+    int monA;
+    int monB;
+    Transition ab;
+    Transition ba;
+};
+
+struct HomingRoute {
+    uint8_t count = 0;
+    Transition steps[3];
+};
+
+#define MAX_MAC_BORDERS 6
+static SharedBorder borders[MAX_MAC_BORDERS];
+static int borderCount = 0;
+static HomingRoute macRoutes[MAX_MONITORS];
+
+const Transition* getTransition(int fromMon, int toMon) {
+    for (int i = 0; i < borderCount; i++) {
+        if (borders[i].monA == fromMon && borders[i].monB == toMon) return &borders[i].ab;
+        if (borders[i].monB == fromMon && borders[i].monA == toMon) return &borders[i].ba;
     }
-    sendRelative12Bit(connHandle, 0, shiftY);
-    long relX = constrain(targetGlobalX - targetMon.x, 0, targetMon.width);
-    long relY = constrain(targetGlobalY - targetMon.y, 0, targetMon.height);
-    uint16_t absX = (uint16_t)round(((float)relX / (float)targetMon.width) * 32767.0f);
-    uint16_t absY = (uint16_t)round(((float)relY / (float)targetMon.height) * 32767.0f);
-    uint8_t absReport[5] = {
-        0x01,                               // In Range = ON
-        (uint8_t)(absX & 0xFF),
-        (uint8_t)((absX >> 8) & 0xFF),
-        (uint8_t)(absY & 0xFF),
-        (uint8_t)((absY >> 8) & 0xFF)
-    };
-    sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
-    absReport[0] = 0x00;                    // In Range = OFF
-    sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
-    logPrint("[%s] Sent macOS digitizer position to PC %s at (%ld, %ld) [Rel: %ld, %ld -> Norm: %u, %u] on Mon #%d (%s)",
-             contextLabel, targetMon.mac.c_str(), targetGlobalX, targetGlobalY, relX, relY, absX, absY, targetMon.id, targetMon.name.c_str());
+    return nullptr;
 }
 
-// --- Simplified Absolute HID Positioning Function for macOS (MacBook at bottom) ---
-void sendAbsoluteCoordinatesMacOs1(uint16_t connHandle, int monIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
-    MonitorConfig& targetMon = monitors[monIndex];
-    MonitorConfig& primaryMon = primaryMonitor(targetMon.mac);
-    sendRelative12Bit(connHandle, 0, -5000);
-    sendRelative12Bit(connHandle, -6000, 0);
-    if (!targetMon.isPrimary) {
-        if (targetMon.y > 0) sendRelative12Bit(connHandle, 0, targetMon.y + 100);
-        if (targetMon.x > 0) sendRelative12Bit(connHandle, targetMon.x + 200, 0);
-    } else {
-        int32_t overMacX = primaryMon.x + (primaryMon.width / 2);
-        long topMonitorY = 0;
-        for (int i = 0; i < monitorCount; i++) {
-            if (monitors[i].mac.equals(targetMon.mac) && !monitors[i].isPrimary) {
-                if (overMacX >= monitors[i].x && overMacX < monitors[i].x + monitors[i].width) {
-                    topMonitorY = monitors[i].y;
+static void buildEdgeListForMac(const int* macIndices, int macCount) {
+    if (macCount <= 1) return;
+
+    const int16_t STEP = 100;
+
+    for (int i = 0; i < macCount && borderCount < MAX_MAC_BORDERS; i++) {
+        for (int j = i + 1; j < macCount && borderCount < MAX_MAC_BORDERS; j++) {
+            int idxA = macIndices[i];
+            int idxB = macIndices[j];
+            const MonitorConfig& a = monitors[idxA];
+            const MonitorConfig& b = monitors[idxB];
+            SharedBorder border;
+            border.monA = idxA;
+            border.monB = idxB;
+            bool found = false;
+            long v_start = (a.y > b.y) ? a.y : b.y;
+            long v_end   = ((a.y + a.height) < (b.y + b.height)) ? (a.y + a.height) : (b.y + b.height);
+            if (v_end > v_start) {
+                long midY = (v_start + v_end) / 2;
+                // B to the right of A
+                if (abs((a.x + a.width) - b.x) <= 1) {
+                    border.ab = { 32757, (uint16_t)(((float)(midY - a.y) / (float)a.height) * 32767.0f), STEP, 0 };
+                    border.ba = { 10,    (uint16_t)(((float)(midY - b.y) / (float)b.height) * 32767.0f), (int16_t)-STEP, 0 };
+                    found = true;
+                }
+                // B is to the left of A
+                else if (abs((b.x + b.width) - a.x) <= 1) {
+                    border.ab = { 10,    (uint16_t)(((float)(midY - a.y) / (float)a.height) * 32767.0f), (int16_t)-STEP, 0 };
+                    border.ba = { 32757, (uint16_t)(((float)(midY - b.y) / (float)b.height) * 32767.0f), STEP, 0 };
+                    found = true;
+                }
+            }
+            long h_start = (a.x > b.x) ? a.x : b.x;
+            long h_end   = ((a.x + a.width) < (b.x + b.width)) ? (a.x + a.width) : (b.x + b.width);
+            if (!found) {
+                if (h_end > h_start) {
+                    long midX = (h_start + h_end) / 2;
+                    // B below A
+                    if (abs((a.y + a.height) - b.y) <= 1) {
+                        border.ab = { (uint16_t)(((float)(midX - a.x) / (float)a.width) * 32767.0f), 32757, 0, STEP };
+                        border.ba = { (uint16_t)(((float)(midX - b.x) / (float)b.width) * 32767.0f), 10,    0, (int16_t)-STEP };
+                        found = true;
+                    }
+                    // B is above A
+                    else if (abs((b.y + b.height) - a.y) <= 1) {
+                        border.ab = { (uint16_t)(((float)(midX - a.x) / (float)a.width) * 32767.0f), 10,    0, (int16_t)-STEP };
+                        border.ba = { (uint16_t)(((float)(midX - b.x) / (float)b.width) * 32767.0f), 32757, 0, STEP };
+                        found = true;
+                    }
+                }
+            }
+
+            if (found) {
+                borders[borderCount++] = border;
+                logPrint("[EdgeList] Border #%d: Mon #%d (%s) <-> Mon #%d (%s)", borderCount - 1, a.id, a.name.c_str(), b.id, b.name.c_str());
+                logPrint("   -> ab (Mon #%d -> #%d): exit(%u, %u), step(%d, %d)", a.id, b.id, border.ab.exitX, border.ab.exitY, border.ab.stepX, border.ab.stepY);
+                logPrint("   -> ba (Mon #%d -> #%d): exit(%u, %u), step(%d, %d)", b.id, a.id, border.ba.exitX, border.ba.exitY, border.ba.stepX, border.ba.stepY);
+            } else {
+                logPrint("[EdgeList] No shared border between Mon #%d and Mon #%d (v_overlap: %d, h_overlap: %d)", a.id, b.id, (v_end > v_start), (h_end > h_start));
+            }
+        }
+    }
+}
+
+static void buildRoutesForMac(const int* macIndices, int macCount) {
+    for (int t = 0; t < macCount; t++) {
+        int targetMon = macIndices[t];
+        HomingRoute& route = macRoutes[targetMon];
+        route.count = 0;
+
+        if (macCount <= 1) {
+            logPrint("[EdgeList] Route for Mon #%d (%s): 0 steps (Single monitor)", monitors[targetMon].id, monitors[targetMon].name.c_str());
+            continue;
+        }
+
+        if (macCount == 2) {
+            int other = (t == 0) ? macIndices[1] : macIndices[0];
+            const Transition* step = getTransition(other, targetMon);
+            if (step && route.count < 3) route.steps[route.count++] = *step;
+            logPrint("[EdgeList] Route for Target Mon #%d (%s): %d step(s) (from Mon #%d %s)",
+                     monitors[targetMon].id, monitors[targetMon].name.c_str(), route.count,
+                     monitors[other].id, monitors[other].name.c_str());
+            if (route.count > 0) {
+                logPrint("   Step 1: exit(%u, %u), step(%d, %d)", route.steps[0].exitX, route.steps[0].exitY, route.steps[0].stepX, route.steps[0].stepY);
+            } else {
+                logPrint("   WARNING: No transition found from Mon #%d to Mon #%d!", monitors[other].id, monitors[targetMon].id);
+            }
+            continue;
+        }
+
+        if (macCount == 3) {
+            int m1 = macIndices[(t + 1) % 3];
+            int m2 = macIndices[(t + 2) % 3];
+
+            const Transition* t_m1_t  = getTransition(m1, targetMon);
+            const Transition* t_m2_t  = getTransition(m2, targetMon);
+            const Transition* t_m1_m2 = getTransition(m1, m2);
+
+            if (t_m1_t && !t_m2_t) {
+                // Endpoint monitor: m2 -> m1 -> target (2 steps)
+                const Transition* t_m2_m1 = getTransition(m2, m1);
+                if (t_m2_m1 && route.count < 3) route.steps[route.count++] = *t_m2_m1;
+                if (route.count < 3) route.steps[route.count++] = *t_m1_t;
+            } else if (!t_m1_t && t_m2_t) {
+                // Endpoint monitor: m1 -> m2 -> target (2 steps)
+                const Transition* t_m1_m2_rev = getTransition(m1, m2);
+                if (t_m1_m2_rev && route.count < 3) route.steps[route.count++] = *t_m1_m2_rev;
+                if (route.count < 3) route.steps[route.count++] = *t_m2_t;
+            } else if (t_m1_t && t_m2_t && t_m1_m2) {
+                // Triangle topology (2 steps)
+                if (route.count < 3) route.steps[route.count++] = *t_m1_t;
+                if (route.count < 3) route.steps[route.count++] = *t_m2_t;
+            } else if (t_m1_t && t_m2_t && !t_m1_m2) {
+                // Check whether neighbors are on opposite sides of the same axis (collinear center: left-right or top-bottom)
+                bool isCollinear = (t_m1_t->stepX != 0 && t_m2_t->stepX != 0) ||
+                                   (t_m1_t->stepY != 0 && t_m2_t->stepY != 0);
+
+                if (isCollinear) {
+                    // True collinear chain center A-B-C (3 steps):
+                    // 1. m2 -> target
+                    if (route.count < 3) route.steps[route.count++] = *t_m2_t;
+                    // 2. target -> m1
+                    const Transition* t_t_m1 = getTransition(targetMon, m1);
+                    if (t_t_m1 && route.count < 3) route.steps[route.count++] = *t_t_m1;
+                    // 3. m1 -> target
+                    if (route.count < 3) route.steps[route.count++] = *t_m1_t;
+                } else {
+                    // Corner / L-shape topology (orthogonal neighbors): target is not in the center of a 1D chain!
+                    // Neighbors approach along different axes (e.g., one from bottom, one from left) - exactly 2 steps:
+                    if (route.count < 3) route.steps[route.count++] = *t_m2_t;
+                    if (route.count < 3) route.steps[route.count++] = *t_m1_t;
+                }
+            }
+
+            logPrint("[EdgeList] Route for Target Mon #%d (%s): %d step(s)", monitors[targetMon].id, monitors[targetMon].name.c_str(), route.count);
+            for (uint8_t s = 0; s < route.count; s++) {
+                logPrint("   Step %d: exit(%u, %u), step(%d, %d)", s + 1, route.steps[s].exitX, route.steps[s].exitY, route.steps[s].stepX, route.steps[s].stepY);
+            }
+        }
+    }
+}
+
+void rebuildMacEdgeListRoutes() {
+    borderCount = 0;
+    for (int i = 0; i < MAX_MONITORS; i++) {
+        macRoutes[i].count = 0;
+    }
+
+    String processedMacs[MAX_MONITORS];
+    int processedCount = 0;
+
+    logPrint("[EdgeList] rebuildMacEdgeListRoutes(): scanning %d monitors...", monitorCount);
+
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].os == OS_MAC && monitors[i].mac.length() > 0) {
+            bool alreadyDone = false;
+            for (int p = 0; p < processedCount; p++) {
+                if (processedMacs[p].equals(monitors[i].mac)) {
+                    alreadyDone = true;
                     break;
                 }
             }
+            if (!alreadyDone && processedCount < MAX_MONITORS) {
+                processedMacs[processedCount++] = monitors[i].mac;
+
+                int macIndices[MAX_MONITORS];
+                int macCount = 0;
+                for (int m = 0; m < monitorCount && macCount < MAX_MONITORS; m++) {
+                    if (monitors[m].os == OS_MAC && monitors[m].mac.equals(monitors[i].mac)) {
+                        macIndices[macCount++] = m;
+                    }
+                }
+
+                logPrint("[EdgeList] Mac %s has %d monitor(s):", monitors[i].mac.c_str(), macCount);
+                for (int mi = 0; mi < macCount; mi++) {
+                    int mIdx = macIndices[mi];
+                    logPrint("   -> Mon[%d] ID=%d '%s' [%ld,%ld %ldx%ld]%s",
+                             mIdx, monitors[mIdx].id, monitors[mIdx].name.c_str(),
+                             monitors[mIdx].x, monitors[mIdx].y, monitors[mIdx].width, monitors[mIdx].height,
+                             monitors[mIdx].isPrimary ? " [Primary]" : "");
+                }
+
+                buildEdgeListForMac(macIndices, macCount);
+                buildRoutesForMac(macIndices, macCount);
+
+                logPrint("[EdgeList] Finished for Mac %s (total borders: %d)", monitors[i].mac.c_str(), borderCount);
+            }
         }
-        if (topMonitorY > 0) sendRelative12Bit(connHandle, 0, topMonitorY + 100);
-        if (overMacX > 0) sendRelative12Bit(connHandle, overMacX, 0);
-        sendRelative12Bit(connHandle, 0, 3000);
     }
+}
+
+void sendAbsoluteCoordinatesMacOs(uint16_t connHandle, int targetMonIndex, long targetGlobalX, long targetGlobalY, const char* contextLabel) {
+    if (targetMonIndex < 0 || targetMonIndex >= monitorCount) {
+        logPrint("[EdgeList EXEC] ERROR: targetMonIndex %d out of range (count=%d)", targetMonIndex, monitorCount);
+        return;
+    }
+
+    MonitorConfig& targetMon = monitors[targetMonIndex];
+    const HomingRoute& route = macRoutes[targetMonIndex];
+
+    logPrint("[%s] [EdgeList EXEC] >>> Target Mon #%d (%s, MAC: %s) at Global (%ld, %ld), connHandle: %d, route.steps: %d <<<",
+             contextLabel, targetMon.id, targetMon.name.c_str(), targetMon.mac.c_str(),
+             targetGlobalX, targetGlobalY, connHandle, route.count);
+
+    for (uint8_t i = 0; i < route.count; i++) {
+        const Transition& s = route.steps[i];
+
+        logPrint("   [EdgeList EXEC] Step %d/%d: Setting Digitizer Exit (%u, %u)", i + 1, route.count, s.exitX, s.exitY);
+
+        uint8_t absReport[5] = {
+            0x01,
+            (uint8_t)(s.exitX & 0xFF),
+            (uint8_t)((s.exitX >> 8) & 0xFF),
+            (uint8_t)(s.exitY & 0xFF),
+            (uint8_t)((s.exitY >> 8) & 0xFF)
+        };
+        sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
+        delay(5);
+        absReport[0] = 0x00;
+        sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
+        delay(10);
+
+        logPrint("   [EdgeList EXEC] Step %d/%d: Sending Relative Step (%d, %d)", i + 1, route.count, s.stepX, s.stepY);
+        sendRelative12Bit(connHandle, s.stepX, s.stepY);
+        delay(15);
+    }
+
     long relX = constrain(targetGlobalX - targetMon.x, 0, targetMon.width);
     long relY = constrain(targetGlobalY - targetMon.y, 0, targetMon.height);
     uint16_t absX = (uint16_t)round(((float)relX / (float)targetMon.width) * 32767.0f);
     uint16_t absY = (uint16_t)round(((float)relY / (float)targetMon.height) * 32767.0f);
+
+    logPrint("   [EdgeList EXEC] Final Target Digitizer: (%u, %u) [Rel: %ld, %ld]", absX, absY, relX, relY);
+
     uint8_t absReport[5] = {
-        0x01,                               // In Range = ON
+        0x01,
         (uint8_t)(absX & 0xFF),
         (uint8_t)((absX >> 8) & 0xFF),
         (uint8_t)(absY & 0xFF),
         (uint8_t)((absY >> 8) & 0xFF)
     };
     sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
-    logPrint("[%s] Sent macOS1 digitizer pos to PC %s at (%ld, %ld) [Rel: %ld, %ld -> Norm: %u, %u] on Mon #%d (%s)",
-             contextLabel, targetMon.mac.c_str(), targetGlobalX, targetGlobalY, relX, relY, absX, absY, targetMon.id, targetMon.name.c_str());
-    sendRelative12Bit(connHandle, 0, 0);
+    delay(5);
+    absReport[0] = 0x00;
+    sendHidReport(macAbsInputChar, connHandle, absReport, sizeof(absReport));
+
+    logPrint("[%s] [EdgeList EXEC] Completed for Mon #%d (%s) at (%ld, %ld)", contextLabel, targetMon.id, targetMon.name.c_str(), targetGlobalX, targetGlobalY);
 }
 
 
@@ -535,9 +747,6 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
 
     sendRelative12Bit(connHandle, sendDx, sendDy, sendButtons, scroll, hScroll);
 }
-
-
-
 
 // Callback when HID data is received from the mouse
 void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {

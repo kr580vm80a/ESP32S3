@@ -1,5 +1,6 @@
 #include "kvm_config.h"
 #include "usb_device_engine.h"
+#include "cursor_engine.h"
 
 static String pendingSaveJson = "";
 static bool doSaveConfig = false;
@@ -247,6 +248,7 @@ void loadConfiguration() {
                  monitors[m].isPrimary ? " [Primary]" : "");
     }
     usb_device_check_detection();
+    rebuildMacEdgeListRoutes();
 }
 
 void saveConfiguration(const String& jsonString) {

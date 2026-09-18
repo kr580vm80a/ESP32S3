@@ -1,15 +1,11 @@
 #include "usb_manager.h"
 #include "logi_bolt.h"
 #include "usb_device_engine.h"
-
-#if CONFIG_IDF_TARGET_ESP32S3
 #include "driver/periph_ctrl.h"
 #include "soc/periph_defs.h"
 #include "soc/usb_wrap_reg.h"
 #include "soc/usb_serial_jtag_reg.h"
-#include "soc/soc.h"
 #include "driver/gpio.h"
-#include <Preferences.h>
 
 void logPrint(const char* format, ...);
 
@@ -74,37 +70,10 @@ static UsbKvmMode probe_usb_hardware() {
     return USB_KVM_MODE_DEVICE_PC;
 }
 
-void usb_manager_set_preferred_mode(const String& mode) {
-    Preferences prefs;
-    prefs.begin("kvm_usb", false);
-    prefs.putString("mode", mode);
-    prefs.end();
-    logPrint("[USB MGR] Preferred USB mode saved: %s. Rebooting to apply...", mode.c_str());
-    delay(100);
-    esp_restart();
-}
-
-String usb_manager_get_preferred_mode() {
-    Preferences prefs;
-    prefs.begin("kvm_usb", true);
-    String m = prefs.getString("mode", "auto");
-    prefs.end();
-    return m;
-}
-
 void usb_manager_init() {
-    String pref = usb_manager_get_preferred_mode();
-    if (pref.equalsIgnoreCase("bolt")) {
-        logPrint("[USB MGR] NVS Override: Logitech Bolt / Host");
-        usb_manager_switch_to(USB_KVM_MODE_HOST_BOLT);
-    } else if (pref.equalsIgnoreCase("pc")) {
-        logPrint("[USB MGR] NVS Override: Wired PC / MacBook HID");
-        usb_manager_switch_to(USB_KVM_MODE_DEVICE_PC);
-    } else {
-        logPrint("[USB MGR] Auto-probing USB port hardware state...");
-        UsbKvmMode detected = probe_usb_hardware();
-        usb_manager_switch_to(detected);
-    }
+    logPrint("[USB MGR] Auto-probing USB port hardware state...");
+    UsbKvmMode detected = probe_usb_hardware();
+    usb_manager_switch_to(detected);
 }
 
 void usb_manager_loop() {
@@ -122,29 +91,11 @@ void usb_manager_loop() {
     }
 }
 
-UsbKvmMode usb_manager_get_mode() {
-    return s_currentMode;
-}
-
 bool usb_manager_is_pc_connected() {
     return (s_currentMode == USB_KVM_MODE_DEVICE_PC) && usb_device_is_connected();
-}
-
-bool usb_manager_is_bolt_connected() {
-    return (s_currentMode == USB_KVM_MODE_HOST_BOLT) && (logi_bolt_is_mouse_connected() || logi_bolt_is_keyboard_connected());
 }
 
 void usb_manager_notify_host_dev_gone() {
     s_boltDevGone = true;
 }
 
-#else
-
-void usb_manager_init() {}
-void usb_manager_loop() {}
-UsbKvmMode usb_manager_get_mode() { return USB_KVM_MODE_NONE; }
-bool usb_manager_is_pc_connected() { return false; }
-bool usb_manager_is_bolt_connected() { return false; }
-void usb_manager_notify_host_dev_gone() {}
-
-#endif

@@ -9,7 +9,7 @@
 // --- BLE Host (Central) Functions ---
 
 static bool isConnectingToMouse = false;
-static NimBLEClient* pClient = nullptr;
+static NimBLEClient* pMouseClient = nullptr;
 static NimBLEAdvertisedDevice* advDevice = nullptr;
 
 static bool isConnectingToKeyboard = false;
@@ -114,7 +114,7 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             mouseMatch = true;
         }
 
-        if (!mouseConnected && !logi_bolt_is_mouse_connected() && !isConnectingToMouse && mouseMatch) {
+        if (!mouseConnected && !isConnectingToMouse && mouseMatch) {
             isConnectingToMouse = true; // Set flag immediately to throttle multiple advertising packets
             logPrint("[BLE Scan] TARGET MOUSE MATCH! Connecting to %s (%s)", devName.c_str(), devMac.c_str());
             NimBLEDevice::getScan()->stop();
@@ -128,7 +128,7 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             kbMatch = true;
         }
 
-        if (!kbConnected && !logi_bolt_is_keyboard_connected() && !isConnectingToKeyboard && kbMatch) {
+        if (!kbConnected && !isConnectingToKeyboard && kbMatch) {
             isConnectingToKeyboard = true; // Set flag immediately to throttle multiple advertising packets
             logPrint("[BLE Scan] TARGET KEYBOARD MATCH! Connecting to %s (%s)...", devName.c_str(), devMac.c_str());
             NimBLEDevice::getScan()->stop();
@@ -137,6 +137,10 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         }
     }
 };
+
+bool isHostConnectingPeripheral() {
+    return isConnectingToMouse || isConnectingToKeyboard || doConnectMouse || doConnectKeyboard;
+}
 
 static ScanCallbacks* globalScanCallbacks = nullptr;
 
@@ -155,8 +159,8 @@ void startHostReconnectTask() {
     xTaskCreate([](void* param) {
         logPrint("[BLE Host] Host Reconnect Daemon started (Instant Wakeup Mode).");
         while (true) {
-            bool needMouse = !mouseConnected && !logi_bolt_is_mouse_connected();
-            bool needKb = !kbConnected && !logi_bolt_is_keyboard_connected();
+            bool needMouse = (targetMouseMac.length() > 0) && !mouseConnected;
+            bool needKb = (targetKeyboardMac.length() > 0) && !kbConnected;
 
             if (!needMouse && !needKb) {
                 // Both peripherals connected: Stop radio scanner to reserve 100% bandwidth for HID traffic.
@@ -199,7 +203,7 @@ void startHostReconnectTask() {
 }
 
 // Callback for BLE Mouse Connection Status
-class ClientCallbacks : public NimBLEClientCallbacks {
+class MouseCallbacks : public NimBLEClientCallbacks {
     void onConnect(NimBLEClient* pClient) {
         logPrint("[BLE Host] Connected to mouse!");
     }
@@ -208,18 +212,18 @@ class ClientCallbacks : public NimBLEClientCallbacks {
         mouseConnected = false;
         isConnectingToMouse = false;
         isCalibrated = false;
-        // Instantly return all PCs to Standby (80ms) to free 98% radio airtime for mouse reconnect
-        updateKvmPowerAndRateProfiles("", true);
-        if (pClient) {
-            NimBLEDevice::deleteClient(pClient);
-            pClient = nullptr;
-        }
+        // Shift PCs to standby profile when mouse is disconnected
+        updateKvmPowerAndRateProfiles("", false);
         // Instantly wake up the reconnect daemon without waiting for periodic timer tick
         if (hostScanTaskHandle != NULL) {
             xTaskNotifyGive(hostScanTaskHandle);
         }
     }
     bool onConnParamsUpdateRequest(NimBLEClient* pClient, const ble_gap_upd_params* params) {
+        logPrint("[BLE Host] Mouse requested params: itvl_min=%d (%.2f ms), itvl_max=%d (%.2f ms), lat=%d, to=%d",
+                 params->itvl_min, params->itvl_min * 1.25f,
+                 params->itvl_max, params->itvl_max * 1.25f,
+                 params->latency, params->supervision_timeout * 10);
         return true;
     }
 };
@@ -237,16 +241,28 @@ class KeyboardClientCallbacks : public NimBLEClientCallbacks {
         isConnectingToKeyboard = false;
         pKbLedChar = nullptr;
         pKbBootLedChar = nullptr;
-        if (pKbClient) {
-            NimBLEDevice::deleteClient(pKbClient);
-            pKbClient = nullptr;
-        }
         // Instantly wake up the reconnect daemon without waiting for periodic timer tick
         if (hostScanTaskHandle != NULL) {
             xTaskNotifyGive(hostScanTaskHandle);
         }
     }
+    bool onConnParamsUpdateRequest(NimBLEClient* pClient, const ble_gap_upd_params* params) {
+        logPrint("[BLE Host] Keyboard requested params: itvl_min=%d (%.2f ms), itvl_max=%d (%.2f ms), lat=%d, to=%d",
+                 params->itvl_min, params->itvl_min * 1.25f,
+                 params->itvl_max, params->itvl_max * 1.25f,
+                 params->latency, params->supervision_timeout * 10);
+        return true;
+    }
 };
+
+// Returns true for transient / retryable link errors (OS-style backoff recovery)
+inline bool isTransientConnectionError(int err) {
+    // 525 (HCI 0x0D): Limited Resources (peripheral busy finishing channel switch / buffer teardown)
+    // 574 (HCI 0x3E): Connection Failed to be Established (RF packet miss / anchor collision)
+    // 524 (HCI 0x0C): Command Disallowed (HCI controller busy transitioning)
+    // 523 (HCI 0x0B): Connection Already Exists (half-open link handle clearing)
+    return (err == 525 || err == 574 || err == 524 || err == 523);
+}
 
 /**
  * @brief Establishes Direct Link-Layer connection to the target bonded keyboard.
@@ -260,61 +276,80 @@ bool connectToKeyboard() {
     if (isScanningForMice) return false;
     if (targetKeyboardMac.length() == 0 && !advKbDevice) return false;
 
+    isConnectingToKeyboard = true;
+
     if (!pKbClient) {
         pKbClient = NimBLEDevice::createClient();
         pKbClient->setClientCallbacks(new KeyboardClientCallbacks());
-        pKbClient->setConnectTimeout(5);
+        pKbClient->setConnectTimeout(2);
     }
+    // 50% Initiator Duty Cycle (scanInterval=32 (20ms), scanWindow=16 (10ms)) - matched with mouse
+    // Previous (v45-v48): pKbClient->setConnectionParams(6, 24, 0, 216, 32, 8);
+    pKbClient->setConnectionParams(6, 24, 0, 216, 32, 16);
 
     if (pKbClient->isConnected()) {
         kbConnected = true;
+        isConnectingToKeyboard = false;
         return true;
     }
-
-    isConnectingToKeyboard = true;
 
     NimBLEScan* pScan = NimBLEDevice::getScan();
     if (pScan && pScan->isScanning()) {
         pScan->stop();
-        int waitCount = 0;
-        while (pScan->isScanning() && waitCount++ < 50) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
     }
     if (ble_gap_disc_active()) {
         ble_gap_disc_cancel();
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
         NimBLEDevice::getAdvertising()->stop();
     }
     if (ble_gap_adv_active()) {
         ble_gap_adv_stop();
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (ble_gap_conn_active()) {
         logPrint("[BLE Host] Lingering connection attempt detected, cancelling...");
         ble_gap_conn_cancel();
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
 
     logPrint("[BLE Host GAP Status] conn_active=%d, disc_active=%d, adv_active=%d",
              ble_gap_conn_active(), ble_gap_disc_active(), ble_gap_adv_active());
 
-    // Direct Link-Layer Connection (Connects on first radio burst in <50ms)
-    bool connRes = false;
+    NimBLEAddress kbAddr;
+    uint8_t kbAddrType = BLE_ADDR_PUBLIC;
+    bool hasExactAddrType = false;
     if (advKbDevice) {
-        logPrint("[BLE Host] Direct Link-Layer Connecting to Keyboard: %s (Type: %d)...", 
-                 advKbDevice->getAddress().toString().c_str(), advKbDevice->getAddressType());
-        connRes = pKbClient->connect(advKbDevice, false);
+        kbAddr = advKbDevice->getAddress();
+        kbAddrType = advKbDevice->getAddressType();
+        hasExactAddrType = true;
         delete advKbDevice;
         advKbDevice = nullptr;
     } else if (targetKeyboardMac.length() > 0) {
-        logPrint("[BLE Host] Direct Link-Layer Connecting to MAC: %s...", targetKeyboardMac.c_str());
-        connRes = pKbClient->connect(NimBLEAddress(targetKeyboardMac.c_str(), BLE_ADDR_RANDOM), false);
+        kbAddr = NimBLEAddress(targetKeyboardMac.c_str(), BLE_ADDR_PUBLIC);
+        kbAddrType = BLE_ADDR_PUBLIC;
+    }
+
+    // Direct Link-Layer Connection with OS-level adaptive retry for transient link states (rc=525, 574, etc.)
+    bool connRes = false;
+    const int MAX_CONNECT_RETRIES = 5;
+    for (int retry = 0; retry < MAX_CONNECT_RETRIES && !connRes; retry++) {
+        if (retry > 0) {
+            logPrint("[BLE Host] Retrying Keyboard connection (attempt %d/%d)...", retry + 1, MAX_CONNECT_RETRIES);
+        }
+        logPrint("[BLE Host] Direct Link-Layer Connecting to Keyboard: %s (Type: %d)...", 
+                 kbAddr.toString().c_str(), kbAddrType);
+        connRes = pKbClient->connect(kbAddr, false);
         if (!connRes) {
-            connRes = pKbClient->connect(NimBLEAddress(targetKeyboardMac.c_str(), BLE_ADDR_PUBLIC), false);
+            int err = pKbClient ? pKbClient->getLastError() : -1;
+            if (isTransientConnectionError(err) && retry + 1 < MAX_CONNECT_RETRIES) {
+                logPrint("[BLE Host] Keyboard busy / transient link state (rc=%d: %s), waiting 400ms before retry...",
+                         err, NimBLEUtils::returnCodeToString(err));
+                vTaskDelay(pdMS_TO_TICKS(400));
+            } else if (!hasExactAddrType && targetKeyboardMac.length() > 0) {
+                // Blind MAC fallback only if we didn't receive an exact advertisement packet
+                uint8_t altType = (kbAddrType == BLE_ADDR_PUBLIC) ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC;
+                connRes = pKbClient->connect(NimBLEAddress(targetKeyboardMac.c_str(), altType), false);
+            }
         }
     }
 
@@ -322,17 +357,16 @@ bool connectToKeyboard() {
         int errCode = pKbClient ? pKbClient->getLastError() : -1;
         logPrint("[BLE Host] Keyboard connection attempt failed: rc=%d (%s)", 
                  errCode, NimBLEUtils::returnCodeToString(errCode));
-        if (pKbClient) {
-            NimBLEDevice::deleteClient(pKbClient);
-            pKbClient = nullptr;
-        }
         vTaskDelay(pdMS_TO_TICKS(1500));
         isConnectingToKeyboard = false;
+        checkAndResumeAdvertising();
+        if (!kbConnected || !mouseConnected) startHostReconnectTask();
         return false;
     }
 
-    logPrint("[BLE Host] Keyboard connected! Securing link...");
-    pKbClient->setConnectionParams(6, 12, 0, 500); // Enforce 7.5ms BLE stream latency
+    // Native Logitech MX Keys S PPCP profile: 20.00..25.00 ms (itvl: 16..20), Latency 20, Timeout 2100 ms (210)
+    // Previous (v46): pKbClient->updateConnParams(16, 24, 20, 500);
+    pKbClient->updateConnParams(16, 20, 20, 210);
     if (!pKbClient->secureConnection()) {
         logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...");
         delay(100);
@@ -355,7 +389,7 @@ bool connectToKeyboard() {
         int subCount = 0;
         if (pChars != nullptr) {
             for (auto &pChar : *pChars) {
-                logPrint("[BLE KB Char] UUID: %s | Notify: %d | Write: %d | WriteNR: %d",
+                if (KEYBOARD_LOG) logPrint("[BLE KB Char] UUID: %s | Notify: %d | Write: %d | WriteNR: %d",
                          pChar->getUUID().toString().c_str(),
                          pChar->canNotify(), pChar->canWrite(), pChar->canWriteNoResponse());
 
@@ -400,6 +434,7 @@ bool connectToKeyboard() {
         pKbClient->disconnect();
         isConnectingToKeyboard = false;
         checkAndResumeAdvertising();
+        if (!kbConnected || !mouseConnected) startHostReconnectTask();
         return false;
     }
 }
@@ -408,26 +443,31 @@ bool connectToMouse() {
     if (isScanningForMice) return false;
     if (targetMouseMac.length() == 0 && !advDevice) return false;
 
-    if (!pClient) {
-        pClient = NimBLEDevice::createClient();
-        pClient->setClientCallbacks(new ClientCallbacks());
-        pClient->setConnectTimeout(5);
-    }
+    isConnectingToMouse = true;
 
-    if (pClient->isConnected()) {
+    if (!pMouseClient) {
+        pMouseClient = NimBLEDevice::createClient();
+        pMouseClient->setClientCallbacks(new MouseCallbacks());
+        pMouseClient->setConnectTimeout(2);
+    }
+    // Variant 1: 50% Initiator Duty Cycle (scanInterval=32 (20ms), scanWindow=16 (10ms))
+    // Frees 50% radio airtime for ESP32 BT controller to service active PC links (Mac/Windows)
+    // without rejecting connection initiation with HCI 0x0D (rc=525: Limited Resources)
+    pMouseClient->setConnectionParams(6, 24, 0, 216, 32, 16);
+
+    if (pMouseClient->isConnected()) {
         mouseConnected = true;
+        isConnectingToMouse = false;
         return true;
     }
-
-    isConnectingToMouse = true;
 
     if (!advDevice && targetMouseMac.length() > 0) {
         logPrint("[BLE Host] Performing targeted fast probe scan for mouse (%s)...", targetMouseMac.c_str());
         NimBLEScan* pScan = NimBLEDevice::getScan();
         if (pScan) {
             pScan->setActiveScan(true);
-            pScan->setInterval(160);
-            pScan->setWindow(160);
+            pScan->setInterval(48); // 30ms interval
+            pScan->setWindow(24);   // 15ms window (50% duty cycle)
             NimBLEScanResults results = pScan->start(2, false);
             for (int i = 0; i < results.getCount(); i++) {
                 NimBLEAdvertisedDevice dev = results.getDevice(i);
@@ -446,50 +486,65 @@ bool connectToMouse() {
     NimBLEScan* pScan = NimBLEDevice::getScan();
     if (pScan && pScan->isScanning()) {
         pScan->stop();
-        int waitCount = 0;
-        while (pScan->isScanning() && waitCount++ < 50) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
     }
     if (ble_gap_disc_active()) {
         ble_gap_disc_cancel();
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
         NimBLEDevice::getAdvertising()->stop();
     }
     if (ble_gap_adv_active()) {
         ble_gap_adv_stop();
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
     if (ble_gap_conn_active()) {
         logPrint("[BLE Host] Lingering connection attempt detected, cancelling...");
         ble_gap_conn_cancel();
-        vTaskDelay(pdMS_TO_TICKS(50));
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
-    vTaskDelay(pdMS_TO_TICKS(100));
 
     logPrint("[BLE Host GAP Status] conn_active=%d, disc_active=%d, adv_active=%d",
              ble_gap_conn_active(), ble_gap_disc_active(), ble_gap_adv_active());
 
-    bool connRes = false;
-
+    NimBLEAddress mouseAddr;
+    uint8_t mouseAddrType = BLE_ADDR_PUBLIC;
+    bool hasExactMouseAddrType = false;
     if (advDevice) {
-        logPrint("[BLE Host] Direct Link-Layer Connecting to Mouse: %s (Type: %d)...", 
-                 advDevice->getAddress().toString().c_str(), advDevice->getAddressType());
-        connRes = pClient->connect(advDevice, false);
+        mouseAddr = advDevice->getAddress();
+        mouseAddrType = advDevice->getAddressType();
+        hasExactMouseAddrType = true;
         delete advDevice;
         advDevice = nullptr;
     } else if (targetMouseMac.length() > 0) {
-        logPrint("[BLE Host] Direct Link-Layer Connecting to MAC: %s...", targetMouseMac.c_str());
-        connRes = pClient->connect(NimBLEAddress(targetMouseMac.c_str(), BLE_ADDR_RANDOM), false);
+        mouseAddr = NimBLEAddress(targetMouseMac.c_str(), BLE_ADDR_PUBLIC);
+        mouseAddrType = BLE_ADDR_PUBLIC;
+    }
+
+    // Direct Link-Layer Connection with OS-level adaptive retry for transient link states (rc=525, 574, etc.)
+    bool connRes = false;
+    const int MAX_CONNECT_RETRIES = 5;
+    for (int retry = 0; retry < MAX_CONNECT_RETRIES && !connRes; retry++) {
+        if (retry > 0) {
+            logPrint("[BLE Host] Retrying Mouse connection (attempt %d/%d)...", retry + 1, MAX_CONNECT_RETRIES);
+        }
+        logPrint("[BLE Host] Direct Link-Layer Connecting to Mouse: %s (Type: %d)...", 
+                 mouseAddr.toString().c_str(), mouseAddrType);
+        connRes = pMouseClient->connect(mouseAddr, false);
         if (!connRes) {
-            connRes = pClient->connect(NimBLEAddress(targetMouseMac.c_str(), BLE_ADDR_PUBLIC), false);
+            int err = pMouseClient ? pMouseClient->getLastError() : -1;
+            if (isTransientConnectionError(err) && retry + 1 < MAX_CONNECT_RETRIES) {
+                logPrint("[BLE Host] Mouse busy / transient link state (rc=%d: %s), waiting 150ms before retry...",
+                         err, NimBLEUtils::returnCodeToString(err));
+                vTaskDelay(pdMS_TO_TICKS(150));
+            } else if (!hasExactMouseAddrType && targetMouseMac.length() > 0) {
+                // Blind MAC fallback only if we didn't receive an exact advertisement packet
+                uint8_t altType = (mouseAddrType == BLE_ADDR_PUBLIC) ? BLE_ADDR_RANDOM : BLE_ADDR_PUBLIC;
+                connRes = pMouseClient->connect(NimBLEAddress(targetMouseMac.c_str(), altType), false);
+            }
         }
     }
 
     if (!connRes) {
-        int errCode = pClient ? pClient->getLastError() : -1;
+        int errCode = pMouseClient ? pMouseClient->getLastError() : -1;
         logPrint("[BLE Host] Connection attempt failed: rc=%d (%s)", 
                  errCode, NimBLEUtils::returnCodeToString(errCode));
         vTaskDelay(pdMS_TO_TICKS(1500));
@@ -499,10 +554,10 @@ bool connectToMouse() {
     }
 
     logPrint("[BLE Host] Connected! Securing connection (Pairing)...");
-    if (!pClient->secureConnection()) {
+    if (!pMouseClient->secureConnection()) {
         logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...");
         delay(100);
-        if (!pClient->secureConnection()) {
+        if (!pMouseClient->secureConnection()) {
             logPrint("[BLE Host] Secure connection retry failed. Proceeding with service discovery...");
         } else {
             logPrint("[BLE Host] Connection secured on retry!");
@@ -511,27 +566,24 @@ bool connectToMouse() {
         logPrint("[BLE Host] Connection secured!");
     }
 
-    NimBLERemoteService* pService = pClient->getService(hidServiceUUID);
+    NimBLERemoteService* pService = pMouseClient->getService(hidServiceUUID);
     if (pService != nullptr) {
         std::vector<NimBLERemoteCharacteristic*>* pChars = pService->getCharacteristics(true);
         for (auto &pChar : *pChars) {
             if (pChar->getUUID() == reportCharUUID) {
                 if(pChar->canNotify()) {
-                    pChar->subscribe(true, notifyCallback, true); // Synchronous: waits for ATT_WRITE_RSP confirmation
+                    pChar->subscribe(true, MouseNotifyCallback, true); // Synchronous: waits for ATT_WRITE_RSP confirmation
                     logPrint("[BLE Host] Subscribed to HID report (Acknowledged)!");
                 }
             }
         }
-        ble_gap_set_prefered_le_phy(pClient->getConnId(), BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
-        checkAndLogPhyStatus(pClient->getConnId(), "Mouse");
-        logPrint("[BLE Host] GATT Setup Complete Event -> Mouse HID ready!");
-        ble_gap_conn_desc mouseDesc;
-        if (ble_gap_conn_find(pClient->getConnId(), &mouseDesc) == 0 && mouseDesc.conn_itvl > 9) {
-            logPrint("[BLE Host] Requesting low-latency connection params for mouse (Target: 7.50..11.25ms)...");
-            pClient->updateConnParams(6, 9, 44, 216);
-        }
+        ble_gap_set_prefered_le_phy(pMouseClient->getConnId(), BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
+        checkAndLogPhyStatus(pMouseClient->getConnId(), "Mouse");
+        // The mouse automatically requests its preferred connection parameters (interval, latency, timeout)
+        // via L2CAP update request right after pairing/encryption. Our adaptive stack in ble_gap.c
+        // automatically honors the peripheral's requested latency while finding the fastest stable interval.
     } else {
-        pClient->disconnect();
+        pMouseClient->disconnect();
         isConnectingToMouse = false;
         checkAndResumeAdvertising();
         if (!kbConnected || !mouseConnected) startHostReconnectTask();
@@ -542,7 +594,7 @@ bool connectToMouse() {
     if (!isCalibrated) {
         scheduleBootCalibration();
     } else {
-        updateKvmPowerAndRateProfiles(monitors[currentMonitorIndex].mac, true);
+        updateKvmPowerAndRateProfiles(monitors[currentMonitorIndex].mac, false);
     }
     checkAndResumeAdvertising();
     if (!kbConnected) startHostReconnectTask();
@@ -550,8 +602,8 @@ bool connectToMouse() {
 }
 
 void disconnectMouse() {
-    if (pClient && pClient->isConnected()) {
-        pClient->disconnect();
+    if (pMouseClient && pMouseClient->isConnected()) {
+        pMouseClient->disconnect();
     }
 }
 

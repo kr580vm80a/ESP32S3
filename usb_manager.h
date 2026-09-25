@@ -11,3 +11,5 @@ void usb_manager_init();
 void usb_manager_loop();
 bool usb_manager_is_pc_connected();
 void usb_manager_notify_host_dev_gone();
+UsbKvmMode usb_manager_get_mode();
+void usb_manager_switch_to(UsbKvmMode newMode);

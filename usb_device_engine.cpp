@@ -8,6 +8,7 @@
 #include "USBHIDConsumerControl.h"
 #include "hid_descriptors.h"
 #include "kvm_types.h"
+#include "cursor_engine.h"
 
 void logPrint(const char* format, ...);
 
@@ -112,12 +113,15 @@ String usb_device_get_bound_mac() {
 
 void usb_device_set_bound_mac(const String& mac) {
     s_usbBoundMac = mac;
+    if (!isCalibrated && firstConnectedPcMac.length() == 0) {
+        firstConnectedPcMac = mac;
+        scheduleBootCalibration();
+    }
     updateKvmPowerAndRateProfiles("", true);
 }
 
 void usb_device_clear_bound_mac() {
     s_usbBoundMac = "";
-    updateKvmPowerAndRateProfiles("", true);
 }
 
 void usb_device_check_detection() {
@@ -132,7 +136,7 @@ void usb_device_check_detection() {
             !monitors[i].mac.equalsIgnoreCase("USB") && !monitors[i].mac.equalsIgnoreCase("USB-C")) {
             bool found = false;
             for (int m = 0; m < matchingCount; m++) {
-                if (matchingMacs[m].equalsIgnoreCase(monitors[i].mac)) { found = true; break; }
+                if (matchingMacs[m].equals(monitors[i].mac)) { found = true; break; }
             }
             if (!found && matchingCount < MAX_SUPPORTED_KVM_CLIENTS) {
                 matchingMacs[matchingCount++] = monitors[i].mac;
@@ -163,7 +167,7 @@ void usb_device_check_detection() {
         bool isConn = false;
         for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
             if (kvmClients[k].active && kvmClients[k].conn_id != BLE_HS_CONN_HANDLE_NONE &&
-                kvmClients[k].mac.equalsIgnoreCase(matchingMacs[m])) {
+                kvmClients[k].mac.equals(matchingMacs[m])) {
                 isConn = true;
                 break;
             }
@@ -235,7 +239,7 @@ void usb_device_on_ble_connect(const String& mac, int os) {
     if (s_usbHostOs == -1) return;
     if (os != s_usbHostOs) return;
     // If not bound or if currently bound, verify with probe
-    if (s_usbBoundMac.length() == 0 || s_usbBoundMac.equalsIgnoreCase(mac)) {
+    if (s_usbBoundMac.length() == 0 || s_usbBoundMac.equals(mac)) {
         logPrint("[USB DETECT] Candidate %s connected via BLE (%s). Checking USB binding...",
                  mac.c_str(), os == OS_MAC ? "Mac" : "Win");
         usb_device_check_detection();
@@ -284,24 +288,78 @@ void usb_device_loop() {
     }
     if (s_eventUnmounted) {
         s_eventUnmounted = false;
-        s_seenMsftDescriptor = false;
-        s_usbHostOs = -1;
-        usb_device_clear_bound_mac();
-        s_probeActive = false;
-        logPrint("[USB DEVICE] Host PC UNMOUNTED device! Cleared USB binding.");
+        // If tud_ready() is still true, this was a transient bus reset or out-of-order event during enumeration
+        if (tud_ready()) {
+            logPrint("[USB DEVICE] Filtered transient USB bus reset during enumeration (tud_ready is active).");
+        } else {
+            s_seenMsftDescriptor = false;
+            s_usbHostOs = -1;
+            String oldBoundMac = s_usbBoundMac;
+            usb_device_clear_bound_mac();
+            s_probeActive = false;
+            if (oldBoundMac.length() > 0) {
+                logPrint("[USB DEVICE] Host PC UNMOUNTED device! Cleared USB binding.");
+
+                // If the unmounted USB PC was the active monitor, check if it has BLE or needs failover
+                if (monitorCount > 0 && monitors[currentMonitorIndex].mac.equals(oldBoundMac)) {
+                    bool hasBle = false;
+                    for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+                        if (kvmClients[k].active && kvmClients[k].mac.equals(oldBoundMac)) {
+                            hasBle = true;
+                            break;
+                        }
+                    }
+                    if (!hasBle) {
+                        isCalibrated = false;
+                        firstConnectedPcMac = "";
+                        for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+                            if (kvmClients[k].active && isMacInActiveLayout(kvmClients[k].mac)) {
+                                firstConnectedPcMac = kvmClients[k].mac;
+                                break;
+                            }
+                        }
+                        if (firstConnectedPcMac.length() > 0) {
+                            scheduleBootCalibration();
+                            logPrint("[FAILOVER] USB PC %s unplugged and has no BLE! Switched control to active PC %s", oldBoundMac.c_str(), firstConnectedPcMac.c_str());
+                        } else {
+                            logPrint("[FAILOVER] USB PC %s unplugged and no active BLE PC available.", oldBoundMac.c_str());
+                        }
+                        updateKvmPowerAndRateProfiles(isCalibrated ? firstConnectedPcMac : "");
+                    } else {
+                        logPrint("[USB DEVICE] USB PC %s unplugged -> seamlessly continuing control over BLE!", oldBoundMac.c_str());
+                        updateKvmPowerAndRateProfiles(oldBoundMac, true);
+                    }
+                } else {
+                    updateKvmPowerAndRateProfiles("", true);
+                }
+            }
+        }
     }
     if (s_eventSuspended) {
         s_eventSuspended = false;
-        logPrint("[USB DEVICE] USB Bus Suspended (Cable unplugged or PC Sleep) -> KVM fallback to BLE");
-        updateKvmPowerAndRateProfiles("", true);
+        if (s_usbBoundMac.length() > 0) {
+            logPrint("[USB DEVICE] USB Bus Suspended (Cable unplugged or PC Sleep) -> KVM fallback to BLE");
+            updateKvmPowerAndRateProfiles("", true);
+        }
     }
     if (s_eventResumed) {
         s_eventResumed = false;
-        logPrint("[USB DEVICE] USB Bus Resumed -> Re-activating 1000Hz HID!");
-        if (s_usbHostOs != -1 && s_usbBoundMac.length() == 0) {
+        if (s_usbBoundMac.length() > 0) {
+            logPrint("[USB DEVICE] USB Bus Resumed -> Re-activating 1000Hz HID!");
+            updateKvmPowerAndRateProfiles("", true);
+        }
+    }
+
+    // Authoritative hardware state synchronization:
+    // If TinyUSB is ready (tud_ready()), ensure OS and layout binding are active!
+    if (s_usbDeviceStarted && tud_ready()) {
+        if (s_usbHostOs == -1) {
+            s_usbHostOs = s_seenMsftDescriptor ? OS_WINDOWS : OS_MAC;
+        }
+        if (s_usbBoundMac.length() == 0) {
+            logPrint("[USB DEVICE] Hardware link ready (1000Hz HID)! Binding layout to USB...");
             usb_device_check_detection();
         }
-        updateKvmPowerAndRateProfiles("", true);
     }
     if (s_hasPendingLeds) {
         s_hasPendingLeds = false;
@@ -347,7 +405,7 @@ void usb_device_loop() {
                     !monitors[i].mac.equalsIgnoreCase("USB") && !monitors[i].mac.equalsIgnoreCase("USB-C")) {
                     bool f = false;
                     for (int m = 0; m < matchingCount; m++) {
-                        if (matchingMacs[m].equalsIgnoreCase(monitors[i].mac)) { f = true; break; }
+                        if (matchingMacs[m].equals(monitors[i].mac)) { f = true; break; }
                     }
                     if (!f && matchingCount < MAX_SUPPORTED_KVM_CLIENTS) {
                         matchingMacs[matchingCount++] = monitors[i].mac;
@@ -360,7 +418,7 @@ void usb_device_loop() {
                 bool isConn = false;
                 for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
                     if (kvmClients[k].active && kvmClients[k].conn_id != BLE_HS_CONN_HANDLE_NONE &&
-                        kvmClients[k].mac.equalsIgnoreCase(matchingMacs[m])) {
+                        kvmClients[k].mac.equals(matchingMacs[m])) {
                         isConn = true;
                         break;
                     }

@@ -7,6 +7,36 @@
 #include "nimble/nimble/host/include/host/ble_gap.h"
 
 #define BLE_DEVICE_NAME "ESP32 KVM Combo"
+// Previous: #define FIRMWARE_VERSION 79
+#define FIRMWARE_VERSION 80
+#define KEEPALIVE_INTERVAL_SEC 60
+#define KEEPALIVE_INTERVAL_MS (KEEPALIVE_INTERVAL_SEC * 1000)
+#define KEYBOARD_LOG false
+
+// Dual-Core Input Event Queue Definitions
+enum InputEventType : uint8_t {
+    INPUT_EVENT_MOUSE_RAW = 0,
+    INPUT_EVENT_MOUSE_MOVE = 1,
+    INPUT_EVENT_KEYBOARD_RAW = 2
+};
+
+struct InputEvent {
+    InputEventType type;
+    uint16_t charHandle;
+    uint8_t length;
+    union {
+        uint8_t raw[24];
+        struct {
+            uint8_t buttons;
+            int16_t dx;
+            int16_t dy;
+            int8_t scroll;
+            int8_t hScroll;
+        } mouse;
+    };
+};
+
+extern QueueHandle_t g_inputEventQueue;
 
 // NVS Flash Storage Constants
 extern const char* NVS_NAMESPACE;
@@ -56,8 +86,10 @@ struct KVMClient {
     bool active = false;
     bool isTurbo = false;
     bool isHandshaking = false;
+    bool hidSubscribed = false;
     uint32_t handshakeStartMs = 0;
     uint8_t ledState = 0; // Saved keyboard LED state (Caps/Num/Scroll) for this PC
+    uint32_t lastParamUpdateMs = 0; // Debounce duplicate updateConnParams calls
 };
 extern KVMClient kvmClients[MAX_SUPPORTED_KVM_CLIENTS];
 
@@ -133,6 +165,7 @@ void syncPhysicalKeyboardLedsForPc(const String& targetMac);
 void startHostReconnectTask();
 bool connectToMouse();
 bool connectToKeyboard();
+bool isHostConnectingPeripheral();
 void disconnectMouse();
 void disconnectKeyboard();
 void triggerDeviceDiscoveryScan();

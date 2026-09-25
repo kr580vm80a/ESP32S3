@@ -205,8 +205,8 @@ void loadConfiguration() {
             if (clientCount >= MAX_SUPPORTED_KVM_CLIENTS) break;
             String mac = client["mac"] | "";
             if (mac.length() == 0) continue;
-            if (targetMouseMac.length() > 0 && mac.equalsIgnoreCase(targetMouseMac)) continue;
-            if (targetKeyboardMac.length() > 0 && mac.equalsIgnoreCase(targetKeyboardMac)) continue;
+            if (targetMouseMac.length() > 0 && mac.equals(targetMouseMac)) continue;
+            if (targetKeyboardMac.length() > 0 && mac.equals(targetKeyboardMac)) continue;
             uint16_t conn_id = BLE_HS_CONN_HANDLE_NONE;
             bool active = false;
             bool isTurbo = false;
@@ -244,7 +244,7 @@ void loadConfiguration() {
                  monitors[m].name.length() > 0 ? monitors[m].name.c_str() : "Display",
                  monitors[m].mac.c_str(),
                  monitors[m].os == OS_WINDOWS ? "Win" : (monitors[m].os == OS_MAC ? "Mac" : "Android"),
-                 monitors[m].keepAlive ? "ON (30s)" : "OFF",
+                 monitors[m].keepAlive ? "ON" : "OFF",
                  monitors[m].isPrimary ? " [Primary]" : "");
     }
     usb_device_check_detection();

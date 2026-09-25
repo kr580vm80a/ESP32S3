@@ -564,9 +564,107 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
     syncPhysicalKeyboardLedsForPc(mon.mac);
 }
 
+void onBleClientHidSubscribed(const String &mac, NimBLECharacteristic *pChar) {
+    int clientOs = OS_WINDOWS;
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.equals(mac)) {
+            clientOs = monitors[i].os;
+            break;
+        }
+    }
+
+    bool isReadyForAbs = false;
+    if (clientOs == OS_MAC) {
+        if (pChar == macAbsInputChar) isReadyForAbs = true;
+    } else {
+        if (pChar == absInputChar || pChar == inputChar) isReadyForAbs = true;
+    }
+
+    if (isReadyForAbs) {
+        for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+            if (kvmClients[i].active && kvmClients[i].mac.equals(mac)) {
+                kvmClients[i].hidSubscribed = true;
+                break;
+            }
+        }
+    }
+
+    if (!isReadyForAbs) return;
+
+    // Rule: The first connected PC gets calibrated
+    if (!isCalibrated) {
+        if (firstConnectedPcMac.length() == 0 && isMacInActiveLayout(mac)) {
+            firstConnectedPcMac = mac;
+        }
+
+        if (firstConnectedPcMac.equals(mac)) {
+            bool isMouseActive = mouseConnected || logi_bolt_is_mouse_connected();
+            if (isMouseActive && monitorCount > 0) {
+                logPrint("[BLE HID] First PC %s subscribed to %s! Waiting 1200ms for link & OS driver to settle...",
+                         mac.c_str(), (clientOs == OS_MAC ? "Digitizer (Mac)" : "Abs Pointer (Win)"));
+                isCalibrated = true;
+                if (bootCalibTaskHandle != NULL) {
+                    vTaskDelete(bootCalibTaskHandle);
+                    bootCalibTaskHandle = NULL;
+                }
+                xTaskCreate([](void* param) {
+                    String* pMac = (String*)param;
+                    vTaskDelay(pdMS_TO_TICKS(1200));
+                    calibrateFirstConnectedPcToCenter(*pMac);
+                    delete pMac;
+                    bootCalibTaskHandle = NULL;
+                    vTaskDelete(NULL);
+                }, "bootCalibTask", 4096, new String(mac), 1, &bootCalibTaskHandle);
+            } else {
+                logPrint("[BLE HID] First PC %s subscribed to HID, waiting for mouse before calibration.", mac.c_str());
+            }
+        }
+    }
+}
+
 void scheduleBootCalibration() {
     bool isMouseActive = mouseConnected || logi_bolt_is_mouse_connected();
-    if (monitorCount == 0 || !isMouseActive || isCalibrated || firstConnectedPcMac.length() == 0) return;
+    if (monitorCount == 0 || !isMouseActive || isCalibrated) return;
+
+    if (firstConnectedPcMac.length() == 0) {
+        if (usb_manager_is_pc_connected() && usb_device_get_bound_mac().length() > 0 &&
+            isMacInActiveLayout(usb_device_get_bound_mac())) {
+            firstConnectedPcMac = usb_device_get_bound_mac();
+        } else {
+            for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                if (kvmClients[i].active && isMacInActiveLayout(kvmClients[i].mac)) {
+                    firstConnectedPcMac = kvmClients[i].mac;
+                    break;
+                }
+            }
+        }
+    }
+    if (firstConnectedPcMac.length() == 0) return;
+
+    // 1. Wired USB-C PC is ready immediately without BLE subscriptions
+    if (usb_manager_is_pc_connected() && usb_device_get_bound_mac().equals(firstConnectedPcMac)) {
+        isCalibrated = true;
+        calibrateFirstConnectedPcToCenter(firstConnectedPcMac);
+        return;
+    }
+
+    // 2. BLE PC: verify client is subscribed to HID before attempting calibration
+    bool isSubscribed = false;
+    for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active && kvmClients[i].mac.equals(firstConnectedPcMac)) {
+            if (kvmClients[i].hidSubscribed) {
+                isSubscribed = true;
+            }
+            break;
+        }
+    }
+
+    if (!isSubscribed) {
+        logPrint("[KVM ENGINE] PC %s not yet subscribed to HID. Calibration deferred until onSubscribe.", firstConnectedPcMac.c_str());
+        return;
+    }
+
+    logPrint("[KVM ENGINE] PC %s is subscribed and mouse is ready. Calibrating center immediately!", firstConnectedPcMac.c_str());
     isCalibrated = true;
     if (bootCalibTaskHandle != NULL) {
         vTaskDelete(bootCalibTaskHandle);
@@ -574,12 +672,11 @@ void scheduleBootCalibration() {
     }
     xTaskCreate([](void* param) {
         String* pMac = (String*)param;
-        vTaskDelay(pdMS_TO_TICKS(600));
         calibrateFirstConnectedPcToCenter(*pMac);
         delete pMac;
         bootCalibTaskHandle = NULL;
         vTaskDelete(NULL);
-    }, "bootCalibTask", 3072, new String(firstConnectedPcMac), 1, &bootCalibTaskHandle);
+    }, "bootCalibTask", 4096, new String(firstConnectedPcMac), 1, &bootCalibTaskHandle);
 }
 
 /**
@@ -732,7 +829,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
                     currentMonitorIndex = newMonitorIndex;
                     logPrint("[PC SWITCH] Cursor saved at (%ld, %ld) -> Target: %s",
                              virtualX, virtualY, targetConn == CONN_HANDLE_USB_DEVICE ? "USB-C (1000Hz HID)" : String(targetConn).c_str());
-                    updateKvmPowerAndRateProfiles(monitors[newMonitorIndex].mac, true);
+                    // updateKvmPowerAndRateProfiles(monitors[newMonitorIndex].mac, true);
                     syncPhysicalKeyboardLedsForPc(monitors[newMonitorIndex].mac);
                     sendAbsoluteCoordinates(targetConn, newMonitorIndex, virtualX, virtualY, "PC SWITCH");
                 }
@@ -748,8 +845,8 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
     sendRelative12Bit(connHandle, sendDx, sendDy, sendButtons, scroll, hScroll);
 }
 
-// Callback when HID data is received from the mouse
-void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+// Process raw mouse HID report on Core 1 (called by kvm_engine_task)
+void processMouseRawEvent(const uint8_t* pData, size_t length) {
     if (!pData || length < 6) return;
     // Logitech MX Master 3S standard HID mouse buttons (Bits 0..4: Left, Right, Middle, Back, Forward)
     uint8_t buttons = pData[0] & 0x1F;
@@ -766,4 +863,17 @@ void notifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_
     //             buttons, x, y, scroll, hScroll, virtualX, virtualY,
     //             monitors[currentMonitorIndex].id, monitors[currentMonitorIndex].name.c_str());
     updateVirtualCursorAndSend(buttons, x, y, scroll, hScroll);
+}
+
+// Callback when HID data is received from the mouse (runs on Core 0 in nimble_host)
+// Fast non-blocking handoff to Core 1 FreeRTOS queue (< 1 microsecond)
+void MouseNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+    if (!pData || length < 6 || !isCalibrated || !g_inputEventQueue) return;
+
+    InputEvent ev;
+    ev.type = INPUT_EVENT_MOUSE_RAW;
+    ev.charHandle = 0;
+    ev.length = (uint8_t)min((size_t)sizeof(ev.raw), length);
+    memcpy(ev.raw, pData, ev.length);
+    xQueueSend(g_inputEventQueue, &ev, 0);
 }

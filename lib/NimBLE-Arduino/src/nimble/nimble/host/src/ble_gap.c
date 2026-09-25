@@ -20,6 +20,7 @@
 #include <assert.h>
 #include <string.h>
 #include <errno.h>
+#include <stdio.h>
 #include "nimble/nimble/include/nimble/nimble_opt.h"
 #include "nimble/nimble/host/include/host/ble_hs_adv.h"
 #include "nimble/nimble/host/include/host/ble_hs_hci.h"
@@ -5828,21 +5829,54 @@ ble_gap_update_tx(uint16_t conn_handle,
     struct ble_hci_le_conn_update_cp cmd;
 
     cmd.conn_handle = htole16(conn_handle);
-    uint16_t min_itvl = params->itvl_min;
-    uint16_t max_itvl = params->itvl_max;
-    if (min_itvl < 12) min_itvl = 12;
-    if (max_itvl < 12) max_itvl = 12;
-    cmd.conn_itvl_min = htole16(min_itvl);
-    cmd.conn_itvl_max = htole16(max_itvl);
+    cmd.conn_itvl_min = htole16(params->itvl_min);
+    // Target fastest requested interval (itvl_min) directly
+    cmd.conn_itvl_max = htole16(params->itvl_min);
     cmd.conn_latency = htole16(params->latency);
     cmd.supervision_timeout = htole16(params->supervision_timeout);
-    cmd.min_ce_len = 0;
-    cmd.max_ce_len = 0;
+    cmd.min_ce_len = htole16(params->min_ce_len);
+    cmd.max_ce_len = htole16(params->max_ce_len);
 
     int rc = ble_hs_hci_cmd_tx(BLE_HCI_OP(BLE_HCI_OGF_LE,
                                         BLE_HCI_OCF_LE_CONN_UPDATE),
                                         &cmd, sizeof(cmd), NULL, 0);
-    return rc;
+    if (rc == 0) {
+        printf("[BLE GAP] -> Accepted fastest requested interval itvl %d..%d (%.2f ms)!\n",
+               params->itvl_min, params->itvl_min, params->itvl_min * 1.25f);
+        ((struct ble_gap_upd_params *)params)->itvl_max = params->itvl_min;
+        return 0;
+    }
+
+    printf("[BLE GAP] update_tx conn=%d itvl %d..%d initial rc=%d -> probing fallback ladder...\n",
+           conn_handle, params->itvl_min, params->itvl_min, rc);
+    static const struct {
+        uint16_t itvl;
+        const char *label;
+    } probes[] = {
+        { 8,  "itvl 8..8 (10.00 ms / 100 Hz)"  },
+        { 10, "itvl 10..10 (12.50 ms / 80 Hz)" },
+        { 12, "itvl 12..12 (15.00 ms / 66.7 Hz)" },
+        { 16, "itvl 16..16 (20.00 ms / 50 Hz)" },
+        { 18, "itvl 18..18 (22.50 ms / 44.4 Hz)" },
+    };
+
+    for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); i++) {
+        if (probes[i].itvl < params->itvl_min) continue;
+        cmd.conn_itvl_min = htole16(probes[i].itvl);
+        cmd.conn_itvl_max = htole16(probes[i].itvl);
+        int probe_rc = ble_hs_hci_cmd_tx(BLE_HCI_OP(BLE_HCI_OGF_LE, BLE_HCI_OCF_LE_CONN_UPDATE), &cmd, sizeof(cmd), NULL, 0);
+        printf("[BLE GAP] -> probe %s: rc=%d\n", probes[i].label, probe_rc);
+        if (probe_rc == 0) {
+            ((struct ble_gap_upd_params *)params)->itvl_min = probes[i].itvl;
+            ((struct ble_gap_upd_params *)params)->itvl_max = probes[i].itvl;
+            return 0;
+        }
+    }
+
+    // Ultimate fallback: try original requested range
+    cmd.conn_itvl_min = htole16(params->itvl_min);
+    cmd.conn_itvl_max = htole16(params->itvl_max);
+    return ble_hs_hci_cmd_tx(BLE_HCI_OP(BLE_HCI_OGF_LE, BLE_HCI_OCF_LE_CONN_UPDATE), &cmd, sizeof(cmd), NULL, 0);
 }
 
 static bool
@@ -5935,11 +5969,7 @@ ble_gap_update_params(uint16_t conn_handle,
     BLE_HS_LOG(INFO, "\n");
 
     /*
-     * If LL update procedure is not supported on this connection and we are
-     * the slave, fail over to the L2CAP update procedure.
-     * NOTE: ESP32-S3 controller advertises BLE_HS_HCI_LE_FEAT_CONN_PARAM_REQUEST
-     * but returns rc=530 (0x12) when HCI_LE_Connection_Update is called from
-     * Slave role. Force L2CAP path for any Slave connection to avoid this.
+     * If we are the slave, use the L2CAP update procedure.
      */
     if (!(conn->bhc_flags & BLE_HS_CONN_F_MASTER)) {
         l2cap_update = 1;

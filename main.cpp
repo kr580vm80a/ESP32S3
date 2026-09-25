@@ -1,4 +1,4 @@
-#include <Arduino.h>
+﻿#include <Arduino.h>
 #include <Preferences.h>
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
@@ -74,6 +74,130 @@ bool doConnectKeyboard = false;
 
 uint32_t lastConfigActivityTime = 0;
 
+// Dual-Core FreeRTOS Input Queue Handle
+QueueHandle_t g_inputEventQueue = nullptr;
+
+// Fast decoding helper for Logitech standard 12-bit HID mouse reports
+static inline bool decodeMouseRaw(const uint8_t* pData, size_t length, uint8_t& buttons, int16_t& dx, int16_t& dy, int8_t& scroll, int8_t& hScroll) {
+    if (!pData || length < 6) return false;
+    buttons = pData[0] & 0x1F;
+    dx = pData[2] | ((pData[3] & 0x0F) << 8);
+    if (dx & 0x800) dx |= 0xF000;
+    dy = (pData[3] >> 4) | (pData[4] << 4);
+    if (dy & 0x800) dy |= 0xF000;
+    scroll = (int8_t)pData[5];
+    hScroll = (length > 6) ? (int8_t)pData[6] : 0;
+    return true;
+}
+
+// Dedicated KVM processing task pinned to Core 1 (APP CPU) with Event Coalescing
+static void kvmEngineTask(void* pvParameters) {
+    InputEvent ev;
+    while (true) {
+        if (xQueueReceive(g_inputEventQueue, &ev, portMAX_DELAY) == pdTRUE) {
+            switch (ev.type) {
+                case INPUT_EVENT_MOUSE_RAW:
+                case INPUT_EVENT_MOUSE_MOVE: {
+                    uint8_t buttons = 0;
+                    int32_t totalDx = 0;
+                    int32_t totalDy = 0;
+                    int32_t totalScroll = 0;
+                    int32_t totalHScroll = 0;
+
+                    if (ev.type == INPUT_EVENT_MOUSE_RAW) {
+                        int16_t dx = 0, dy = 0;
+                        int8_t scroll = 0, hScroll = 0;
+                        if (!decodeMouseRaw(ev.raw, ev.length, buttons, dx, dy, scroll, hScroll)) break;
+                        totalDx = dx;
+                        totalDy = dy;
+                        totalScroll = scroll;
+                        totalHScroll = hScroll;
+                    } else { // INPUT_EVENT_MOUSE_MOVE
+                        buttons = ev.mouse.buttons;
+                        totalDx = ev.mouse.dx;
+                        totalDy = ev.mouse.dy;
+                        totalScroll = ev.mouse.scroll;
+                        totalHScroll = ev.mouse.hScroll;
+                    }
+
+                    // Event Coalescing: Drain & sum all contiguous pending mouse events with identical button state
+                    InputEvent nextEv;
+                    while (xQueuePeek(g_inputEventQueue, &nextEv, 0) == pdTRUE) {
+                        if (nextEv.type == INPUT_EVENT_MOUSE_RAW) {
+                            uint8_t nextButtons = 0;
+                            int16_t nextDx = 0, nextDy = 0;
+                            int8_t nextScroll = 0, nextHScroll = 0;
+                            if (decodeMouseRaw(nextEv.raw, nextEv.length, nextButtons, nextDx, nextDy, nextScroll, nextHScroll)) {
+                                if (nextButtons == buttons) {
+                                    xQueueReceive(g_inputEventQueue, &nextEv, 0); // Pop consumed event
+                                    totalDx += nextDx;
+                                    totalDy += nextDy;
+                                    totalScroll += nextScroll;
+                                    totalHScroll += nextHScroll;
+                                    continue;
+                                }
+                            }
+                        } else if (nextEv.type == INPUT_EVENT_MOUSE_MOVE) {
+                            if (nextEv.mouse.buttons == buttons) {
+                                xQueueReceive(g_inputEventQueue, &nextEv, 0); // Pop consumed event
+                                totalDx += nextEv.mouse.dx;
+                                totalDy += nextEv.mouse.dy;
+                                totalScroll += nextEv.mouse.scroll;
+                                totalHScroll += nextEv.mouse.hScroll;
+                                continue;
+                            }
+                        }
+                        // Stop coalescing if next event is keyboard or mouse with different button state
+                        break;
+                    }
+
+                    int16_t clampedDx = (int16_t)constrain(totalDx, -32767, 32767);
+                    int16_t clampedDy = (int16_t)constrain(totalDy, -32767, 32767);
+                    int8_t clampedScroll = (int8_t)constrain(totalScroll, -127, 127);
+                    int8_t clampedHScroll = (int8_t)constrain(totalHScroll, -127, 127);
+
+                    // Mac BLE 14-15ms rate-matching
+                    static int32_t s_macAccumDx = 0;
+                    static int32_t s_macAccumDy = 0;
+                    static uint32_t s_macLastSendMs = 0;
+                    static uint8_t s_macLastButtons = 0;
+
+                    bool isMacBle = false;
+                    if (monitorCount > 0 && currentMonitorIndex < monitorCount) {
+                        MonitorConfig& curMon = monitors[currentMonitorIndex];
+                        isMacBle = (curMon.os == OS_MAC && getTargetConnHandle(curMon.mac) != CONN_HANDLE_USB_DEVICE);
+                    }
+
+                    if (isMacBle) {
+                        uint32_t now = millis();
+                        bool shouldSend = (buttons != s_macLastButtons) ||
+                                        (clampedScroll != 0 || clampedHScroll != 0) ||
+                                        (now - s_macLastSendMs >= 14);
+
+                        s_macAccumDx += clampedDx;
+                        s_macAccumDy += clampedDy;
+                        s_macLastButtons = buttons;
+
+                        if (!shouldSend) break; // Skip sending until 14ms or click/scroll
+
+                        clampedDx = (int16_t)constrain(s_macAccumDx, -32767, 32767);
+                        clampedDy = (int16_t)constrain(s_macAccumDy, -32767, 32767);
+                        s_macLastSendMs = now;
+                    }
+                    s_macAccumDx = 0;
+                    s_macAccumDy = 0;
+                    
+                    updateVirtualCursorAndSend(buttons, clampedDx, clampedDy, clampedScroll, clampedHScroll);
+                    break;
+                }
+                case INPUT_EVENT_KEYBOARD_RAW:
+                    processKeyboardEvent(ev.charHandle, ev.raw, ev.length);
+                    break;
+            }
+        }
+    }
+}
+
 void logPrint(const char* format, ...) {
     unsigned long ms = millis();
     char buffer[408];
@@ -91,7 +215,13 @@ void setup() {
     Serial.begin(115200);
     delay(2000);
     
-    logPrint("--- ESP32 KVM Switcher Started ---");
+    logPrint("--- ESP32 KVM Switcher Started (Firmware v%d) ---", FIRMWARE_VERSION);
+
+    // Initialize FreeRTOS event queue and start dedicated KVM engine on Core 1 (Priority 10)
+    g_inputEventQueue = xQueueCreate(64, sizeof(InputEvent));
+    xTaskCreatePinnedToCore(kvmEngineTask, "kvm_engine", 4096, NULL, 10, NULL, 1);
+    logPrint("[CORE CONFIG] Core 0: NimBLE Radio Stack | Core 1: KVM Engine Task (Pri 10)");
+
     usb_manager_init();
     loadConfiguration();
     

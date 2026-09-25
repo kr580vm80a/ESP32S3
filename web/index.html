@@ -3446,10 +3446,10 @@
       if (activeConnectionType === 'bluetooth') {
         setTimeout(async () => {
           if (!configReceivedSuccessfully && activeConnectionType === 'bluetooth') {
-            console.warn('[LOAD CONFIG TIMEOUT] No response received within 2.5s over BLE. Auto-retrying GET_CONFIG...');
+            console.warn('[LOAD CONFIG TIMEOUT] No response received within 5.0s over BLE. Auto-retrying GET_CONFIG...');
             await sendESP32Command('GET_CONFIG\n');
           }
-        }, 2500);
+        }, 5000);
       }
     });
 

@@ -600,8 +600,8 @@ static uint16_t translateConsumerUsage(uint16_t rawUsage) {
     }
 }
 
-// Callback when HID data is received from the keyboard (Follow-the-Mouse)
-void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+// Process incoming keyboard report on Core 1 (called by kvm_engine_task)
+void processKeyboardEvent(uint16_t charHandle, const uint8_t* pData, size_t length) {
     if (!pData || length == 0) return;
     g_lastUserActivityMs = millis();
 
@@ -610,15 +610,16 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         s_isAnyKeyboardKeyPressed = checkReportHasActiveKeys(pData, length);
     }
 
-    // Log the raw incoming keyboard packet
-    String hexDump = "";
-    for (size_t i = 0; i < length; i++) {
-        char buf[4];
-        snprintf(buf, sizeof(buf), "%02X ", pData[i]);
-        hexDump += buf;
+    if (KEYBOARD_LOG) {
+        // Log the raw incoming keyboard packet
+        String hexDump = "";
+        for (size_t i = 0; i < length; i++) {
+            char buf[4];
+            snprintf(buf, sizeof(buf), "%02X ", pData[i]);
+            hexDump += buf;
+        }
+        logPrint("[KEYBOARD RX RAW] %s (len: %d, hdl: 0x%04X)", hexDump.c_str(), length, charHandle);
     }
-    uint16_t charHandle = pBLERemoteCharacteristic ? pBLERemoteCharacteristic->getHandle() : 0;
-    logPrint("[KEYBOARD RX RAW] %s (len: %d, hdl: 0x%04X)", hexDump.c_str(), length, charHandle);
 
     uint16_t targetConn = BLE_HS_CONN_HANDLE_NONE;
     if (monitorCount > 0 && currentMonitorIndex < monitorCount) {
@@ -662,8 +663,10 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         sendHidReport(keyboardInputChar, targetConn, rep8, 8);
         checkAndSyncCapsLock(rep8);
         checkCtrlShiftGlobeTrigger(pData[0], rep8, targetOs, targetConn);
-        logPrint("[KEYBOARD FWD] 7B->8B [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
-                 rep8[0], rep8[2], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
+        if (KEYBOARD_LOG) {
+            logPrint("[KEYBOARD FWD] 7B->8B [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
+                     rep8[0], rep8[2], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
+        }
     } else if (length == 8) {
         // Standard 8-byte keyboard report: [mods, res, k1, k2, k3, k4, k5, k6]
         uint8_t rep8[8];
@@ -675,8 +678,10 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         sendHidReport(keyboardInputChar, targetConn, rep8, length);
         checkAndSyncCapsLock(rep8);
         checkCtrlShiftGlobeTrigger(pData[0], rep8, targetOs, targetConn);
-        logPrint("[KEYBOARD FWD] 8B [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
-                 rep8[0], rep8[2], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
+        if (KEYBOARD_LOG) {
+            logPrint("[KEYBOARD FWD] 8B [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
+                     rep8[0], rep8[2], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
+        }
     } else if (length == 9) {
         // 9-byte report with Report ID prepended: forward payload without Report ID
         uint8_t rep8[8];
@@ -688,8 +693,10 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         sendHidReport(keyboardInputChar, targetConn, rep8, 8);
         checkAndSyncCapsLock(rep8);
         checkCtrlShiftGlobeTrigger(pData[1], rep8, targetOs, targetConn);
-        logPrint("[KEYBOARD FWD] 9B (ID 0x%02X) [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
-                 pData[0], rep8[0], rep8[2], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
+        if (KEYBOARD_LOG) {
+            logPrint("[KEYBOARD FWD] 9B (ID 0x%02X) [Mods: 0x%02X, Key1: 0x%02X] -> Conn %d (Mon #%d, OS: %s)",
+                     pData[0], rep8[0], rep8[2], targetConn, currentMonitorIndex + 1, targetOs == OS_MAC ? "Mac" : "Win");
+        }
     } else if (length >= 15 && length <= 17) {
         // 16-byte Bitmap / NKRO Keyboard report from Logitech Bolt Receiver:
         // Byte 0: Modifiers (Ctrl, Shift, Alt, GUI)
@@ -714,9 +721,10 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
         if (handleWindowsCtrlShiftDwell(pData[0], rep8, targetOs, targetConn)) return;
         sendHidReport(keyboardInputChar, targetConn, rep8, 8);
         checkAndSyncCapsLock(rep8);
-        checkCtrlShiftGlobeTrigger(pData[0], rep8, targetOs, targetConn);
-        logPrint("[KEYBOARD FWD] Bolt Bitmap %dB->8B [Mods: 0x%02X, Keys: %02X %02X %02X] -> Conn %d (OS: %s)",
-                 (int)length, rep8[0], rep8[2], rep8[3], rep8[4], targetConn, targetOs == OS_MAC ? "Mac" : "Win");
+        if (KEYBOARD_LOG) {
+            logPrint("[KEYBOARD FWD] Bolt Bitmap %dB->8B [Mods: 0x%02X, Keys: %02X %02X %02X] -> Conn %d (OS: %s)",
+                     (int)length, rep8[0], rep8[2], rep8[3], rep8[4], targetConn, targetOs == OS_MAC ? "Mac" : "Win");
+        }
     } else if (length == 2) {
         // Dedicated Telephony / Mic Mute characteristic (F7 on Logitech MX Keys)
         if (charHandle == LOGI_MX_KEYS_TELEPHONY_HDL) {
@@ -770,6 +778,23 @@ void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic
             checkCtrlShiftGlobeTrigger(pData[0], repBuf, targetOs, targetConn);
         }
         sendHidReport(keyboardInputChar, targetConn, repBuf, copyLen);
-        logPrint("[KEYBOARD FWD] %dB -> Conn %d (OS: %s)", (int)length, targetConn, targetOs == OS_MAC ? "Mac" : "Win");
+        if (KEYBOARD_LOG) {
+            logPrint("[KEYBOARD FWD] %dB -> Conn %d (OS: %s)", (int)length, targetConn, targetOs == OS_MAC ? "Mac" : "Win");
+        }
     }
+}
+
+// Callback when HID data is received from the keyboard (runs on Core 0 in nimble_host)
+// Fast non-blocking handoff to Core 1 FreeRTOS queue (< 1 microsecond)
+void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify) {
+    if (!pData || length == 0 || !g_inputEventQueue) return;
+    // Fast filter: Logitech HID++ keep-alives (19 bytes or starts with 0xFF)
+    if (length == 19 || pData[0] == 0xFF) return;
+
+    InputEvent ev;
+    ev.type = INPUT_EVENT_KEYBOARD_RAW;
+    ev.charHandle = pBLERemoteCharacteristic ? pBLERemoteCharacteristic->getHandle() : 0;
+    ev.length = (uint8_t)min((size_t)sizeof(ev.raw), length);
+    memcpy(ev.raw, pData, ev.length);
+    xQueueSend(g_inputEventQueue, &ev, 0);
 }

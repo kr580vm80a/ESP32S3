@@ -1,6 +1,6 @@
 #include "logi_bolt.h"
+#include "kvm_types.h"
 
-#if CONFIG_IDF_TARGET_ESP32S3
 #include "usb/usb_host.h"
 #include "usb/usb_helpers.h"
 #include <NimBLEDevice.h>
@@ -8,12 +8,8 @@
 #include "driver/periph_ctrl.h"
 #include "soc/periph_defs.h"
 
-// Forward declarations of existing KVM functions in main.cpp
-void logPrint(const char* format, ...);
-void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t scroll, int8_t hScroll);
-void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify);
-void updateKvmPowerAndRateProfiles(String activeMac = "", bool force = false);
-int getActiveClientOs();
+#include "cursor_engine.h"
+#include "keyboard_engine.h"
 
 static usb_host_client_handle_t s_usb_client_hdl = NULL;
 static usb_device_handle_t s_usb_dev_hdl = NULL;
@@ -54,6 +50,20 @@ bool logi_bolt_is_mouse_connected() {
 
 bool logi_bolt_is_keyboard_connected() {
     return s_is_kb_connected;
+}
+
+bool logi_bolt_is_device_attached() {
+    return (s_usb_dev_hdl != NULL);
+}
+
+void logi_bolt_pause_host_tasks(bool pause) {
+    if (pause) {
+        if (s_usb_client_task_hdl) vTaskSuspend(s_usb_client_task_hdl);
+        if (s_usb_lib_task_hdl) vTaskSuspend(s_usb_lib_task_hdl);
+    } else {
+        if (s_usb_lib_task_hdl) vTaskResume(s_usb_lib_task_hdl);
+        if (s_usb_client_task_hdl) vTaskResume(s_usb_client_task_hdl);
+    }
 }
 
 static void processUnifyingMouseReport(uint8_t *pData, size_t length) {
@@ -431,7 +441,7 @@ void logi_bolt_loop() {
     // Dynamic rate-matched flush strictly synchronized with active OS connection interval:
     // macOS:   15ms (exactly 1 packet per 15.00ms Apple connection event, ZERO queue backlog!)
     // Windows: 8ms (exactly 1 packet per 7.50ms Windows connection event, ZERO queue backlog!)
-    uint32_t flushInterval = (getActiveClientOs() == 1 /* OS_MAC */) ? 15 : 8;
+    uint32_t flushInterval = (getActiveClientOs() == OS_MAC) ? 15 : 8;
 
     if (s_has_pending_data && (buttonChanged || (nowMs - s_lastFlush >= flushInterval))) {
         int16_t dx = 0;
@@ -451,7 +461,20 @@ void logi_bolt_loop() {
 
         s_lastFlush = nowMs;
         s_lastSentButtons = btn;
-        updateVirtualCursorAndSend(btn, dx, dy, scroll, hScroll);
+        if (g_inputEventQueue) {
+            InputEvent ev;
+            ev.type = INPUT_EVENT_MOUSE_MOVE;
+            ev.charHandle = 0;
+            ev.length = 0;
+            ev.mouse.buttons = btn;
+            ev.mouse.dx = dx;
+            ev.mouse.dy = dy;
+            ev.mouse.scroll = scroll;
+            ev.mouse.hScroll = hScroll;
+            xQueueSend(g_inputEventQueue, &ev, 0);
+        } else {
+            updateVirtualCursorAndSend(btn, dx, dy, scroll, hScroll);
+        }
     }
 }
 
@@ -488,5 +511,3 @@ void logi_bolt_set_keyboard_leds(uint8_t leds) {
         logPrint("[USB HOST LED] SET_REPORT submitted: 0x%02X (Caps: %d)", leds, (leds & 0x02) ? 1 : 0);
     }
 }
-
-#endif

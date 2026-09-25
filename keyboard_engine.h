@@ -11,6 +11,7 @@ void sendMacCalculatorShortcut(uint16_t connHandle);
 void sendMacScreenshotShortcut(uint16_t connHandle);
 void sendMacLockShortcut(uint16_t connHandle);
 void checkCtrlShiftGlobeTrigger(uint8_t rawMods, const uint8_t* rep8, int targetOs, uint16_t targetConn);
+void processKeyboardEvent(uint16_t charHandle, const uint8_t* pData, size_t length);
 void keyboardNotifyCallback(NimBLERemoteCharacteristic* pBLERemoteCharacteristic, uint8_t* pData, size_t length, bool isNotify);
 void checkAndSyncCapsLock(const uint8_t* rep8);
 void syncPhysicalKeyboardLedsForPc(const String& targetMac);

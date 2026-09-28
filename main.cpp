@@ -1,4 +1,4 @@
-﻿#include <Arduino.h>
+#include <Arduino.h>
 #include <Preferences.h>
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
@@ -13,6 +13,7 @@
 #include "ble_central.h"
 #include "logi_bolt.h"
 #include "usb_manager.h"
+#include "led_indicator.h"
 
 Preferences preferences;
 
@@ -222,6 +223,7 @@ void setup() {
     xTaskCreatePinnedToCore(kvmEngineTask, "kvm_engine", 4096, NULL, 10, NULL, 1);
     logPrint("[CORE CONFIG] Core 0: NimBLE Radio Stack | Core 1: KVM Engine Task (Pri 10)");
 
+    led_indicator_init();
     usb_manager_init();
     loadConfiguration();
     
@@ -232,6 +234,7 @@ void setup() {
 }
 
 void loop() {
+    led_indicator_loop();
     usb_manager_loop();
     checkWindowsCtrlShiftDwell();
 

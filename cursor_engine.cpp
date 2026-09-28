@@ -3,6 +3,7 @@
 #include "logi_bolt.h"
 #include "usb_manager.h"
 #include "usb_device_engine.h"
+#include "led_indicator.h"
 #include <cmath>
 
 static float subpixelX = 0.0f;
@@ -562,6 +563,7 @@ void calibrateFirstConnectedPcToCenter(String targetMac) {
     sendAbsoluteCoordinates(connHandle, currentMonitorIndex, virtualX, virtualY, "BOOT POSITION");
     updateKvmPowerAndRateProfiles(mon.mac, true);
     syncPhysicalKeyboardLedsForPc(mon.mac);
+    led_indicator_trigger_flash(mon.os, 300);
 }
 
 void onBleClientHidSubscribed(const String &mac, NimBLECharacteristic *pChar) {
@@ -771,6 +773,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             virtualY = currentMon.y + currentMon.height - 1 + shift;
             sendDy += 127;
         }
+        led_trigger_bright_pulse(currentMon.os);
         static uint32_t lastCalibLog = 0;
         if (millis() - lastCalibLog > 500) {
             lastCalibLog = millis();
@@ -815,6 +818,7 @@ void updateVirtualCursorAndSend(uint8_t buttons, int16_t dx, int16_t dy, int8_t 
             currentMonitorIndex = newMonitorIndex;
             logPrint("[MONITOR SWITCH] Cursor at (%ld, %ld) crossed to Monitor #%d (%s)",
                 virtualX, virtualY, monitors[newMonitorIndex].id, monitors[newMonitorIndex].name.c_str());
+            led_trigger_bright_pulse(currentMon.os);
         } else {
                 uint16_t targetConn = getTargetConnHandle(monitors[newMonitorIndex].mac);
                 if (targetConn == BLE_HS_CONN_HANDLE_NONE || !isPcSwitchAllowed(buttons)) {

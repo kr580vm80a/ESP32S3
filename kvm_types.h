@@ -7,8 +7,8 @@
 #include "nimble/nimble/host/include/host/ble_gap.h"
 
 #define BLE_DEVICE_NAME "ESP32 KVM Combo"
-// Previous: #define FIRMWARE_VERSION 79
-#define FIRMWARE_VERSION 80
+// Previous: #define FIRMWARE_VERSION 81
+#define FIRMWARE_VERSION 82
 #define KEEPALIVE_INTERVAL_SEC 60
 #define KEEPALIVE_INTERVAL_MS (KEEPALIVE_INTERVAL_SEC * 1000)
 #define KEYBOARD_LOG false

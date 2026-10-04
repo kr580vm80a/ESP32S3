@@ -6,12 +6,19 @@
 #include <NimBLEHIDDevice.h>
 #include "nimble/nimble/host/include/host/ble_gap.h"
 
-#define BLE_DEVICE_NAME "ESP32 KVM Combo"
-// Previous: #define FIRMWARE_VERSION 81
-#define FIRMWARE_VERSION 82
+#define BLE_DEVICE_NAME "esp combo"
+#define BLE_WEB_SERVICE_NAME "esp"
+#define FIRMWARE_VERSION 102
 #define KEEPALIVE_INTERVAL_SEC 60
 #define KEEPALIVE_INTERVAL_MS (KEEPALIVE_INTERVAL_SEC * 1000)
 #define KEYBOARD_LOG false
+
+// Bluetooth SIG HID Appearance Definitions (KVM Keyboard & Mouse)
+#ifndef GENERIC_HID
+#define GENERIC_HID        0x03C0
+#define HID_KEYBOARD       0x03C1
+#define HID_MOUSE          0x03C2
+#endif
 
 // Dual-Core Input Event Queue Definitions
 enum InputEventType : uint8_t {

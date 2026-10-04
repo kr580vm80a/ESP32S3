@@ -3743,6 +3743,8 @@
       } else if (line.startsWith('OK_AUTH')) {
         console.log(`[${source} AUTH LOG] ESP32 confirmed Challenge-Response authentication successful!`);
         updateConnectionUI('bluetooth');
+      } else if (line.startsWith('PONG') || line.startsWith('OK_DISCONNECTED')) {
+        // Heartbeat or disconnect acknowledgement
       } else if (line.startsWith('ERROR_UNAUTHORIZED') || line.startsWith('ERROR_AUTH')) {
         console.warn(`[${source} AUTH ERROR] Authentication failed on ESP32:`, line);
         updateConnectionUI('none');
@@ -3938,9 +3940,36 @@
     }
 
     let activeConnectionType = 'none'; // 'none', 'usb', or 'bluetooth'
+    let bleHeartbeatTimer = null;
+
+    function startBleHeartbeat() {
+      stopBleHeartbeat();
+      bleHeartbeatTimer = setInterval(async () => {
+        if (activeConnectionType === 'bluetooth' && window.esp32BleRxChar) {
+          try {
+            await sendESP32Command('PING\n');
+          } catch(e) {
+            console.warn('[BLE Heartbeat] Ping failed:', e);
+          }
+        }
+      }, 10000);
+    }
+
+    function stopBleHeartbeat() {
+      if (bleHeartbeatTimer) {
+        clearInterval(bleHeartbeatTimer);
+        bleHeartbeatTimer = null;
+      }
+    }
 
     function updateConnectionUI(type) {
       activeConnectionType = type;
+
+      if (type === 'bluetooth') {
+        startBleHeartbeat();
+      } else {
+        stopBleHeartbeat();
+      }
 
       const usbBtn = document.getElementById('btnConnectUSB');
       const btBtn = document.getElementById('btnConnectBT');
@@ -3998,6 +4027,7 @@
     }
 
     async function disconnectAllChannels() {
+      stopBleHeartbeat();
       activeConnectionType = 'none';
       pendingAuthNonce = null;
       bleNotifyBuffer = '';
@@ -4025,6 +4055,9 @@
       if (window.esp32BleTxChar) {
         try {
           window.esp32BleTxChar.removeEventListener('characteristicvaluechanged', handleBleNotification);
+        } catch(e) {}
+        try {
+          await window.esp32BleTxChar.stopNotifications();
         } catch(e) {}
       }
 
@@ -4082,12 +4115,11 @@
 
     document.getElementById('btnConnectBT').addEventListener('click', async () => {
       if (activeConnectionType === 'bluetooth') {
-        // Drop authenticated session and lock UI
-        activeConnectionType = 'none';
-        pendingAuthNonce = null;
-        bleNotifyBuffer = '';
-        updateConnectionUI('none');
-        console.log('[BLE] Session closed by user (GATT link kept warm).');
+        console.log('[BLE] Disconnecting by user request...');
+        try {
+          await sendESP32Command('CLOSE_WEB\n');
+        } catch(e) {}
+        await disconnectAllChannels();
         return;
       }
 
@@ -4103,7 +4135,7 @@
           const device = await navigator.bluetooth.requestDevice({
             filters: [
               { services: [CONFIG_SERVICE_UUID] },
-              { namePrefix: 'ESP32' }
+              { name: 'esp' }
             ],
             optionalServices: [CONFIG_SERVICE_UUID]
           });
@@ -4148,6 +4180,38 @@
         }
       } else {
         showToast('Web Bluetooth API is not supported in this browser.', 'error', 4000);
+      }
+    });
+
+    window.addEventListener('beforeunload', () => {
+      if (activeConnectionType === 'bluetooth') {
+        try {
+          if (window.esp32BleRxChar) {
+            const enc = new TextEncoder();
+            window.esp32BleRxChar.writeValueWithoutResponse(enc.encode('CLOSE_WEB\n'));
+          }
+        } catch(e) {}
+        if (window.esp32BleDevice && window.esp32BleDevice.gatt && window.esp32BleDevice.gatt.connected) {
+          try {
+            window.esp32BleDevice.gatt.disconnect();
+          } catch(e) {}
+        }
+      }
+    });
+
+    window.addEventListener('pagehide', () => {
+      if (activeConnectionType === 'bluetooth') {
+        try {
+          if (window.esp32BleRxChar) {
+            const enc = new TextEncoder();
+            window.esp32BleRxChar.writeValueWithoutResponse(enc.encode('CLOSE_WEB\n'));
+          }
+        } catch(e) {}
+        if (window.esp32BleDevice && window.esp32BleDevice.gatt && window.esp32BleDevice.gatt.connected) {
+          try {
+            window.esp32BleDevice.gatt.disconnect();
+          } catch(e) {}
+        }
       }
     });
 

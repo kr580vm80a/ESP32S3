@@ -1154,6 +1154,9 @@ int NimBLEClient::handleGapEvent(struct ble_gap_event *event, void *arg) {
             if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
                 pkey.action = event->passkey.params.action;
                 pkey.passkey = NimBLEDevice::m_passkey; // This is the passkey to be entered on peer
+                if (NimBLEDevice::m_securityCallbacks != nullptr) {
+                    NimBLEDevice::m_securityCallbacks->onPassKeyNotify(pkey.passkey);
+                }
                 rc = ble_sm_inject_io(event->passkey.conn_handle, &pkey);
                 NIMBLE_LOGD(LOG_TAG, "ble_sm_inject_io result: %d", rc);
 

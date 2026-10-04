@@ -3,6 +3,7 @@
 #include "cursor_engine.h"
 #include "keyboard_engine.h"
 #include "cmd_processor.h"
+#include "kvm_config.h"
 #include "logi_bolt.h"
 #include <ArduinoJson.h>
 
@@ -22,6 +23,16 @@ static NimBLEUUID reportCharUUID("2a4d");
 static JsonDocument scannedMiceDoc;
 static TaskHandle_t hostScanTaskHandle = NULL;
 
+static bool isSameDeviceMacPrefix(const String& mac1, const String& mac2, int maxLastByteDiff = 3) {
+    if (mac1.length() < 17 || mac2.length() < 17) return false;
+    if (!mac1.substring(0, 15).equalsIgnoreCase(mac2.substring(0, 15))) {
+        return false;
+    }
+    int b1 = (int)strtol(mac1.substring(15, 17).c_str(), NULL, 16);
+    int b2 = (int)strtol(mac2.substring(15, 17).c_str(), NULL, 16);
+    return abs(b1 - b2) <= maxLastByteDiff;
+}
+
 class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* advertisedDevice) {
         String devMac = advertisedDevice->getAddress().toString().c_str();
@@ -35,29 +46,22 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
 
             bool hasHidService = advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(NimBLEUUID((uint16_t)0x1812));
             uint16_t appearance = advertisedDevice->haveAppearance() ? advertisedDevice->getAppearance() : 0;
-            bool hasHidAppearance = (appearance == 0x03C1 || appearance == 0x03C2 || appearance == 0x03C0 || appearance == 0x03C3 || appearance == 0x03C4);
-            bool hasHidName = (nameLower.indexOf("mouse") != -1 || nameLower.indexOf("keyboard") != -1 || 
-                               nameLower.indexOf("keys") != -1 || nameLower.indexOf("master") != -1 || 
-                               nameLower.indexOf("trackpad") != -1 || nameLower.indexOf("magic") != -1 ||
-                               nameLower.indexOf("keychron") != -1 || nameLower.indexOf("naga") != -1 || 
-                               nameLower.indexOf("basilisk") != -1);
-            bool isTargetDevice = (targetMouseMac.length() > 0 && devMac == targetMouseMac) || 
-                                 (targetKeyboardMac.length() > 0 && devMac == targetKeyboardMac);
+            bool hasHidAppearance = (appearance == GENERIC_HID || appearance == HID_KEYBOARD || appearance == HID_MOUSE);
+            bool isTargetDevice = (targetMouseMac.length() > 0 && devMac.equals(targetMouseMac)) || 
+                                 (targetKeyboardMac.length() > 0 && devMac.equals(targetKeyboardMac));
 
-            // Strict Filter: Only include genuine HID input peripherals (Mice, Keyboards, Trackpads)
-            if (!hasHidService && !hasHidAppearance && !hasHidName && !isTargetDevice) {
+            // Standard Bluetooth SIG Filter: Only include genuine HID input peripherals (Mice, Keyboards)
+            if (!hasHidService && !hasHidAppearance && !isTargetDevice) {
                 return; // Ignore smartphones, TVs, smart meters, beacons, etc.
             }
 
             String devType = "unknown";
-            if (appearance == 0x03C2 || nameLower.indexOf("mouse") != -1 || nameLower.indexOf("master") != -1 || 
-                nameLower.indexOf("naga") != -1 || nameLower.indexOf("basilisk") != -1 || devMac == targetMouseMac) {
+            if (appearance == HID_MOUSE || nameLower.indexOf("mouse") != -1 || devMac.equals(targetMouseMac)) {
                 devType = "mouse";
-            } else if (appearance == 0x03C1 || nameLower.indexOf("keyboard") != -1 || nameLower.indexOf("keys") != -1 || 
-                       nameLower.indexOf("keychron") != -1 || devMac == targetKeyboardMac) {
+            } else if (appearance == HID_KEYBOARD || nameLower.indexOf("keyboard") != -1 || devMac.equals(targetKeyboardMac)) {
                 devType = "keyboard";
             } else {
-                devType = "unknown";
+                devType = "hid";
             }
 
             JsonArray arr = scannedMiceDoc.as<JsonArray>();
@@ -106,12 +110,25 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             }
         }
 
-        // 1. Mouse Check (Strict exact MAC match only)
-        bool isKbMac = (targetKeyboardMac.length() > 0 && devMac == targetKeyboardMac);
+        bool hasHidService = advertisedDevice->haveServiceUUID() && advertisedDevice->isAdvertisingService(NimBLEUUID((uint16_t)0x1812));
+        uint16_t appearance = advertisedDevice->haveAppearance() ? advertisedDevice->getAppearance() : 0;
+        bool isKeyboardAppearance = (appearance == HID_KEYBOARD);
+        bool isMouseAppearance = (appearance == HID_MOUSE);
+
+        // 1. Mouse Check (Exact match OR dynamic +/-3 MAC shift from same physical device)
+        bool isKbMac = (targetKeyboardMac.length() > 0 && devMac.equals(targetKeyboardMac));
         bool mouseMatch = false;
 
-        if (!isKbMac && targetMouseMac.length() > 0 && devMac == targetMouseMac) {
-            mouseMatch = true;
+        if (!isKbMac && targetMouseMac.length() > 0) {
+            if (devMac.equalsIgnoreCase(targetMouseMac)) {
+                mouseMatch = true;
+            } else if (isSameDeviceMacPrefix(targetMouseMac, devMac, 3) && (isMouseAppearance || hasHidService)) {
+                int diff = (int)strtol(devMac.substring(15, 17).c_str(), NULL, 16) - (int)strtol(targetMouseMac.substring(15, 17).c_str(), NULL, 16);
+                logPrint("[BLE Scan] ⚡ TARGET MOUSE MAC SHIFT DETECTED (%+d)! Old: %s -> New: %s. Auto-updating target...",
+                         diff, targetMouseMac.c_str(), devMac.c_str());
+                saveMouseToNvsLayout(devMac, targetMouseName.length() > 0 ? targetMouseName : devName);
+                mouseMatch = true;
+            }
         }
 
         if (!mouseConnected && !isConnectingToMouse && mouseMatch) {
@@ -122,10 +139,18 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             doConnectMouse = true;
         }
 
-        // 2. Keyboard Check (Strict exact MAC match only)
+        // 2. Keyboard Check (Exact match OR dynamic +/-3 MAC shift from same physical device)
         bool kbMatch = false;
-        if (!mouseMatch && targetKeyboardMac.length() > 0 && devMac == targetKeyboardMac) {
-            kbMatch = true;
+        if (!mouseMatch && targetKeyboardMac.length() > 0) {
+            if (devMac.equalsIgnoreCase(targetKeyboardMac)) {
+                kbMatch = true;
+            } else if (isSameDeviceMacPrefix(targetKeyboardMac, devMac, 3) && (isKeyboardAppearance || hasHidService)) {
+                int diff = (int)strtol(devMac.substring(15, 17).c_str(), NULL, 16) - (int)strtol(targetKeyboardMac.substring(15, 17).c_str(), NULL, 16);
+                logPrint("[BLE Scan] ⚡ TARGET KEYBOARD MAC SHIFT DETECTED (%+d)! Old: %s -> New: %s. Auto-updating target...",
+                         diff, targetKeyboardMac.c_str(), devMac.c_str());
+                saveKeyboardToNvsLayout(devMac, targetKeyboardName.length() > 0 ? targetKeyboardName : devName);
+                kbMatch = true;
+            }
         }
 
         if (!kbConnected && !isConnectingToKeyboard && kbMatch) {
@@ -134,6 +159,16 @@ class ScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             NimBLEDevice::getScan()->stop();
             advKbDevice = new NimBLEAdvertisedDevice(*advertisedDevice);
             doConnectKeyboard = true;
+        } else if (!kbConnected && !isConnectingToKeyboard) {
+            // Universal Bluetooth SIG standard detection (Appearance 0x03C1 or HID Service, zero brand dependency!)
+            if (isKeyboardAppearance || (hasHidService && !isMouseAppearance)) {
+                static uint32_t lastKbSeenTime = 0;
+                if (millis() - lastKbSeenTime > 2500) {
+                    lastKbSeenTime = millis();
+                    logPrint("[BLE Scan] 🔍 Discovered BLE Keyboard (Appearance: 0x%04X, HID: %d) MAC: %s '%s' (Target: %s)",
+                             appearance, hasHidService ? 1 : 0, devMac.c_str(), devName.c_str(), targetKeyboardMac.c_str());
+                }
+            }
         }
     }
 };
@@ -224,6 +259,11 @@ class MouseCallbacks : public NimBLEClientCallbacks {
                  params->itvl_min, params->itvl_min * 1.25f,
                  params->itvl_max, params->itvl_max * 1.25f,
                  params->latency, params->supervision_timeout * 10);
+        // Briefly pause advertising to eliminate radio airtime contention during parameter negotiation
+        if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
+            NimBLEDevice::getAdvertising()->stop();
+            logPrint("[BLE Host] Advertising STOPPED");
+        }
         return true;
     }
 };
@@ -283,9 +323,10 @@ bool connectToKeyboard() {
         pKbClient->setClientCallbacks(new KeyboardClientCallbacks());
         pKbClient->setConnectTimeout(2);
     }
-    // 50% Initiator Duty Cycle (scanInterval=32 (20ms), scanWindow=16 (10ms)) - matched with mouse
-    // Previous (v45-v48): pKbClient->setConnectionParams(6, 24, 0, 216, 32, 8);
-    pKbClient->setConnectionParams(6, 24, 0, 216, 32, 16);
+    // Harmonic grid to 7.5ms: itvl_min=12 (15.0ms), itvl_max=24 (30.0ms), scanInterval=24 (15.0ms), scanWindow=6 (3.75ms)
+    // scanWindow 3.75ms easily fits into the 7.5ms Windows connection interval gaps without rc=525 collisions
+    // Previous (v45-v101): pKbClient->setConnectionParams(6, 24, 0, 216, 32, 16);
+    pKbClient->setConnectionParams(12, 24, 0, 216, 24, 6);
 
     if (pKbClient->isConnected()) {
         kbConnected = true;
@@ -302,6 +343,7 @@ bool connectToKeyboard() {
     }
     if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
         NimBLEDevice::getAdvertising()->stop();
+        logPrint("[BLE Host] Advertising STOPPED");
     }
     if (ble_gap_adv_active()) {
         ble_gap_adv_stop();
@@ -364,14 +406,17 @@ bool connectToKeyboard() {
         return false;
     }
 
-    // Native Logitech MX Keys S PPCP profile: 20.00..25.00 ms (itvl: 16..20), Latency 20, Timeout 2100 ms (210)
-    // Previous (v46): pKbClient->updateConnParams(16, 24, 20, 500);
-    pKbClient->updateConnParams(16, 20, 20, 210);
+    vTaskDelay(pdMS_TO_TICKS(150));
+    logPrint("[BLE Host] Connected to Keyboard! Securing connection (Pairing)...");
     if (!pKbClient->secureConnection()) {
-        logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...");
-        delay(100);
+        int errCode = pKbClient->getLastError();
+        logPrint("[BLE Host] Initial secureConnection failed: rc=%d (%s). Retrying in 250ms...",
+                 errCode, NimBLEUtils::returnCodeToString(errCode));
+        vTaskDelay(pdMS_TO_TICKS(250));
         if (!pKbClient->secureConnection()) {
-            logPrint("[BLE Host] Secure connection retry failed. Proceeding with service discovery...");
+            errCode = pKbClient->getLastError();
+            logPrint("[BLE Host] Secure connection retry failed: rc=%d (%s). Proceeding with service discovery...",
+                     errCode, NimBLEUtils::returnCodeToString(errCode));
         } else {
             logPrint("[BLE Host] Keyboard connection secured on retry!");
         }
@@ -426,6 +471,7 @@ bool connectToKeyboard() {
         isConnectingToKeyboard = false;
         ble_gap_set_prefered_le_phy(pKbClient->getConnId(), BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
         checkAndLogPhyStatus(pKbClient->getConnId(), "Keyboard");
+        pKbClient->updateConnParams(16, 20, 20, 210);
         logPrint("[BLE Host] Keyboard FULLY CONNECTED & READY (%d active chars)!", subCount);
         checkAndResumeAdvertising();
         return true;
@@ -450,10 +496,10 @@ bool connectToMouse() {
         pMouseClient->setClientCallbacks(new MouseCallbacks());
         pMouseClient->setConnectTimeout(2);
     }
-    // Variant 1: 50% Initiator Duty Cycle (scanInterval=32 (20ms), scanWindow=16 (10ms))
-    // Frees 50% radio airtime for ESP32 BT controller to service active PC links (Mac/Windows)
-    // without rejecting connection initiation with HCI 0x0D (rc=525: Limited Resources)
-    pMouseClient->setConnectionParams(6, 24, 0, 216, 32, 16);
+    // Harmonic grid to 7.5ms: itvl_min=6 (7.5ms), itvl_max=24 (30.0ms), scanInterval=24 (15.0ms), scanWindow=6 (3.75ms)
+    // scanWindow 3.75ms easily fits into the 7.5ms Windows connection interval gaps without rc=525 collisions
+    // Previous (v45-v101): pMouseClient->setConnectionParams(6, 24, 0, 216, 32, 16);
+    pMouseClient->setConnectionParams(12, 24, 0, 216, 24, 6);
 
     if (pMouseClient->isConnected()) {
         mouseConnected = true;
@@ -492,6 +538,7 @@ bool connectToMouse() {
     }
     if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
         NimBLEDevice::getAdvertising()->stop();
+        logPrint("[BLE Host] Advertising STOPPED");
     }
     if (ble_gap_adv_active()) {
         ble_gap_adv_stop();
@@ -555,10 +602,14 @@ bool connectToMouse() {
 
     logPrint("[BLE Host] Connected! Securing connection (Pairing)...");
     if (!pMouseClient->secureConnection()) {
-        logPrint("[BLE Host] Initial secureConnection failed. Retrying in 100ms...");
-        delay(100);
+        int err = pMouseClient->getLastError();
+        logPrint("[BLE Host] Initial secureConnection failed: rc=%d (%s). Retrying in 150ms...",
+                 err, NimBLEUtils::returnCodeToString(err));
+        vTaskDelay(pdMS_TO_TICKS(150));
         if (!pMouseClient->secureConnection()) {
-            logPrint("[BLE Host] Secure connection retry failed. Proceeding with service discovery...");
+            err = pMouseClient->getLastError();
+            logPrint("[BLE Host] Secure connection retry failed: rc=%d (%s). Proceeding with service discovery...",
+                     err, NimBLEUtils::returnCodeToString(err));
         } else {
             logPrint("[BLE Host] Connection secured on retry!");
         }
@@ -645,3 +696,12 @@ void triggerDeviceDiscoveryScan() {
     serializeJson(scannedMiceDoc, jsonStr);
     sendConfigResponse("MICE " + jsonStr);
 }
+
+uint16_t getBleMouseConnHandle() {
+    return (mouseConnected && pMouseClient && pMouseClient->isConnected()) ? pMouseClient->getConnId() : BLE_HS_CONN_HANDLE_NONE;
+}
+
+uint16_t getBleKeyboardConnHandle() {
+    return (kbConnected && pKbClient && pKbClient->isConnected()) ? pKbClient->getConnId() : BLE_HS_CONN_HANDLE_NONE;
+}
+

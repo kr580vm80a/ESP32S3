@@ -46,7 +46,19 @@ void led_indicator_trigger_flash(int targetOs, uint32_t durationMs) {
     flashOs = (targetOs >= 0) ? targetOs : getActiveClientOs();
 }
 
+static bool isWebActive = false;
+
+void led_indicator_set_web_service_active(bool active) {
+    isWebActive = active;
+}
+
 void led_indicator_loop() {
+    if (isWebActive) {
+        // Mode: Solid PURPLE continuously while Web Service is active
+        setRgb(20, 0, 30);
+        return;
+    }
+
     bool isMouseConn = mouseConnected || logi_bolt_is_mouse_connected();
 
     if (!isMouseConn) {

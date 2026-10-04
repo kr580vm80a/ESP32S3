@@ -5,3 +5,4 @@
 .vscode/extensions.json
 .vscode/ipch
 .idea/
+*.txt

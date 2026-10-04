@@ -14,6 +14,7 @@
 #include "logi_bolt.h"
 #include "usb_manager.h"
 #include "led_indicator.h"
+#include "boot_button.h"
 
 Preferences preferences;
 
@@ -224,6 +225,7 @@ void setup() {
     logPrint("[CORE CONFIG] Core 0: NimBLE Radio Stack | Core 1: KVM Engine Task (Pri 10)");
 
     led_indicator_init();
+    boot_button_init();
     usb_manager_init();
     loadConfiguration();
     
@@ -234,16 +236,11 @@ void setup() {
 }
 
 void loop() {
+    boot_button_loop();
+    checkWebServiceTimeout();
     led_indicator_loop();
     usb_manager_loop();
     checkWindowsCtrlShiftDwell();
-
-    // Continuous Advertising Watchdog: ensures ESP32 is discoverable without log spam
-    static uint32_t lastAdvCheck = 0;
-    if (millis() - lastAdvCheck > 2000) {
-        lastAdvCheck = millis();
-        checkAndResumeAdvertising();
-    }
 
     // Smart Web Grace Period Watchdog: disconnects unconfigured PCs after 45s
     static uint32_t lastGraceCheck = 0;

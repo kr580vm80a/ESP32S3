@@ -249,7 +249,7 @@ void usb_device_on_ble_connect(const String& mac, int os) {
 void usb_device_init() {
     if (s_usbDeviceStarted) return;
     logPrint("[USB DEVICE] Initializing TinyUSB HID Mouse, Keyboard, Consumer & Absolute Pointer...");
-    USB.productName("ESP32 KVM Combo");
+    USB.productName(BLE_DEVICE_NAME);
     USB.manufacturerName("Espressif");
     USB.onEvent([](void* arg, esp_event_base_t base, int32_t id, void* data) {
         if (id == ARDUINO_USB_STARTED_EVENT) {

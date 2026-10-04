@@ -8,8 +8,10 @@
 #include "logi_bolt.h"
 #include "usb_manager.h"
 #include "usb_device_engine.h"
+#include "led_indicator.h"
 #include <esp_mac.h>
 #include "nimble/nimble/host/services/gatt/include/services/gatt/ble_svc_gatt.h"
+#include "nimble/nimble/host/services/gap/include/services/gap/ble_svc_gap.h"
 
 bool isAnyPcHandshaking() {
     uint32_t now = millis();
@@ -69,52 +71,257 @@ int getActiveLayoutPcCount() {
     return count;
 }
 
+int getConnectedLayoutPcCount() {
+    String distinctMacs[MAX_SUPPORTED_KVM_CLIENTS];
+    int count = 0;
+    for (int i = 0; i < monitorCount; i++) {
+        if (monitors[i].mac.length() == 0) continue;
+        bool found = false;
+        for (int k = 0; k < count; k++) {
+            if (distinctMacs[k].equals(monitors[i].mac)) {
+                found = true;
+                break;
+            }
+        }
+        if (!found && count < MAX_SUPPORTED_KVM_CLIENTS) {
+            distinctMacs[count++] = monitors[i].mac;
+        }
+    }
+
+    int connectedCount = 0;
+    for (int k = 0; k < count; k++) {
+        bool isConnected = false;
+        if (usb_manager_is_pc_connected() && usb_device_get_bound_mac().length() > 0 &&
+            usb_device_get_bound_mac().equals(distinctMacs[k])) {
+            isConnected = true;
+        } else {
+            for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                if (kvmClients[i].active && kvmClients[i].mac.equals(distinctMacs[k])) {
+                    isConnected = true;
+                    break;
+                }
+            }
+        }
+        if (isConnected) {
+            connectedCount++;
+        }
+    }
+    return connectedCount;
+}
+
+void disconnectNonLayoutClients();
+
 bool isConfigModeActive() {
     return isWebBleAuthenticated || (lastConfigActivityTime > 0 && (millis() - lastConfigActivityTime < 60000));
 }
 
+static bool g_webServiceActive = false;
+static uint32_t g_webServiceStartTime = 0;
+static bool g_webClientConnected = false;
+static uint16_t g_webClientConnHandle = BLE_HS_CONN_HANDLE_NONE;
+
+bool isWebServiceModeActive() {
+    return g_webServiceActive;
+}
+
+void startHidAdvertising() {
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+    if (!pAdvertising) return;
+    if (pAdvertising->isAdvertising()) {
+        pAdvertising->stop();
+        logPrint("[BLE Server] Advertising STOPPED");
+    }
+    pAdvertising->reset();
+
+    ble_svc_gap_device_name_set(BLE_DEVICE_NAME);
+
+    pAdvertising->setName(BLE_DEVICE_NAME);
+    pAdvertising->setAppearance(HID_MOUSE); // 0x03C2 Mouse Appearance to enable macOS 7.5ms low latency mode
+    pAdvertising->removeServices();
+    if (hidDevice && hidDevice->hidService()) {
+        pAdvertising->addServiceUUID(hidDevice->hidService()->getUUID());
+    }
+    pAdvertising->setScanResponse(false);
+    pAdvertising->start();
+    logPrint("[BLE Server] Advertising HID Combo");
+}
+
+void startWebAdvertising() {
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+    if (!pAdvertising) return;
+    if (pAdvertising->isAdvertising()) {
+        pAdvertising->stop();
+        logPrint("[BLE Server] Advertising STOPPED");
+    }
+    pAdvertising->reset();
+
+    ble_svc_gap_device_name_set(BLE_WEB_SERVICE_NAME);
+
+    NimBLEAdvertisementData advData;
+    advData.setFlags(BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP);
+    advData.setCompleteServices(NimBLEUUID(CONFIG_SERVICE_UUID));
+    advData.setName(BLE_WEB_SERVICE_NAME);
+    pAdvertising->setAdvertisementData(advData);
+    pAdvertising->setScanResponse(false);
+    pAdvertising->start();
+    logPrint("[BLE Server] 🟣 Web Service Mode ACTIVE!");
+}
+
+void activateWebServiceMode() {
+    if (g_webServiceActive && g_webClientConnected) {
+        logPrint("[BLE Server] 🟣 Web client already connected. Holding connection.");
+        return;
+    }
+    g_webServiceActive = true;
+    g_webServiceStartTime = millis();
+    g_webClientConnected = false;
+    g_webClientConnHandle = BLE_HS_CONN_HANDLE_NONE;
+    lastConfigActivityTime = 0;
+    led_indicator_set_web_service_active(true);
+    startWebAdvertising();
+}
+
+void deactivateWebServiceMode() {
+    if (!g_webServiceActive) return;
+    g_webServiceActive = false;
+    g_webClientConnected = false;
+    g_webClientConnHandle = BLE_HS_CONN_HANDLE_NONE;
+    g_webServiceStartTime = 0;
+    lastConfigActivityTime = 0;
+    isWebBleAuthenticated = false;
+    currentAuthNonce = "";
+    led_indicator_set_web_service_active(false);
+    logPrint("[BLE Server] ⚪ Web Service Mode DEACTIVATED. Resuming HID mode.");
+    startHidAdvertising();
+}
+
+void checkWebServiceTimeout() {
+    if (!g_webServiceActive) return;
+
+    if (!g_webClientConnected) {
+        if (millis() - g_webServiceStartTime >= 60000) {
+            logPrint("[BLE Server] ⏳ Web Service 60s timeout expired with no browser connection.");
+            deactivateWebServiceMode();
+        }
+    } else {
+        // Connected mode: hold connection indefinitely while web page is open.
+        // Inactivity watchdog: if no BLE command/ping received for 30s (e.g. browser closed/refreshed without clean disconnect), shut down.
+        if (lastConfigActivityTime > 0 && (millis() - lastConfigActivityTime >= 30000)) {
+            logPrint("[BLE Server] ⏳ Web client heartbeat lost (>30s no activity). Shutting down Web Service.");
+            deactivateWebServiceMode();
+        }
+    }
+}
+
+void disconnectNonLayoutClients() {
+    NimBLEServer* srv = NimBLEDevice::getServer();
+    if (!srv) return;
+
+    for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+        if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) {
+            if (g_webServiceActive && kvmClients[i].conn_id == g_webClientConnHandle) continue;
+            if (!isMacInActiveLayout(kvmClients[i].mac)) {
+                logPrint("[BLE Server] ✂ Ejecting non-layout PC %s (conn: %d) because all layout PCs are connected",
+                         kvmClients[i].mac.c_str(), kvmClients[i].conn_id);
+                srv->disconnect(kvmClients[i].conn_id);
+            }
+        }
+    }
+    for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
+        if (nonKvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && !nonKvmClients[i].isWebConfig) {
+            if (!isMacInActiveLayout(nonKvmClients[i].mac)) {
+                srv->disconnect(nonKvmClients[i].conn_id);
+            }
+        }
+    }
+}
+
+static SemaphoreHandle_t g_advMutex = NULL;
+
 void checkAndResumeAdvertising() {
+    if (g_advMutex == NULL) {
+        g_advMutex = xSemaphoreCreateMutex();
+    }
+    if (xSemaphoreTake(g_advMutex, pdMS_TO_TICKS(50)) != pdTRUE) {
+        return; // Another core/task is already updating advertising safely
+    }
+
     if (isHostConnectingPeripheral()) {
+        xSemaphoreGive(g_advMutex);
         return; // Do not resume advertising while a peripheral connection/handshake is in progress!
+    }
+
+    if (g_webServiceActive) {
+        if (!g_webClientConnected) {
+            NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+            if (adv && !adv->isAdvertising()) {
+                startWebAdvertising();
+            }
+        }
+        xSemaphoreGive(g_advMutex);
+        return;
     }
 
     int activeCount = 0;
     for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
         if (kvmClients[i].active) activeCount++;
     }
-    for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
-        if (nonKvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE) activeCount++;
-    }
 
-    // Hardware ACL budget: 8 max simultaneous connections in ESP32-S3 controller (10 activities).
     int maxAllowedPcConnections = max(2, 8 - (targetMouseMac.length() > 0 ? 1 : 0) - (targetKeyboardMac.length() > 0 ? 1 : 0));
-
     int layoutPcs = getActiveLayoutPcCount();
+    int connectedLayoutPcs = getConnectedLayoutPcCount();
 
-    // Keep advertising active as long as hardware handles are available (up to maxAllowedPcConnections)
-    // so Web Bluetooth browser interface can discover and connect to ESP32 at any time!
-    if (activeCount < maxAllowedPcConnections) {
-        if (NimBLEDevice::getAdvertising() && !NimBLEDevice::getAdvertising()->isAdvertising()) {
-            logPrint("[BLE Server] Advertising active (PCs: %d/%d [Layout: %d] | Mouse: %d | KB: %d)", 
-                     activeCount, maxAllowedPcConnections, layoutPcs,
-                     mouseConnected ? 1 : 0, kbConnected ? 1 : 0);
-            NimBLEDevice::getAdvertising()->start();
+    bool mouseReady = (targetMouseMac.length() == 0) || mouseConnected || logi_bolt_is_mouse_connected();
+    bool kbReady = (targetKeyboardMac.length() == 0) || kbConnected;
+    bool allLayoutConnected = (layoutPcs > 0) && (connectedLayoutPcs >= layoutPcs);
+
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+
+    // If all PCs belonging to active layout are connected:
+    // 1. Stop advertising (no more PCs needed, freeing radio for peripherals/traffic).
+    // 2. Eject any extra PCs that do not belong to the layout.
+    if (allLayoutConnected) {
+        if (adv && adv->isAdvertising()) {
+            adv->stop();
+            logPrint("[BLE Server] Advertising STOPPED. 🛑 All layout PCs (%d/%d) connected (Mouse: %d, KB: %d)",
+                     connectedLayoutPcs, layoutPcs,
+                     (mouseConnected || logi_bolt_is_mouse_connected()) ? 1 : 0,
+                     kbConnected ? 1 : 0);
+        }
+        // Eject any extra PC that is not part of active layout
+        disconnectNonLayoutClients();
+    } else if (activeCount < maxAllowedPcConnections) {
+        // Still waiting for layout PCs (even if a non-layout PC connected, advertising stays active!)
+        if (adv && !adv->isAdvertising()) {
+            logPrint("[BLE Server] Advertising active (PCs: %d/%d [Layout: %d/%d] | Mouse: %d | KB: %d)", 
+                     activeCount, maxAllowedPcConnections, connectedLayoutPcs, layoutPcs,
+                     (mouseConnected || logi_bolt_is_mouse_connected()) ? 1 : 0, 
+                     kbConnected ? 1 : 0);
+            startHidAdvertising();
         }
     } else {
-        if (NimBLEDevice::getAdvertising() && NimBLEDevice::getAdvertising()->isAdvertising()) {
-            logPrint("[BLE Server] Advertising paused (All %d connection slots full)", activeCount);
-            NimBLEDevice::getAdvertising()->stop();
+        if (adv && adv->isAdvertising()) {
+            adv->stop();
+            logPrint("[BLE Server] Advertising STOPPED. All %d connection slots full", activeCount);
         }
     }
+    xSemaphoreGive(g_advMutex);
 }
 
 void markClientAsWebConfig(uint16_t connHandle) {
+    if (g_webServiceActive) {
+        g_webClientConnected = true;
+        if (connHandle != BLE_HS_CONN_HANDLE_NONE) {
+            g_webClientConnHandle = connHandle;
+        }
+        lastConfigActivityTime = millis();
+    }
     for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
         if (nonKvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE && 
             (nonKvmClients[i].conn_id == connHandle || connHandle == BLE_HS_CONN_HANDLE_NONE)) {
             if (!nonKvmClients[i].isWebConfig) {
                 nonKvmClients[i].isWebConfig = true;
-                logPrint("[BLE Server] Client %s (conn: %d) identified as Web Configurator (Grace Period cancelled)",
+                logPrint("[BLE Server] 🟣 Client %s (conn: %d) identified as Web Configurator (Holding connection indefinitely)",
                          nonKvmClients[i].mac.c_str(), nonKvmClients[i].conn_id);
             }
         }
@@ -175,7 +382,7 @@ void checkAndLogPhyStatus(uint16_t connHandle, const char* deviceLabel) {
         }
         ble_gap_conn_desc desc;
         if (ble_gap_conn_find(p->handle, &desc) == 0) {
-            logPrint("[BLE LINK METRICS] %s (conn: %d) -> Itvl: %.2f ms (itvl: %d) | Latency: %d | Timeout: %d ms | TX: %s | RX: %s",
+            logPrint("[BLE SERVER] LINK METRICS %s (conn: %d) -> Itvl: %.2f ms (itvl: %d) | Latency: %d | Timeout: %d ms | TX: %s | RX: %s",
                      p->label, p->handle,
                      desc.conn_itvl * 1.25f, desc.conn_itvl,
                      desc.conn_latency,
@@ -217,16 +424,32 @@ void updateKvmPowerAndRateProfiles(String activeMac, bool force) {
             }
         }
 
+        bool inLayout = isMacInActiveLayout(clientMac);
         bool isUsbHost = (usb_device_is_connected() && clientMac.length() > 0 && clientMac.equals(usb_device_get_bound_mac()));
-        bool shouldBeTurbo = isMouseActive && !isUsbHost;
+        bool shouldBeTurbo = isMouseActive && !isUsbHost && inLayout;
 
-        // Rate Profiles:
-        // Mac: 15.00 ms (itvl 12). Turbo -> Latency 0 | Standby -> Latency 22
-        // Windows: 7.50..10.00 ms (itvl 6..8). Turbo -> Latency 0 | Standby -> Latency 4
-        uint16_t minItvl = (clientOs == OS_MAC) ? 12 : 6;
-        uint16_t maxItvl = (clientOs == OS_MAC) ? 12 : 8;
-        uint16_t timeout = (clientOs == OS_MAC) ? 216 : 600;
-        uint16_t targetLatency = shouldBeTurbo ? 0 : ((clientOs == OS_MAC) ? 22 : 4);
+        uint16_t minItvl;
+        uint16_t maxItvl;
+        uint16_t timeout;
+        uint16_t targetLatency;
+
+        if (!inLayout) {
+            // Deep Standby for PCs outside the active layout (100.00..125.00 ms, Latency: 10, Timeout: 6000 ms)
+            // Keeps Windows/macOS connected without spamming radio time slots (transmits ~1 packet per 1.1s)
+            minItvl = 80;
+            maxItvl = 100;
+            timeout = 600;
+            targetLatency = 10;
+        } else {
+            // Rate Profiles for Active Layout PCs:
+            // Mac: 15.00 ms (itvl 12). Turbo -> Latency 0 | Standby -> Latency 22
+            // Windows: 7.50 ms (itvl 6). Turbo -> Latency 0 | Standby -> Latency 4
+            minItvl = (clientOs == OS_MAC) ? 6 : 6;
+            // Previous: maxItvl = (clientOs == OS_MAC) ? 12 : 8;
+            maxItvl = (clientOs == OS_MAC) ? 12 : 6;
+            timeout = (clientOs == OS_MAC) ? 216 : 600;
+            targetLatency = (clientOs == OS_MAC) ? 44 : 44;
+        }
 
         // Debounce: If a param update for this exact target mode was sent recently, don't spam while waiting for host ack
         if (kvmClients[i].isTurbo == shouldBeTurbo && (millis() - kvmClients[i].lastParamUpdateMs < 1200)) {
@@ -236,27 +459,17 @@ void updateKvmPowerAndRateProfiles(String activeMac, bool force) {
         // Check real hardware link state from NimBLE connection descriptor
         ble_gap_conn_desc desc;
         bool hasDesc = (ble_gap_conn_find(kvmClients[i].conn_id, &desc) == 0);
-        bool alreadyTarget = false;
-        if (hasDesc) {
-            alreadyTarget = (desc.conn_latency == targetLatency);
-            if (clientOs == OS_MAC) {
-                alreadyTarget = alreadyTarget && (desc.conn_itvl == 12);
-            } else {
-                alreadyTarget = alreadyTarget && (desc.conn_itvl >= 6 && desc.conn_itvl <= 8);
-            }
-        }
-
+        bool alreadyTarget = hasDesc &&
+                      desc.conn_latency == targetLatency &&
+                      desc.conn_itvl >= minItvl && desc.conn_itvl <= maxItvl;
+        kvmClients[i].isTurbo = shouldBeTurbo;
         if (!alreadyTarget) {
-            kvmClients[i].isTurbo = shouldBeTurbo;
             kvmClients[i].lastParamUpdateMs = millis();
             pServer->updateConnParams(kvmClients[i].conn_id, minItvl, maxItvl, targetLatency, timeout);
-            if (shouldBeTurbo) {
-                logPrint("[BLE Server] Enforcing %s TURBO for PC: %s (Target: %.2f ms, Latency: %d, ⚡)",
-                         clientOs == OS_MAC ? "macOS" : "Windows", clientMac.c_str(), minItvl * 1.25f, targetLatency);
-            } else {
-                logPrint("[BLE Server] Idle Standby for %s PC: %s (Target: %.2f ms, Latency: %d, 💤)",
-                         clientOs == OS_MAC ? "macOS" : "Windows", clientMac.c_str(), minItvl * 1.25f, targetLatency);
-            }
+            logPrint("[BLE Server] %s for %s PC: %s (Target: %.2f ms, Latency: %d)",
+                    !inLayout ? "DEEP Standby💤" : (shouldBeTurbo ? "Enforcing TURBO⚡" : "Idle Standby💤"),
+                    clientOs == OS_MAC ? "macOS" : "Windows",
+                    clientMac.c_str(), minItvl * 1.25f, targetLatency);
             vTaskDelay(pdMS_TO_TICKS(100)); // Stagger connection updates to avoid L2CAP signaling collisions
         }
     }
@@ -271,7 +484,18 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
         }
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
-        const char* mode = (desc->conn_itvl <= 16 && desc->conn_latency == 0) ? "ACTIVE TURBO (⚡)" : "BACKGROUND STANDBY (💤)";
+        bool inLayout = isMacInActiveLayout(peerMac);
+        int pOs = OS_WINDOWS;
+        for (int m = 0; m < monitorCount; m++) {
+            if (monitors[m].mac.equals(peerMac)) {
+                pOs = monitors[m].os;
+                break;
+            }
+        }
+        bool isTurboDesc = (pOs == OS_MAC) ? (desc->conn_itvl <= 8 && desc->conn_latency <= 44)
+                                            : (desc->conn_itvl <= 8 && desc->conn_latency <= 44);
+        const char* mode = (!inLayout) ? "DEEP STANDBY (💤)" :
+                           (isTurboDesc ? "ACTIVE TURBO (⚡)" : "BACKGROUND STANDBY (💤)");
         logPrint("[BLE Server] Connection Metrics Applied -> PC: %s (conn: %d) | Itvl: %.2f ms (itvl: %d) | Latency: %d | Timeout: %d ms -> %s",
                  peerMac.c_str(), desc->conn_handle,
                  desc->conn_itvl * 1.25f, desc->conn_itvl,
@@ -287,11 +511,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         String activeMac = (monitorCount > 0 && currentMonitorIndex < monitorCount) ? monitors[currentMonitorIndex].mac : "";
         bool isUsbHost = (usb_device_is_connected() && peerMac.length() > 0 && peerMac.equals(usb_device_get_bound_mac()));
         bool isCurrentActivePc = (activeMac.length() > 0 && peerMac.equals(activeMac));
-        // [TEST: PERMANENT TURBO FOR ALL CONNECTED PCs]
-        // Keeps both Windows and Mac always in Turbo (Latency 0) to eliminate border-crossing switch lag and "skidding".
-        // To rollback to dynamic active/standby: uncomment the original line below.
-        // bool shouldBeTurbo = !isUsbHost && isMouseActive && (boltActive || isCurrentActivePc);
-        bool shouldBeTurbo = !isUsbHost && isMouseActive;
+        // Turbo only applies to PCs in the active layout
+        bool shouldBeTurbo = !isUsbHost && isMouseActive && inLayout;
 
         if (isHostConnectingPeripheral()) {
             return; // Never trigger LLCP Turbo re-assertion while a peripheral connection is in progress!
@@ -301,6 +522,27 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         uint16_t handle = desc->conn_handle;
         uint32_t now = millis();
 
+        if (!inLayout) {
+            // Non-layout PC: if connected with fast interval (e.g. Windows default itvl 6), demote back to Deep Standby
+            if (desc->conn_itvl < 80 && handle < MAX_SUPPORTED_KVM_CLIENTS && (now - lastReassertTime[handle] > 5000)) {
+                lastReassertTime[handle] = now;
+                logPrint("[BLE Server] Non-Layout PC %s is in fast mode (itvl: %d). Demoting to Deep Standby...", peerMac.c_str(), desc->conn_itvl);
+                xTaskCreate([](void* param) {
+                    uint16_t connId = (uint16_t)(uintptr_t)param;
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    NimBLEServer* srv = NimBLEDevice::getServer();
+                    if (srv) {
+                        ble_gap_conn_desc d;
+                        if (ble_gap_conn_find(connId, &d) == 0) {
+                            srv->updateConnParams(connId, 80, 100, 10, 600);
+                        }
+                    }
+                    vTaskDelete(NULL);
+                }, "deepStbyDemoteTask", 4096, (void*)(uintptr_t)handle, 1, NULL);
+            }
+            return;
+        }
+
         int pcOs = OS_WINDOWS;
         for (int m = 0; m < monitorCount; m++) {
             if (monitors[m].mac.equals(peerMac)) {
@@ -309,8 +551,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
         }
         // Previous (v43): bool isSubOptimal = (pcOs == OS_MAC) ? (desc->conn_itvl != 12 || desc->conn_latency > 0) : (desc->conn_itvl > 12 || desc->conn_latency > 0);
-        bool isSubOptimal = (pcOs == OS_MAC) ? (desc->conn_itvl != 12 || desc->conn_latency > 0)
-                                             : (desc->conn_itvl > 8 || desc->conn_latency > 0);
+        bool isSubOptimal = (pcOs == OS_MAC) ? (desc->conn_itvl > 6 || desc->conn_latency > 44)
+                                             : (desc->conn_itvl > 6 || desc->conn_latency > 44);
 
         if (shouldBeTurbo && isSubOptimal && handle < MAX_SUPPORTED_KVM_CLIENTS && (now - lastReassertTime[handle] > 10000)) {
             lastReassertTime[handle] = now;
@@ -332,16 +574,16 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                             }
                         }
                         // Previous (v43): bool sub = (pcOs == OS_MAC) ? (d.conn_itvl != 12 || d.conn_latency > 0) : (d.conn_itvl > 12 || d.conn_latency > 0);
-                        bool sub = (pcOs == OS_MAC) ? (d.conn_itvl != 12 || d.conn_latency > 0)
-                                                    : (d.conn_itvl > 8 || d.conn_latency > 0);
+                        bool sub = (pcOs == OS_MAC) ? (d.conn_itvl > 6 || d.conn_latency > 44)
+                                                    : (d.conn_itvl > 6 || d.conn_latency > 44);
                         if (sub) {
                             if (pcOs == OS_MAC) {
-                                srv->updateConnParams(connId, 12, 12, 0, 216);
-                                logPrint("[BLE Server] Re-asserted macOS TURBO for conn %d (Target: 15.00ms, Latency: 0, ⚡)!", connId);
+                                srv->updateConnParams(connId, 6, 6, 44, 216);
+                                logPrint("[BLE Server] Re-asserted macOS TURBO for conn %d (Target: 15.00ms, Latency: 44, ⚡)!", connId);
                             } else {
-                                // Previous (v43): srv->updateConnParams(connId, 6, 12, 0, 600);
-                                srv->updateConnParams(connId, 6, 8, 0, 600);
-                                logPrint("[BLE Server] Re-asserted Windows TURBO for conn %d (Target: 7.50..10.00ms, Latency: 0, ⚡)!", connId);
+                                // Previous (v100): srv->updateConnParams(connId, 6, 8, 0, 600);
+                                srv->updateConnParams(connId, 6, 6, 44, 600);
+                                logPrint("[BLE Server] Re-asserted Windows TURBO for conn %d (Target: 7.50 ms, Latency: 44, ⚡)!", connId);
                             }
                         }
                     }
@@ -405,7 +647,21 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                 }
             }
             if (!isLayoutPc) {
-                logPrint("[BLE Server] 💤 Background KVM PC %s (conn: %d) connected (not in active layout). Staying in Standby.", effectiveMac.c_str(), desc->conn_handle);
+                logPrint("[BLE Server] 💤 Background KVM PC %s (conn: %d) connected (not in active layout). Scheduling Deep Standby.", effectiveMac.c_str(), desc->conn_handle);
+                uint16_t connHandle = desc->conn_handle;
+                xTaskCreate([](void* p) {
+                    uint16_t h = (uint16_t)(uintptr_t)p;
+                    vTaskDelay(pdMS_TO_TICKS(1200)); // Allow pairing/encryption and initial link exchange to complete
+                    NimBLEServer* srv = NimBLEDevice::getServer();
+                    if (srv) {
+                        ble_gap_conn_desc d;
+                        if (ble_gap_conn_find(h, &d) == 0) {
+                            srv->updateConnParams(h, 80, 100, 10, 600);
+                            logPrint("[BLE Server] 💤 Deep Standby applied to conn %d (Target: 100.00..125.00 ms, Latency: 10)", h);
+                        }
+                    }
+                    vTaskDelete(NULL);
+                }, "deepStbyTask", 4096, (void*)(uintptr_t)connHandle, 1, NULL);
             }
 
             // Check if this newly connected PC resolves USB host binding
@@ -457,20 +713,27 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
         logPrint("[BLE Server] PC Disconnected! MAC: %s (conn_handle: %d)", peerMac.c_str(), desc->conn_handle);
 
-        isWebBleAuthenticated = false; // Reset Web Bluetooth authorization on client disconnect
-        currentAuthNonce = "";
-        
+        bool isTheWebClient = (g_webClientConnHandle != BLE_HS_CONN_HANDLE_NONE && desc->conn_handle == g_webClientConnHandle);
+
         // Check if disconnected client was a non-KVM / Web client
-        bool isNonKvm = false;
         for (int i = 0; i < MAX_NON_KVM_CLIENTS; i++) {
             if (nonKvmClients[i].conn_id == desc->conn_handle || nonKvmClients[i].mac.equals(peerMac)) {
+                if (nonKvmClients[i].isWebConfig) {
+                    isTheWebClient = true;
+                }
                 nonKvmClients[i].conn_id = BLE_HS_CONN_HANDLE_NONE;
                 nonKvmClients[i].mac = "";
                 nonKvmClients[i].connectedTimeMs = 0;
                 nonKvmClients[i].isWebConfig = false;
-                isNonKvm = true;
                 break;
             }
+        }
+
+        if (isTheWebClient) {
+            isWebBleAuthenticated = false; // Reset Web Bluetooth authorization on web client disconnect
+            currentAuthNonce = "";
+            logPrint("[BLE Server] 🟣 Web client (conn: %d) disconnected. Turning OFF Web Service.", desc->conn_handle);
+            deactivateWebServiceMode();
         }
 
         for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
@@ -609,11 +872,12 @@ class SecurityCallbacks : public NimBLESecurityCallbacks {
                 scheduleBootCalibration();
             }
 
-            // Apply rate profile safely after 2M PHY handshake completes without LLCP collisions
+            // Apply rate profile safely after 2M PHY handshake and HID/LED state exchange complete without LLCP collisions
             String* pMac = new String(effectiveMac);
             xTaskCreate([](void* p) {
                 String* macPtr = (String*)p;
-                vTaskDelay(pdMS_TO_TICKS(500));
+                // Previous (v99): vTaskDelay(pdMS_TO_TICKS(500));
+                vTaskDelay(pdMS_TO_TICKS(1800));
                 if (macPtr) {
                     updateKvmPowerAndRateProfiles(*macPtr, false);
                     delete macPtr;
@@ -858,11 +1122,5 @@ void initBleServer() {
     configRxChar->setCallbacks(new ConfigRxCallbacks());
     pConfigService->start();
 
-    NimBLEAdvertising* pAdvertising = pServer->getAdvertising();
-    pAdvertising->setAppearance(0x03C0); // HID Generic / Combo (Mouse + Keyboard)
-    pAdvertising->addServiceUUID(hidDevice->hidService()->getUUID());
-    pAdvertising->addServiceUUID(CONFIG_SERVICE_UUID);
-    pAdvertising->setScanResponse(true);
-    pAdvertising->start();
-    logPrint("[BLE Server] Advertising HID Combo '%s' & Web Bluetooth Service...", BLE_DEVICE_NAME);
+    startHidAdvertising();
 }

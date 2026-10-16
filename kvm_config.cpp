@@ -100,6 +100,9 @@ String buildConfigJson() {
 
     JsonDocument doc;
     doc["activeLayoutId"] = activeLayoutId;
+    doc["edgeTrans"] = g_edgeTransition;
+    doc["langSwitch"] = g_languageSwitch;
+    doc["textConv"] = g_textConverterEnabled ? 1 : 0;
     deserializeJson(doc["layouts"], layoutsJson);
     if (!doc["layouts"].is<JsonArray>()) {
         doc["layouts"].to<JsonArray>();
@@ -154,6 +157,9 @@ void loadConfiguration() {
     targetKeyboardName = preferences.getString(NVS_KEY_KB_NAME, "");
 
     int activeLayoutId = preferences.getInt(NVS_KEY_ACT_LAYOUT_ID, 1);
+    g_textConverterEnabled = preferences.getBool(NVS_KEY_TEXT_CONV, true);
+    g_languageSwitch = preferences.getUChar(NVS_KEY_LANG_SWITCH, 0);
+    g_edgeTransition = preferences.getString(NVS_KEY_EDGE_TRANS, "");
     String layoutsJson = readNvsBlob(preferences, NVS_KEY_LAYOUTS, "[]");
     String clientsJson = readNvsBlob(preferences, NVS_KEY_CLIENTS, "[]");
     preferences.end();
@@ -262,6 +268,18 @@ void saveConfiguration(const String& jsonString) {
     int actId = doc["activeLayoutId"] | 0;
     if (actId > 0) {
         preferences.putInt(NVS_KEY_ACT_LAYOUT_ID, actId);
+    }
+    if (!doc["textConv"].isNull()) {
+        g_textConverterEnabled = (doc["textConv"] == 1 || doc["textConv"] == true);
+        preferences.putBool(NVS_KEY_TEXT_CONV, g_textConverterEnabled);
+    }
+    if (!doc["langSwitch"].isNull()) {
+        g_languageSwitch = (uint8_t)(doc["langSwitch"] | 0);
+        preferences.putUChar(NVS_KEY_LANG_SWITCH, g_languageSwitch);
+    }
+    if (!doc["edgeTrans"].isNull()) {
+        g_edgeTransition = doc["edgeTrans"].as<String>();
+        preferences.putString(NVS_KEY_EDGE_TRANS, g_edgeTransition);
     }
     if (doc["layouts"].is<JsonArray>()) {
         String layoutsJson;

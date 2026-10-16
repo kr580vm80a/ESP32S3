@@ -8,7 +8,7 @@
 
 #define BLE_DEVICE_NAME "esp combo"
 #define BLE_WEB_SERVICE_NAME "esp"
-#define FIRMWARE_VERSION 102
+#define FIRMWARE_VERSION 104
 #define KEEPALIVE_INTERVAL_SEC 60
 #define KEEPALIVE_INTERVAL_MS (KEEPALIVE_INTERVAL_SEC * 1000)
 #define KEYBOARD_LOG false
@@ -54,6 +54,14 @@ extern const char* NVS_KEY_MOUSE_MAC;
 extern const char* NVS_KEY_MOUSE_NAME;
 extern const char* NVS_KEY_KB_MAC;
 extern const char* NVS_KEY_KB_NAME;
+extern const char* NVS_KEY_TEXT_CONV;
+extern const char* NVS_KEY_LANG_SWITCH;
+extern const char* NVS_KEY_EDGE_TRANS;
+
+// Settings
+extern bool g_textConverterEnabled;
+extern uint8_t g_languageSwitch;
+extern String g_edgeTransition;
 
 enum os {
     OS_WINDOWS = 0,
@@ -167,6 +175,17 @@ void checkWebGracePeriod();
 void checkKeepAlive();
 extern volatile uint32_t g_lastUserActivityMs;
 void syncPhysicalKeyboardLedsForPc(const String& targetMac);
+
+// Smart Rate-Matching Accumulator definitions
+struct SmartAccumulatorConfig {
+    bool bypass;            // true = direct pass-through (1:1), 0 latency
+    uint8_t ratio;          // packet ratio (e.g. 1, 2, 4...)
+    uint32_t minIntervalMs; // timeout threshold (e.g. 7ms, 14ms, 29ms)
+};
+extern volatile SmartAccumulatorConfig g_smartAccumConfig;
+void updateSmartAccumulatorProfile();
+uint16_t getBleMouseConnItvl();
+uint16_t getActivePcConnItvl();
 
 // BLE Host / Central helpers
 void startHostReconnectTask();

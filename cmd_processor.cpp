@@ -236,6 +236,7 @@ void processCommand(String input, bool isBleSource) {
         logPrint("  %s: '%s' (%s)", NVS_KEY_KB_MAC, kMac.c_str(), kName.c_str());
         logPrint("  %s (len %d): %s", NVS_KEY_LAYOUTS, layJson.length(), layJson.c_str());
         logPrint("  %s (len %d): %s", NVS_KEY_CLIENTS, cliJson.length(), cliJson.c_str());
+        printBondedDevices();
         logPrint("--- [END NVS FLASH DUMP] ---");
 
         logPrint("--- [CONNECTED DEVICES STATUS] ---");

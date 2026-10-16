@@ -179,6 +179,7 @@ void activateWebServiceMode() {
     lastConfigActivityTime = 0;
     led_indicator_set_web_service_active(true);
     startWebAdvertising();
+    updateKvmPowerAndRateProfiles("", true);
 }
 
 void deactivateWebServiceMode() {
@@ -193,6 +194,7 @@ void deactivateWebServiceMode() {
     led_indicator_set_web_service_active(false);
     logPrint("[BLE Server] ⚪ Web Service Mode DEACTIVATED. Resuming HID mode.");
     startHidAdvertising();
+    updateKvmPowerAndRateProfiles("", true);
 }
 
 void checkWebServiceTimeout() {
@@ -424,9 +426,10 @@ void updateKvmPowerAndRateProfiles(String activeMac, bool force) {
             }
         }
 
-        bool inLayout = isMacInActiveLayout(clientMac);
+        bool inLayout = (monitorCount == 0) || isMacInActiveLayout(clientMac);
         bool isUsbHost = (usb_device_is_connected() && clientMac.length() > 0 && clientMac.equals(usb_device_get_bound_mac()));
-        bool shouldBeTurbo = isMouseActive && !isUsbHost && inLayout;
+        bool isPeripheralConnecting = isHostConnectingPeripheral();
+        bool shouldBeTurbo = isMouseActive && !isUsbHost && inLayout && !isPeripheralConnecting && !isWebServiceModeActive();
 
         uint16_t minItvl;
         uint16_t maxItvl;
@@ -440,25 +443,48 @@ void updateKvmPowerAndRateProfiles(String activeMac, bool force) {
             maxItvl = 100;
             timeout = 600;
             targetLatency = 10;
+        } else if (!shouldBeTurbo) {
+            // Idle Standby while mouse is not connected: keeps radio airtime 100% free for peripheral pairing/reconnection
+            if (clientOs == OS_MAC) {
+                // macOS driver (AppleBluetoothHIDDriver) intrinsically requests/enforces 7.5ms (itvl 6) with Latency 44.
+                // With Latency 44, macOS transmits only once every ~337ms when idle, taking negligible airtime!
+                // Leaving it at 7.50ms / lat 44 avoids endless update collisions/rejects with macOS.
+                minItvl = 6;
+                maxItvl = 6;
+                timeout = 216;
+                targetLatency = 44;
+            } else {
+                // Windows stays in 30ms Standby (itvl 24..24, Latency 4, Timeout 6000ms), 100% freeing the radio
+                // schedule for ESP32 central role to connect mouse and keyboard without rc=525 collision!
+                minItvl = 24;
+                maxItvl = 24;
+                timeout = 600;
+                targetLatency = 4;
+            }
         } else {
-            // Rate Profiles for Active Layout PCs:
-            // Mac: 15.00 ms (itvl 12). Turbo -> Latency 0 | Standby -> Latency 22
-            // Windows: 7.50 ms (itvl 6). Turbo -> Latency 0 | Standby -> Latency 4
-            minItvl = (clientOs == OS_MAC) ? 6 : 6;
-            // Previous: maxItvl = (clientOs == OS_MAC) ? 12 : 8;
-            maxItvl = (clientOs == OS_MAC) ? 12 : 6;
+            // Rate Profiles for Active Layout PCs when mouse is ACTIVE:
+            // Logitech MX Master 3S standard across both Mac and Windows:
+            // Itvl: 7.50 ms (itvl 6), Latency: 44. Mac Timeout: 2160 ms (216), Win Timeout: 6000 ms (600).
+            minItvl = 6;
+            maxItvl = 6;
             timeout = (clientOs == OS_MAC) ? 216 : 600;
-            targetLatency = (clientOs == OS_MAC) ? 44 : 44;
-        }
-
-        // Debounce: If a param update for this exact target mode was sent recently, don't spam while waiting for host ack
-        if (kvmClients[i].isTurbo == shouldBeTurbo && (millis() - kvmClients[i].lastParamUpdateMs < 1200)) {
-            continue;
+            targetLatency = 44;
         }
 
         // Check real hardware link state from NimBLE connection descriptor
         ble_gap_conn_desc desc;
         bool hasDesc = (ble_gap_conn_find(kvmClients[i].conn_id, &desc) == 0);
+        if (hasDesc && !desc.sec_state.bonded &&
+            !NimBLEDevice::isBonded(NimBLEAddress(desc.peer_ota_addr)) &&
+            !NimBLEDevice::isBonded(NimBLEAddress(desc.peer_id_addr))) {
+            // Pairing in progress for this client - do not interfere!
+            continue;
+        }
+
+        // Debounce: If a param update for this exact target mode was sent recently, don't spam while waiting for host ack
+        if (!force && kvmClients[i].isTurbo == shouldBeTurbo && (millis() - kvmClients[i].lastParamUpdateMs < 1200)) {
+            continue;
+        }
         bool alreadyTarget = hasDesc &&
                       desc.conn_latency == targetLatency &&
                       desc.conn_itvl >= minItvl && desc.conn_itvl <= maxItvl;
@@ -473,6 +499,7 @@ void updateKvmPowerAndRateProfiles(String activeMac, bool force) {
             vTaskDelay(pdMS_TO_TICKS(100)); // Stagger connection updates to avoid L2CAP signaling collisions
         }
     }
+    updateSmartAccumulatorProfile();
 }
 
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -484,18 +511,27 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             }
         }
         String peerMac = NimBLEAddress(desc->peer_ota_addr).toString().c_str();
-        bool inLayout = isMacInActiveLayout(peerMac);
+        NimBLEAddress idAddr(desc->peer_id_addr);
+        String idMac = idAddr.toString().c_str();
+        String effectiveMac = (idMac.length() > 0 && idMac != "00:00:00:00:00:00") ? idMac : peerMac;
+
+        bool isBonded = desc->sec_state.bonded ||
+                        NimBLEDevice::isBonded(NimBLEAddress(desc->peer_ota_addr)) ||
+                        NimBLEDevice::isBonded(NimBLEAddress(desc->peer_id_addr));
+
+        bool inLayout = (monitorCount == 0) || isMacInActiveLayout(peerMac) || isMacInActiveLayout(effectiveMac);
         int pOs = OS_WINDOWS;
         for (int m = 0; m < monitorCount; m++) {
-            if (monitors[m].mac.equals(peerMac)) {
+            if (monitors[m].mac.equals(peerMac) || monitors[m].mac.equals(effectiveMac)) {
                 pOs = monitors[m].os;
                 break;
             }
         }
         bool isTurboDesc = (pOs == OS_MAC) ? (desc->conn_itvl <= 8 && desc->conn_latency <= 44)
                                             : (desc->conn_itvl <= 8 && desc->conn_latency <= 44);
-        const char* mode = (!inLayout) ? "DEEP STANDBY (💤)" :
-                           (isTurboDesc ? "ACTIVE TURBO (⚡)" : "BACKGROUND STANDBY (💤)");
+        const char* mode = (!isBonded) ? "PAIRING / UNBONDED (🔒)" :
+                           ((!inLayout) ? "DEEP STANDBY (💤)" :
+                           (isTurboDesc ? "ACTIVE TURBO (⚡)" : "BACKGROUND STANDBY (💤)"));
         logPrint("[BLE Server] Connection Metrics Applied -> PC: %s (conn: %d) | Itvl: %.2f ms (itvl: %d) | Latency: %d | Timeout: %d ms -> %s",
                  peerMac.c_str(), desc->conn_handle,
                  desc->conn_itvl * 1.25f, desc->conn_itvl,
@@ -503,38 +539,35 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                  desc->supervision_timeout * 10,
                  mode);
 
-        // If Bolt is active, NO PC is ever allowed to sleep (PERMANENT TURBO for all PCs).
-        // If BLE mouse is used, only the active PC (or sole connected PC) is kept in TURBO.
-        // If NO mouse is active (e.g. Bolt unplugged and no BLE mouse), background standby is expected.
-        bool boltActive = logi_bolt_is_mouse_connected();
-        bool isMouseActive = mouseConnected || boltActive;
-        String activeMac = (monitorCount > 0 && currentMonitorIndex < monitorCount) ? monitors[currentMonitorIndex].mac : "";
-        bool isUsbHost = (usb_device_is_connected() && peerMac.length() > 0 && peerMac.equals(usb_device_get_bound_mac()));
-        bool isCurrentActivePc = (activeMac.length() > 0 && peerMac.equals(activeMac));
-        // Turbo only applies to PCs in the active layout
-        bool shouldBeTurbo = !isUsbHost && isMouseActive && inLayout;
+        updateSmartAccumulatorProfile();
 
         if (isHostConnectingPeripheral()) {
             return; // Never trigger LLCP Turbo re-assertion while a peripheral connection is in progress!
         }
+        // Keep the link responsive during initial BLE bonding / PIN entry.
+        // The normal profile is negotiated sequentially after authentication completes.
+        if (!isBonded) {
+            logPrint("[BLE Server] Peer %s is unbonded / pairing in progress. Keeping connection parameters untouched.", effectiveMac.c_str());
+            return;
+        }
 
-        static uint32_t lastReassertTime[MAX_SUPPORTED_KVM_CLIENTS] = {0};
+        static uint32_t lastReassertTime[16] = {0};
         uint16_t handle = desc->conn_handle;
         uint32_t now = millis();
 
         if (!inLayout) {
             // Non-layout PC: if connected with fast interval (e.g. Windows default itvl 6), demote back to Deep Standby
-            if (desc->conn_itvl < 80 && handle < MAX_SUPPORTED_KVM_CLIENTS && (now - lastReassertTime[handle] > 5000)) {
+            if (desc->conn_itvl < 80 && handle < 16 && (now - lastReassertTime[handle] > 5000)) {
                 lastReassertTime[handle] = now;
                 logPrint("[BLE Server] Non-Layout PC %s is in fast mode (itvl: %d). Demoting to Deep Standby...", peerMac.c_str(), desc->conn_itvl);
                 xTaskCreate([](void* param) {
                     uint16_t connId = (uint16_t)(uintptr_t)param;
-                    vTaskDelay(pdMS_TO_TICKS(500));
-                    NimBLEServer* srv = NimBLEDevice::getServer();
-                    if (srv) {
+                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    NimBLEServer* pServer = NimBLEDevice::getServer();
+                    if (pServer) {
                         ble_gap_conn_desc d;
                         if (ble_gap_conn_find(connId, &d) == 0) {
-                            srv->updateConnParams(connId, 80, 100, 10, 600);
+                            pServer->updateConnParams(connId, 80, 100, 10, 600);
                         }
                     }
                     vTaskDelete(NULL);
@@ -543,26 +576,22 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             return;
         }
 
-        int pcOs = OS_WINDOWS;
-        for (int m = 0; m < monitorCount; m++) {
-            if (monitors[m].mac.equals(peerMac)) {
-                pcOs = monitors[m].os;
-                break;
-            }
-        }
-        // Previous (v43): bool isSubOptimal = (pcOs == OS_MAC) ? (desc->conn_itvl != 12 || desc->conn_latency > 0) : (desc->conn_itvl > 12 || desc->conn_latency > 0);
-        bool isSubOptimal = (pcOs == OS_MAC) ? (desc->conn_itvl > 6 || desc->conn_latency > 44)
-                                             : (desc->conn_itvl > 6 || desc->conn_latency > 44);
+        bool isMouseActive = mouseConnected || logi_bolt_is_mouse_connected();
+        bool isUsbHost = (usb_device_is_connected() && peerMac.length() > 0 && peerMac.equals(usb_device_get_bound_mac()));
+        bool shouldBeTurbo = !isUsbHost && isMouseActive && inLayout && !isWebServiceModeActive();
 
-        if (shouldBeTurbo && isSubOptimal && handle < MAX_SUPPORTED_KVM_CLIENTS && (now - lastReassertTime[handle] > 10000)) {
+        bool isSubOptimal = (pOs == OS_MAC) ? (desc->conn_itvl > 8)
+                                            : (desc->conn_itvl > 9 || desc->conn_latency < 20);
+
+        if (shouldBeTurbo && isSubOptimal && handle < 16 && (now - lastReassertTime[handle] > 6000)) {
             lastReassertTime[handle] = now;
-            logPrint("[BLE Server] Active PC %s in Sub-Optimal Mode (itvl: %d, latency: %d, shouldBeTurbo=1). Scheduling single TURBO re-assertion...",
+            logPrint("[BLE Server] Active PC %s in Sub-Optimal Mode (itvl: %d, latency: %d, shouldBeTurbo=1). Scheduling TURBO re-assertion...",
                      peerMac.c_str(), desc->conn_itvl, desc->conn_latency);
             xTaskCreate([](void* param) {
                 uint16_t connId = (uint16_t)(uintptr_t)param;
-                vTaskDelay(pdMS_TO_TICKS(500));
-                NimBLEServer* srv = NimBLEDevice::getServer();
-                if (srv) {
+                vTaskDelay(pdMS_TO_TICKS(1500));
+                NimBLEServer* pServer = NimBLEDevice::getServer();
+                if (pServer) {
                     ble_gap_conn_desc d;
                     if (ble_gap_conn_find(connId, &d) == 0) {
                         String pMac = NimBLEAddress(d.peer_ota_addr).toString().c_str();
@@ -573,18 +602,12 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                                 break;
                             }
                         }
-                        // Previous (v43): bool sub = (pcOs == OS_MAC) ? (d.conn_itvl != 12 || d.conn_latency > 0) : (d.conn_itvl > 12 || d.conn_latency > 0);
-                        bool sub = (pcOs == OS_MAC) ? (d.conn_itvl > 6 || d.conn_latency > 44)
-                                                    : (d.conn_itvl > 6 || d.conn_latency > 44);
-                        if (sub) {
-                            if (pcOs == OS_MAC) {
-                                srv->updateConnParams(connId, 6, 6, 44, 216);
-                                logPrint("[BLE Server] Re-asserted macOS TURBO for conn %d (Target: 15.00ms, Latency: 44, ⚡)!", connId);
-                            } else {
-                                // Previous (v100): srv->updateConnParams(connId, 6, 8, 0, 600);
-                                srv->updateConnParams(connId, 6, 6, 44, 600);
-                                logPrint("[BLE Server] Re-asserted Windows TURBO for conn %d (Target: 7.50 ms, Latency: 44, ⚡)!", connId);
-                            }
+                        if (pcOs == OS_MAC && d.conn_itvl > 8) {
+                            pServer->updateConnParams(connId, 6, 6, 44, 216);
+                            logPrint("[BLE Server] Re-asserted macOS TURBO for conn %d (Target: 7.50 ms, Latency: 44 ⚡)!", connId);
+                        } else if (pcOs == OS_WINDOWS && (d.conn_itvl > 9 || d.conn_latency < 20)) {
+                            pServer->updateConnParams(connId, 6, 9, 44, 600);
+                            logPrint("[BLE Server] Re-asserted Windows TURBO for conn %d (Target: 7.50 ms, Latency: 44, ⚡)!", connId);
                         }
                     }
                 }
@@ -614,12 +637,6 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         bool isLayoutPc = (monitorCount == 0) || isMacInActiveLayout(peerMac) || isMacInActiveLayout(effectiveMac);
         bool isKnownPc = isLayoutPc || isKnownKvmClient(peerMac) || isKnownKvmClient(effectiveMac) || isBondedPeer;
 
-        // Request BLE 5.0 2M PHY (2 Mbps ultra-low latency) for KVM PCs (active layout or known background)
-        if (isKnownPc) {
-            ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, BLE_GAP_LE_PHY_2M_MASK | BLE_GAP_LE_PHY_1M_MASK, 0);
-            checkAndLogPhyStatus(desc->conn_handle, effectiveMac.c_str());
-        }
-
         if (isKnownPc) {
             bool updated = false;
             for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
@@ -646,7 +663,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
                     }
                 }
             }
-            if (!isLayoutPc) {
+            if (!isLayoutPc && isBondedPeer) {
                 logPrint("[BLE Server] 💤 Background KVM PC %s (conn: %d) connected (not in active layout). Scheduling Deep Standby.", effectiveMac.c_str(), desc->conn_handle);
                 uint16_t connHandle = desc->conn_handle;
                 xTaskCreate([](void* p) {
@@ -872,23 +889,89 @@ class SecurityCallbacks : public NimBLESecurityCallbacks {
                 scheduleBootCalibration();
             }
 
-            // Apply rate profile safely after 2M PHY handshake and HID/LED state exchange complete without LLCP collisions
-            String* pMac = new String(effectiveMac);
-            xTaskCreate([](void* p) {
-                String* macPtr = (String*)p;
-                // Previous (v99): vTaskDelay(pdMS_TO_TICKS(500));
-                vTaskDelay(pdMS_TO_TICKS(1800));
-                if (macPtr) {
-                    updateKvmPowerAndRateProfiles(*macPtr, false);
-                    delete macPtr;
-                }
-                vTaskDelete(NULL);
-            }, "safeRateTask", 4096, pMac, 1, NULL);
-        }
+            if (desc->sec_state.encrypted) {
+                ble_svc_gatt_changed(0x0001, 0xffff);
+            }
 
-        if (desc->sec_state.encrypted) {
-            ble_gap_set_prefered_le_phy(desc->conn_handle, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK, 0);
-            ble_svc_gatt_changed(0x0001, 0xffff);
+            // Unified, sequential Link Setup Pipeline:
+            // 1) Wait for initial GATT/HID handshake to settle
+            // 2) Exclusively negotiate 2M PHY (avoids concurrent LLCP collisions)
+            // 3) Enforce 7.50ms Rate Profile on quiet Link Layer
+            // 4) Verify actual link interval and auto-reassert if suboptimal
+            struct PcLinkSetupParams {
+                uint16_t connHandle;
+                String mac;
+            };
+            PcLinkSetupParams* setupParams = new PcLinkSetupParams{desc->conn_handle, effectiveMac};
+
+            xTaskCreate([](void* p) {
+                PcLinkSetupParams* params = (PcLinkSetupParams*)p;
+                uint16_t connHandle = params->connHandle;
+                String peerMac = params->mac;
+                delete params;
+
+                // Step 1: Wait for initial encryption & GATT/HID service discovery to settle
+                vTaskDelay(pdMS_TO_TICKS(1800));
+
+                // Step 2: Request 2M PHY exclusively if not already 2M
+                uint8_t txPhy = 0, rxPhy = 0;
+                ble_gap_read_le_phy(connHandle, &txPhy, &rxPhy);
+                if (txPhy != 2 || rxPhy != 2) {
+                    ble_gap_set_prefered_le_phy(connHandle, BLE_GAP_LE_PHY_2M_MASK, BLE_GAP_LE_PHY_2M_MASK, 0);
+                    // Give controller time to complete LL_PHY_REQ / LL_PHY_UPDATE_IND cleanly
+                    vTaskDelay(pdMS_TO_TICKS(1200));
+                    ble_gap_read_le_phy(connHandle, &txPhy, &rxPhy);
+                }
+
+                // Step 3: Log PHY & link status
+                ble_gap_conn_desc d;
+                if (ble_gap_conn_find(connHandle, &d) == 0) {
+                    logPrint("[BLE SERVER] LINK METRICS %s (conn: %d) -> Itvl: %.2f ms (itvl: %d) | Latency: %d | Timeout: %d ms | TX: %s | RX: %s",
+                             peerMac.c_str(), connHandle,
+                             d.conn_itvl * 1.25f, d.conn_itvl,
+                             d.conn_latency,
+                             d.supervision_timeout * 10,
+                             txPhy == 2 ? "2M (⚡)" : (txPhy == 1 ? "1M" : "CODED"),
+                             rxPhy == 2 ? "2M (⚡)" : (rxPhy == 1 ? "1M" : "CODED"));
+                }
+
+                // Step 4: Ensure LL channel is completely quiet before initiating connection parameter update
+                vTaskDelay(pdMS_TO_TICKS(400));
+
+                // Step 5: Enforce connection interval profile (force = true)
+                updateKvmPowerAndRateProfiles(peerMac, true);
+
+                // Step 6: Verification & Delayed Re-assertion watchdog
+                vTaskDelay(pdMS_TO_TICKS(5000));
+                if (ble_gap_conn_find(connHandle, &d) == 0) {
+                    bool inLayout = (monitorCount == 0) || isMacInActiveLayout(peerMac);
+                    bool isMouseActive = mouseConnected || logi_bolt_is_mouse_connected();
+                    bool isUsbHost = (usb_device_is_connected() && peerMac.length() > 0 && peerMac.equals(usb_device_get_bound_mac()));
+                    bool isPeripheralConnecting = isHostConnectingPeripheral();
+                    bool shouldBeTurbo = isMouseActive && !isUsbHost && inLayout && !isPeripheralConnecting && !isWebServiceModeActive();
+                    if (shouldBeTurbo && d.conn_itvl > 8) {
+                        int pcOs = OS_WINDOWS;
+                        for (int m = 0; m < monitorCount; m++) {
+                            if (monitors[m].mac.equals(peerMac)) {
+                                pcOs = monitors[m].os;
+                                break;
+                            }
+                        }
+                        NimBLEServer* srv = NimBLEDevice::getServer();
+                        if (srv) {
+                            if (pcOs == OS_MAC) {
+                                srv->updateConnParams(connHandle, 6, 6, 44, 216);
+                                logPrint("[BLE Server] Re-asserted macOS TURBO for conn %d (Target: 7.50 ms, Latency: 44 ⚡)!", connHandle);
+                            } else {
+                                srv->updateConnParams(connHandle, 6, 9, 44, 600);
+                                logPrint("[BLE Server] Re-asserted Windows TURBO for conn %d (Target: 7.50 ms, Latency: 44, ⚡)!", connHandle);
+                            }
+                        }
+                    }
+                }
+
+                vTaskDelete(NULL);
+            }, "pcLinkSetupTask", 4096, setupParams, 1, NULL);
         }
 
         checkAndResumeAdvertising();
@@ -1051,13 +1134,22 @@ class HidInputCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+void printBondedDevices() {
+    int numBonds = NimBLEDevice::getNumBonds();
+    logPrint("[BLE NVS BONDS] Saved bonded devices count: %d", numBonds);
+    for (int i = 0; i < numBonds; i++) {
+        NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(i);
+        logPrint("  -> Bonded Device #%d: MAC %s", i + 1, bondAddr.toString().c_str());
+    }
+}
+
 void initBleServer() {
     logPrint("[BLE] Initializing NimBLE...");
     uint8_t customMac[6];
     esp_read_mac(customMac, ESP_MAC_BT);
-    customMac[5] += 30; // Increment to present fresh identity to PCs to reload new 12-bit Logitech HID descriptor
+    customMac[5] += 0; // Increment to present fresh identity to PCs to reload new 12-bit Logitech HID descriptor
     esp_base_mac_addr_set(customMac);
-    logPrint("[BLE] Custom Base MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+    logPrint("[BLE] Custom Base MAC: %02x:%02x:%02x:%02x:%02x:%02x",
              customMac[0], customMac[1], customMac[2], customMac[3], customMac[4], customMac[5]);
 
     NimBLEDevice::init(BLE_DEVICE_NAME);
@@ -1069,17 +1161,7 @@ void initBleServer() {
     NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
     
-    int numBonds = NimBLEDevice::getNumBonds();
-    logPrint("[BLE NVS BONDS] Saved bonded devices count: %d", numBonds);
-    if (numBonds >= 14) {
-        logPrint("[BLE NVS BONDS] Bond table full (%d/16). Clearing stale bonds to ensure reliable pairing...", numBonds);
-        NimBLEDevice::deleteAllBonds();
-        numBonds = 0;
-    }
-    for (int i = 0; i < numBonds; i++) {
-        NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(i);
-        logPrint("  -> Bonded Device #%d: MAC %s", i + 1, bondAddr.toString().c_str());
-    }
+    printBondedDevices();
     syncOrphanBonds();
     
     // Setup BLE Server (Peripheral)

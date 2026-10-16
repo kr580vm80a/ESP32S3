@@ -9,3 +9,4 @@ void deactivateWebServiceMode();
 bool isWebServiceModeActive();
 void checkWebServiceTimeout();
 bool isMacInActiveLayout(const String& mac);
+void printBondedDevices();

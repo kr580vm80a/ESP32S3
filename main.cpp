@@ -27,6 +27,13 @@ const char* NVS_KEY_MOUSE_MAC     = "mouseMac";
 const char* NVS_KEY_MOUSE_NAME    = "mouseName";
 const char* NVS_KEY_KB_MAC        = "keyboardMac";
 const char* NVS_KEY_KB_NAME       = "keyboardName";
+const char* NVS_KEY_TEXT_CONV     = "textConv";
+const char* NVS_KEY_LANG_SWITCH   = "langSwitch";
+const char* NVS_KEY_EDGE_TRANS    = "edgeTrans";
+
+bool g_textConverterEnabled = true;
+uint8_t g_languageSwitch = 0; // 0 = Ctrl+Shift, 1 = Alt+Shift
+String g_edgeTransition = "";
 
 String firstConnectedPcMac = "";
 bool isCalibrated = false;
@@ -92,14 +99,23 @@ static inline bool decodeMouseRaw(const uint8_t* pData, size_t length, uint8_t& 
     return true;
 }
 
-// Dedicated KVM processing task pinned to Core 1 (APP CPU) with Event Coalescing
+// Dedicated KVM processing task pinned to Core 1 (APP CPU) with Event Coalescing & Smart Accumulator
 static void kvmEngineTask(void* pvParameters) {
     InputEvent ev;
+    static int32_t s_accumDx = 0;
+    static int32_t s_accumDy = 0;
+    static uint8_t s_accumPackets = 0;
+    static uint8_t s_lastButtons = 0;
+
     while (true) {
-        if (xQueueReceive(g_inputEventQueue, &ev, portMAX_DELAY) == pdTRUE) {
+        TickType_t waitTicks = (s_accumPackets > 0 && !g_smartAccumConfig.bypass)
+                                ? pdMS_TO_TICKS(g_smartAccumConfig.minIntervalMs > 0 ? g_smartAccumConfig.minIntervalMs : 10)
+                                : portMAX_DELAY;
+
+        if (xQueueReceive(g_inputEventQueue, &ev, waitTicks) == pdTRUE) {
             switch (ev.type) {
-                case INPUT_EVENT_MOUSE_RAW:
-                case INPUT_EVENT_MOUSE_MOVE: {
+                case INPUT_EVENT_MOUSE_RAW:     // BLE mouse
+                case INPUT_EVENT_MOUSE_MOVE: {  // Logi Bolt
                     uint8_t buttons = 0;
                     int32_t totalDx = 0;
                     int32_t totalDy = 0;
@@ -158,43 +174,55 @@ static void kvmEngineTask(void* pvParameters) {
                     int8_t clampedScroll = (int8_t)constrain(totalScroll, -127, 127);
                     int8_t clampedHScroll = (int8_t)constrain(totalHScroll, -127, 127);
 
-                    // Mac BLE 14-15ms rate-matching
-                    static int32_t s_macAccumDx = 0;
-                    static int32_t s_macAccumDy = 0;
-                    static uint32_t s_macLastSendMs = 0;
-                    static uint8_t s_macLastButtons = 0;
+                    // Smart Zero-Overhead Rate Matcher
+                    if (g_smartAccumConfig.bypass) {
+                        // Scenario 2: Mouse and PC speed matched (or PC faster) -> 1:1 Direct pass-through
+                        if (s_accumPackets > 0) {
+                            // Flush any leftover accumulated residue if mode just transitioned to bypass
+                            clampedDx = (int16_t)constrain((int32_t)clampedDx + s_accumDx, -32767, 32767);
+                            clampedDy = (int16_t)constrain((int32_t)clampedDy + s_accumDy, -32767, 32767);
+                            s_accumDx = 0;
+                            s_accumDy = 0;
+                            s_accumPackets = 0;
+                        }
+                        s_lastButtons = buttons;
+                        updateVirtualCursorAndSend(buttons, clampedDx, clampedDy, clampedScroll, clampedHScroll);
+                    } else {
+                        // Scenario 1: Mouse is faster than PC -> Smart Accumulator active
+                        s_accumDx += clampedDx;
+                        s_accumDy += clampedDy;
+                        s_accumPackets++;
 
-                    bool isMacBle = false;
-                    if (monitorCount > 0 && currentMonitorIndex < monitorCount) {
-                        MonitorConfig& curMon = monitors[currentMonitorIndex];
-                        isMacBle = (curMon.os == OS_MAC && getTargetConnHandle(curMon.mac) != CONN_HANDLE_USB_DEVICE);
+                        bool buttonChanged = (buttons != s_lastButtons);
+                        bool hasScroll = (clampedScroll != 0 || clampedHScroll != 0);
+                        bool ratioReached = (s_accumPackets >= g_smartAccumConfig.ratio);
+
+                        s_lastButtons = buttons;
+
+                        if (buttonChanged || hasScroll || ratioReached) {
+                            int16_t sendDx = (int16_t)constrain(s_accumDx, -32767, 32767);
+                            int16_t sendDy = (int16_t)constrain(s_accumDy, -32767, 32767);
+                            s_accumDx = 0;
+                            s_accumDy = 0;
+                            s_accumPackets = 0;
+                            updateVirtualCursorAndSend(buttons, sendDx, sendDy, clampedScroll, clampedHScroll);
+                        }
                     }
-
-                    if (isMacBle) {
-                        uint32_t now = millis();
-                        bool shouldSend = (buttons != s_macLastButtons) ||
-                                        (clampedScroll != 0 || clampedHScroll != 0) ||
-                                        (now - s_macLastSendMs >= 14);
-
-                        s_macAccumDx += clampedDx;
-                        s_macAccumDy += clampedDy;
-                        s_macLastButtons = buttons;
-
-                        if (!shouldSend) break; // Skip sending until 14ms or click/scroll
-
-                        clampedDx = (int16_t)constrain(s_macAccumDx, -32767, 32767);
-                        clampedDy = (int16_t)constrain(s_macAccumDy, -32767, 32767);
-                        s_macLastSendMs = now;
-                    }
-                    s_macAccumDx = 0;
-                    s_macAccumDy = 0;
-                    
-                    updateVirtualCursorAndSend(buttons, clampedDx, clampedDy, clampedScroll, clampedHScroll);
                     break;
                 }
                 case INPUT_EVENT_KEYBOARD_RAW:
                     processKeyboardEvent(ev.charHandle, ev.raw, ev.length);
                     break;
+            }
+        } else {
+            // Queue timeout expired while mouse movement was pending in accumulator
+            if (s_accumPackets > 0 && !g_smartAccumConfig.bypass) {
+                int16_t sendDx = (int16_t)constrain(s_accumDx, -32767, 32767);
+                int16_t sendDy = (int16_t)constrain(s_accumDy, -32767, 32767);
+                s_accumDx = 0;
+                s_accumDy = 0;
+                s_accumPackets = 0;
+                updateVirtualCursorAndSend(s_lastButtons, sendDx, sendDy, 0, 0);
             }
         }
     }

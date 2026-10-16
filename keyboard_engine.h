@@ -17,8 +17,11 @@ void checkAndSyncCapsLock(const uint8_t* rep8);
 void syncPhysicalKeyboardLedsForPc(const String& targetMac);
 void handleUsbDeviceKeyboardLed(uint8_t leds);
 bool isAnyKeyboardKeyPressed();
+bool isCtrlKeyPressed();
 void resetKeyboardPressedState();
 void checkWindowsCtrlShiftDwell();
+void clearTextConverterHistory();
+bool handleTextConverter(uint8_t rawMods, const uint8_t* rep8, int targetOs, uint16_t targetConn);
 
 class KeyboardOutputCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* pCharacteristic, ble_gap_conn_desc* desc) override;

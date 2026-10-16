@@ -489,19 +489,296 @@ static bool handleWindowsCtrlShiftDwell(uint8_t rawMods, const uint8_t* rep8, in
 }
 
 static bool s_isAnyKeyboardKeyPressed = false;
+static bool s_isCtrlKeyPressed = false;
 
 bool isAnyKeyboardKeyPressed() {
     return s_isAnyKeyboardKeyPressed;
 }
 
+bool isCtrlKeyPressed() {
+    return s_isCtrlKeyPressed;
+}
+
 void resetKeyboardPressedState() {
     s_isAnyKeyboardKeyPressed = false;
+    s_isCtrlKeyPressed = false;
     s_winDwellActive = false;
     s_winCtrlShiftActive = false;
     s_winDwellPending = false;
     s_ctrlShiftArmed = false;
     s_ctrlShiftOtherKey = false;
     s_lastRawMods = 0;
+}
+
+// ============================================================================
+// --- SMART TEXT CONVERTER ENGINE (Right Shift + Backspace) ---
+// ============================================================================
+
+#define TEXT_CONV_MAX_HISTORY 256
+
+struct TypedKey {
+    uint8_t hidCode;
+    uint8_t modifiers;
+};
+
+static TypedKey s_history[TEXT_CONV_MAX_HISTORY];
+static int s_historyLen = 0;
+static uint8_t s_prevKeys[6] = { 0 };
+static uint8_t s_prevMods = 0;
+
+static bool s_convSessionActive = false;
+static int s_convStep = 0;
+static uint32_t s_lastTypeTimeMs = 0;
+
+void clearTextConverterHistory() {
+    s_historyLen = 0;
+    s_convSessionActive = false;
+    s_convStep = 0;
+    memset(s_prevKeys, 0, sizeof(s_prevKeys));
+    s_prevMods = 0;
+}
+
+static inline bool isWordKey(uint8_t hidCode) {
+    if (hidCode >= 0x04 && hidCode <= 0x1D) return true; // a-z
+    if (hidCode >= 0x1E && hidCode <= 0x27) return true; // 1-0
+    if (hidCode >= 0x2D && hidCode <= 0x31) return true; // -, =, [, ], \ (Ukrainian: х, ї)
+    if (hidCode >= 0x33 && hidCode <= 0x38) return true; // ;, ', `, ,, ., / (Ukrainian: ж, є, ', б, ю, .)
+    return false;
+}
+
+static inline bool isSpaceKey(uint8_t hidCode) {
+    return hidCode == 0x2C;
+}
+
+static inline bool isResetKey(uint8_t hidCode) {
+    if (hidCode >= 0x4F && hidCode <= 0x52) return true; // Right, Left, Down, Up
+    if (hidCode >= 0x4A && hidCode <= 0x4E) return true; // Home, PgUp, Delete, End, PgDn
+    if (hidCode == 0x28 || hidCode == 0x29 || hidCode == 0x2B) return true; // Enter, Esc, Tab
+    return false;
+}
+
+static void sendSingleKey(uint16_t conn, uint8_t hidCode, uint8_t modifiers) {
+    uint8_t press[8] = { modifiers, 0, hidCode, 0, 0, 0, 0, 0 };
+    uint8_t release[8] = { 0 };
+    sendHidReport(keyboardInputChar, conn, press, 8);
+    vTaskDelay(pdMS_TO_TICKS(6));
+    sendHidReport(keyboardInputChar, conn, release, 8);
+    vTaskDelay(pdMS_TO_TICKS(6));
+}
+
+static void sendBackspaces(uint16_t conn, int count) {
+    uint8_t press[8] = { 0, 0, 0x2A, 0, 0, 0, 0, 0 };
+    uint8_t release[8] = { 0 };
+    for (int i = 0; i < count; i++) {
+        sendHidReport(keyboardInputChar, conn, press, 8);
+        vTaskDelay(pdMS_TO_TICKS(6));
+        sendHidReport(keyboardInputChar, conn, release, 8);
+        vTaskDelay(pdMS_TO_TICKS(6));
+    }
+}
+
+static void toggleOsLanguage(uint16_t conn, int targetOs) {
+    if (targetOs == OS_MAC) {
+        // macOS: Globe key pulse (Consumer usage 0x029D)
+        uint8_t zeroKey[8] = { 0 };
+        sendHidReport(keyboardInputChar, conn, zeroKey, 8);
+        vTaskDelay(pdMS_TO_TICKS(10));
+
+        uint8_t globePress[2] = { 0x9D, 0x02 };
+        sendHidReport(mediaInputChar, conn, globePress, 2);
+        vTaskDelay(pdMS_TO_TICKS(40));
+
+        uint8_t globeRelease[2] = { 0x00, 0x00 };
+        sendHidReport(mediaInputChar, conn, globeRelease, 2);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    } else {
+        // Windows: 0 = Ctrl+Shift, 1 = Alt+Shift
+        uint8_t mod = (g_languageSwitch == 1) ? (0x04 | 0x02) : (0x01 | 0x02);
+        uint8_t pressReport[8] = { mod, 0, 0, 0, 0, 0, 0, 0 };
+        uint8_t zeroReport[8] = { 0 };
+
+        sendHidReport(keyboardInputChar, conn, pressReport, 8);
+        vTaskDelay(pdMS_TO_TICKS(40)); // 40ms dwell so ctfmon.exe reliably registers
+
+        sendHidReport(keyboardInputChar, conn, zeroReport, 8);
+        vTaskDelay(pdMS_TO_TICKS(40));
+    }
+}
+
+static void executeTextConversionStep(int targetOs, uint16_t targetConn) {
+    if (s_historyLen == 0 || targetConn == BLE_HS_CONN_HANDLE_NONE) return;
+
+    s_convSessionActive = true;
+    s_convStep++;
+
+    // Scan backwards from s_historyLen - 1 to find start index of the (s_convStep)-th word
+    int wordsFound = 0;
+    int idx = s_historyLen - 1;
+
+    // Skip any trailing spaces at the very end
+    while (idx >= 0 && isSpaceKey(s_history[idx].hidCode)) {
+        idx--;
+    }
+
+    int targetStartIndex = 0;
+    while (idx >= 0 && wordsFound < s_convStep) {
+        // Scan current word backwards to its beginning
+        while (idx >= 0 && !isSpaceKey(s_history[idx].hidCode)) {
+            idx--;
+        }
+        wordsFound++;
+        if (wordsFound == s_convStep) {
+            targetStartIndex = idx + 1;
+            break;
+        }
+        // Skip spaces between words
+        while (idx >= 0 && isSpaceKey(s_history[idx].hidCode)) {
+            idx--;
+        }
+    }
+
+    if (wordsFound < s_convStep) {
+        // Reached beginning of history buffer
+        targetStartIndex = 0;
+    }
+
+    int charsCount = s_historyLen - targetStartIndex;
+    if (charsCount <= 0) return;
+
+    logPrint("[TEXT CONV] Converting step %d: wordsFound=%d, chars=%d (idx %d..%d) -> %s (conn: %d)",
+             s_convStep, wordsFound, charsCount, targetStartIndex, s_historyLen - 1,
+             targetOs == OS_MAC ? "macOS" : "Windows", targetConn);
+
+    // 1. Send Backspaces to delete words from screen
+    sendBackspaces(targetConn, charsCount);
+
+    // 2. Toggle OS language on step 1 only
+    if (s_convStep == 1) {
+        toggleOsLanguage(targetConn, targetOs);
+    }
+
+    // 3. Replay keys in new layout
+    for (int i = targetStartIndex; i < s_historyLen; i++) {
+        sendSingleKey(targetConn, s_history[i].hidCode, s_history[i].modifiers);
+    }
+}
+
+bool handleTextConverter(uint8_t rawMods, const uint8_t* rep8, int targetOs, uint16_t targetConn) {
+    if (!g_textConverterEnabled) return false;
+
+    // Auto-clear history after 60s inactivity
+    if (s_lastTypeTimeMs > 0 && (millis() - s_lastTypeTimeMs > 60000)) {
+        s_historyLen = 0;
+        s_convSessionActive = false;
+        s_convStep = 0;
+    }
+
+    bool isRightShift = (rawMods & 0x20) != 0;
+    bool hasOtherMods = (rawMods & ~(0x02 | 0x20)) != 0; // Ctrl, Alt, GUI
+
+    // Detect newly pressed keys in rep8[2..7] compared to s_prevKeys
+    uint8_t newKeys[6];
+    int newKeyCount = 0;
+    for (int i = 2; i < 8; i++) {
+        uint8_t k = rep8[i];
+        if (k == 0) continue;
+        bool wasPressed = false;
+        for (int j = 0; j < 6; j++) {
+            if (s_prevKeys[j] == k) {
+                wasPressed = true;
+                break;
+            }
+        }
+        if (!wasPressed) {
+            newKeys[newKeyCount++] = k;
+        }
+    }
+
+    // Check if Backspace was newly pressed
+    bool hasNewBackspace = false;
+    for (int i = 0; i < newKeyCount; i++) {
+        if (newKeys[i] == 0x2A) {
+            hasNewBackspace = true;
+            break;
+        }
+    }
+
+    // --- TRIGGER: Right Shift + Backspace ---
+    if (isRightShift && !hasOtherMods && hasNewBackspace) {
+        executeTextConversionStep(targetOs, targetConn);
+        memcpy(s_prevKeys, &rep8[2], 6);
+        s_prevMods = rawMods;
+        return true; // Intercept! Do not forward Backspace
+    }
+
+    // If Right Shift was released, end the conversion session
+    if (s_convSessionActive && !isRightShift) {
+        s_convSessionActive = false;
+        s_convStep = 0;
+        logPrint("[TEXT CONV] Session finished (Right Shift released).");
+    }
+
+    // If inside an active session:
+    if (s_convSessionActive) {
+        if (newKeyCount > 0 && !hasNewBackspace) {
+            // User typed another key while in session -> terminate session and fall through
+            s_convSessionActive = false;
+            s_convStep = 0;
+        } else {
+            // Intercept modifier release / key release while in session
+            memcpy(s_prevKeys, &rep8[2], 6);
+            s_prevMods = rawMods;
+            return true;
+        }
+    }
+
+    // --- NORMAL TYPING / RECORDING ---
+    // If shortcuts with Ctrl/Alt/GUI: clear history (cursor or text might change)
+    if (hasOtherMods) {
+        if (newKeyCount > 0) {
+            s_historyLen = 0;
+        }
+        memcpy(s_prevKeys, &rep8[2], 6);
+        s_prevMods = rawMods;
+        return false;
+    }
+
+    // Normal Backspace (without Right Shift): pop last character
+    if (hasNewBackspace && !isRightShift) {
+        if (s_historyLen > 0) {
+            s_historyLen--;
+        }
+        memcpy(s_prevKeys, &rep8[2], 6);
+        s_prevMods = rawMods;
+        return false;
+    }
+
+    // Navigation / reset keys: clear history
+    for (int i = 0; i < newKeyCount; i++) {
+        if (isResetKey(newKeys[i])) {
+            s_historyLen = 0;
+            break;
+        }
+    }
+
+    // Record typing keys
+    for (int i = 0; i < newKeyCount; i++) {
+        uint8_t k = newKeys[i];
+        if (isWordKey(k) || isSpaceKey(k)) {
+            if (s_historyLen < TEXT_CONV_MAX_HISTORY) {
+                s_history[s_historyLen++] = { k, rawMods };
+            } else {
+                // Buffer full: shift left by 1
+                memmove(&s_history[0], &s_history[1], sizeof(TypedKey) * (TEXT_CONV_MAX_HISTORY - 1));
+                s_history[TEXT_CONV_MAX_HISTORY - 1] = { k, rawMods };
+            }
+            s_lastTypeTimeMs = millis();
+        }
+    }
+
+    memcpy(s_prevKeys, &rep8[2], 6);
+    s_prevMods = rawMods;
+    return false; // Forward normal keystroke to PC
 }
 
 static bool checkReportHasActiveKeys(const uint8_t* pData, size_t length) {
@@ -608,6 +885,10 @@ void processKeyboardEvent(uint16_t charHandle, const uint8_t* pData, size_t leng
     // Track whether any keyboard key or modifier is currently held
     if (length != 19 && pData[0] != 0xFF) {
         s_isAnyKeyboardKeyPressed = checkReportHasActiveKeys(pData, length);
+        uint8_t currentMods = 0;
+        if (length == 7 || length == 8 || (length >= 15 && length <= 17)) currentMods = pData[0];
+        else if (length == 9) currentMods = pData[1];
+        s_isCtrlKeyPressed = (currentMods & (0x01 | 0x10)) != 0;
     }
 
     if (KEYBOARD_LOG) {
@@ -658,6 +939,7 @@ void processKeyboardEvent(uint16_t charHandle, const uint8_t* pData, size_t leng
         rep8[6] = pData[5]; // Key 5
         rep8[7] = pData[6]; // Key 6
         remapKeysForTargetOs(rep8, targetOs);
+        if (handleTextConverter(pData[0], rep8, targetOs, targetConn)) return;
         if (checkSpecialMacCombos(pData[0], rep8, targetOs, targetConn)) return;
         if (handleWindowsCtrlShiftDwell(pData[0], rep8, targetOs, targetConn)) return;
         sendHidReport(keyboardInputChar, targetConn, rep8, 8);
@@ -673,6 +955,7 @@ void processKeyboardEvent(uint16_t charHandle, const uint8_t* pData, size_t leng
         memcpy(rep8, pData, 8);
         rep8[0] = remapModifiersForTargetOs(pData[0], targetOs);
         remapKeysForTargetOs(rep8, targetOs);
+        if (handleTextConverter(pData[0], rep8, targetOs, targetConn)) return;
         if (checkSpecialMacCombos(pData[0], rep8, targetOs, targetConn)) return;
         if (handleWindowsCtrlShiftDwell(pData[0], rep8, targetOs, targetConn)) return;
         sendHidReport(keyboardInputChar, targetConn, rep8, length);
@@ -688,6 +971,7 @@ void processKeyboardEvent(uint16_t charHandle, const uint8_t* pData, size_t leng
         memcpy(rep8, &pData[1], 8);
         rep8[0] = remapModifiersForTargetOs(pData[1], targetOs);
         remapKeysForTargetOs(rep8, targetOs);
+        if (handleTextConverter(pData[1], rep8, targetOs, targetConn)) return;
         if (checkSpecialMacCombos(pData[1], rep8, targetOs, targetConn)) return;
         if (handleWindowsCtrlShiftDwell(pData[1], rep8, targetOs, targetConn)) return;
         sendHidReport(keyboardInputChar, targetConn, rep8, 8);
@@ -717,6 +1001,7 @@ void processKeyboardEvent(uint16_t charHandle, const uint8_t* pData, size_t leng
             }
         }
         remapKeysForTargetOs(rep8, targetOs);
+        if (handleTextConverter(pData[0], rep8, targetOs, targetConn)) return;
         if (checkSpecialMacCombos(pData[0], rep8, targetOs, targetConn)) return;
         if (handleWindowsCtrlShiftDwell(pData[0], rep8, targetOs, targetConn)) return;
         sendHidReport(keyboardInputChar, targetConn, rep8, 8);

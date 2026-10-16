@@ -306,6 +306,77 @@
       overflow: hidden;
     }
 
+    .custom-radio-input {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 50%;
+      background: rgba(15, 23, 42, 0.9);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      position: relative;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+    }
+
+    .custom-radio-input:hover {
+      border-color: var(--primary);
+    }
+
+    .custom-radio-input:checked {
+      border-color: var(--primary);
+      background: rgba(56, 189, 248, 0.15);
+    }
+
+    .custom-radio-input:checked::after {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--primary);
+      box-shadow: 0 0 6px var(--primary);
+    }
+
+    .custom-checkbox-input {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      border-radius: 3px;
+      background: rgba(15, 23, 42, 0.9);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0;
+      position: relative;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+    }
+
+    .custom-checkbox-input:hover {
+      border-color: var(--primary);
+    }
+
+    .custom-checkbox-input:checked {
+      border-color: var(--primary);
+      background: var(--primary);
+    }
+
+    .custom-checkbox-input:checked::after {
+      content: '✓';
+      font-size: 10px;
+      font-weight: 700;
+      color: #0f172a;
+      line-height: 1;
+    }
+
     .editor-container {
       display: flex;
       flex-direction: column;
@@ -403,6 +474,11 @@
       <!-- Dump Flash Diagnostic Button -->
       <button class="icon-btn" id="btnDumpFlash" title="Dump Flash NVS Diagnostic (Print to Console)">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      </button>
+
+      <!-- Settings Modal Button (Material Gear Icon) -->
+      <button class="icon-btn" id="btnOpenSettings" onclick="openSettingsModal()" title="Settings">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       </button>
       
       <!-- Hidden Native File Input for Cross-Platform Restore -->
@@ -608,6 +684,73 @@
     </div>
   </div>
   <div id="authModalBackdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); z-index: 100001;" onclick="cancelAuthModal()"></div>
+
+  <!-- Floating Settings Modal (Material Design 3 Dark Style) -->
+  <div id="settingsModal" onclick="event.stopPropagation()" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(15, 23, 42, 0.98); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border: 1px solid rgba(56, 189, 248, 0.5); box-shadow: 0 25px 50px rgba(0,0,0,0.9); border-radius: 12px; width: 380px; max-width: calc(100vw - 32px); max-height: 85vh; overflow: hidden; z-index: 100002; padding: 16px;">
+    <!-- Header -->
+    <div style="font-size: 13px; font-weight: 700; color: var(--primary); margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+      <span>Settings</span>
+      <button class="icon-btn" onclick="closeSettingsModal()" title="Close" style="width: 22px; height: 22px; color: #94a3b8;">✕</button>
+    </div>
+
+    <!-- Scrollable Settings Container -->
+    <div id="settingsContentContainer" style="max-height: calc(85vh - 120px); overflow-y: auto; padding-right: 2px;">
+      <!-- Cross-PC Edge Transition Setting Card -->
+      <div style="background: rgba(2, 6, 23, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;">
+        <div style="font-size: 11px; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">
+          Cross-PC Edge Transition
+        </div>
+        <div style="display: flex; gap: 14px; align-items: center;">
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; cursor: pointer;">
+            <input type="radio" name="edgeTrans" value="" id="edgeTransitionFree" class="custom-radio-input" checked>
+            <span>Free (Always)</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; cursor: pointer;">
+            <input type="radio" name="edgeTrans" value="c" id="edgeTransitionCtrl" class="custom-radio-input">
+            <span>Require Ctrl</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Language Switch Setting Card -->
+      <div style="background: rgba(2, 6, 23, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;">
+        <div style="font-size: 11px; font-weight: 700; color: #f8fafc; margin-bottom: 2px;">
+          Language Switch
+        </div>
+        <div style="font-size: 10px; color: #94a3b8; margin-bottom: 8px;">
+          Windows: Dwell Enforcer | macOS: Globe Key
+        </div>
+        <div style="display: flex; gap: 14px; align-items: center;">
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; cursor: pointer;">
+            <input type="radio" name="langSwitch" value="0" id="langSwitchCtrlShift" class="custom-radio-input" checked>
+            <span>Ctrl + Shift</span>
+          </label>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; cursor: pointer;">
+            <input type="radio" name="langSwitch" value="1" id="langSwitchAltShift" class="custom-radio-input">
+            <span>Alt + Shift</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Text Converter Setting Card -->
+      <div style="background: rgba(2, 6, 23, 0.6); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px;">
+        <div style="font-size: 11px; font-weight: 700; color: #f8fafc; margin-bottom: 8px;">
+          Text Converter
+        </div>
+        <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #cbd5e1; cursor: pointer;">
+          <input type="checkbox" id="textConvCheck" class="custom-checkbox-input" checked>
+          <span>Shift + Backspace shortcut for QWERTY keyboards</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Footer / Action Buttons -->
+    <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border-color);">
+      <button class="btn btn-secondary" onclick="closeSettingsModal()" style="font-size: 11px; padding: 6px 12px;">Cancel</button>
+      <button class="btn btn-primary" id="btnSaveSettings" onclick="saveSettings()" style="font-size: 11px; padding: 6px 16px;">Save</button>
+    </div>
+  </div>
+  <div id="settingsModalBackdrop" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); z-index: 100001;" onclick="closeSettingsModal()"></div>
 
   <script>
     // --- Toast Notifications (Positioned under Top Toolbar Buttons, Auto-disappearing) ---
@@ -2819,6 +2962,9 @@
 
       const config = {
         activeLayoutId: Number(layoutsData.activeLayoutId) || 1,
+        edgeTrans: layoutsData.edgeTrans || '',
+        langSwitch: layoutsData.langSwitch ?? 0,
+        textConv: layoutsData.textConv ?? 1,
         layouts: layoutsData.layouts.map(l => {
           const sorted = [...l.screens].sort((a, b) => (a.layoutX !== undefined ? a.layoutX : a.x) - (b.layoutX !== undefined ? b.layoutX : b.x) || (b.layoutY !== undefined ? b.layoutY : b.y) - (a.layoutY !== undefined ? a.layoutY : a.y));
 
@@ -3570,6 +3716,9 @@
 
         layoutsData = {
           activeLayoutId: (typeof doc.activeLayoutId === 'number') ? doc.activeLayoutId : (parseInt(doc.activeLayoutId, 10) || (layoutsArr[0] ? (Number(layoutsArr[0].id) || 1) : 1)),
+          edgeTrans: doc.edgeTrans || '',
+          langSwitch: doc.langSwitch ?? 0,
+          textConv: doc.textConv ?? 1,
           layouts: layoutsArr.map((l, lIdx) => ({
             id: (typeof l.id === 'number') ? l.id : (parseInt(l.id, 10) || (lIdx + 1)),
             name: l.name || ('Layout ' + (lIdx + 1)),
@@ -3840,6 +3989,56 @@
 
     function handleAuthChallenge(nonce) {
       openAuthModal(nonce);
+    }
+
+    function openSettingsModal() {
+      const modal = document.getElementById('settingsModal');
+      const backdrop = document.getElementById('settingsModalBackdrop');
+      const transitionVal = layoutsData.edgeTrans || '';
+      const freeRadio = document.getElementById('edgeTransitionFree');
+      const ctrlRadio = document.getElementById('edgeTransitionCtrl');
+      if (freeRadio) freeRadio.checked = (transitionVal !== 'c');
+      if (ctrlRadio) ctrlRadio.checked = (transitionVal === 'c');
+
+      const lsVal = Number(layoutsData.langSwitch) || 0;
+      const ctrlShiftRadio = document.getElementById('langSwitchCtrlShift');
+      const altShiftRadio = document.getElementById('langSwitchAltShift');
+      if (ctrlShiftRadio) ctrlShiftRadio.checked = (lsVal !== 1);
+      if (altShiftRadio) altShiftRadio.checked = (lsVal === 1);
+
+      const textConvCheck = document.getElementById('textConvCheck');
+      if (textConvCheck) textConvCheck.checked = (layoutsData.textConv !== 0);
+
+      if (modal) modal.style.display = 'block';
+      if (backdrop) backdrop.style.display = 'block';
+    }
+
+    function closeSettingsModal() {
+      const modal = document.getElementById('settingsModal');
+      const backdrop = document.getElementById('settingsModalBackdrop');
+      if (modal) modal.style.display = 'none';
+      if (backdrop) backdrop.style.display = 'none';
+    }
+
+    function saveSettings() {
+      const etRadio = document.querySelector('input[name="edgeTrans"]:checked');
+      const etVal = etRadio ? etRadio.value : '';
+
+      const lsRadio = document.querySelector('input[name="langSwitch"]:checked');
+      const lsVal = lsRadio ? Number(lsRadio.value) : 0;
+
+      const textConvCheck = document.getElementById('textConvCheck');
+      const tcVal = (textConvCheck && textConvCheck.checked) ? 1 : 0;
+
+      if (layoutsData) {
+        layoutsData.edgeTrans = etVal;
+        layoutsData.langSwitch = lsVal;
+        layoutsData.textConv = tcVal;
+      }
+      updateJSON();
+      saveProjectState();
+      closeSettingsModal();
+      showToast('Settings saved!', 'success', 2500);
     }
 
     async function calculateSha256(str) {

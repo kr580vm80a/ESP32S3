@@ -1377,12 +1377,33 @@ ble_gap_rx_update_complete(const struct ble_hci_ev_le_subev_conn_upd_complete *e
 
     conn = ble_hs_conn_find(conn_handle);
     if (conn != NULL) {
+        printf("[BLE GAP] rx_update_complete: conn=%d status=%d itvl=%d lat=%d to=%d\n",
+               conn_handle, ev->status, le16toh(ev->conn_itvl), le16toh(ev->conn_latency), le16toh(ev->supervision_timeout));
         switch (ev->status) {
         case 0:
             /* Connection successfully updated. */
             conn->bhc_itvl = le16toh(ev->conn_itvl);
             conn->bhc_latency = le16toh(ev->conn_latency);
             conn->bhc_supervision_timeout = le16toh(ev->supervision_timeout);
+            break;
+
+        case BLE_ERR_LMP_COLLISION:      /* 0x23 (35): LMP Error Transaction Collision */
+        case BLE_ERR_DIFF_TRANS_COLL:     /* 0x2a (42): Different Transaction Collision */
+            /* Collision (0x23 / 0x2a): Peer Link Layer is busy with another transaction.
+             * Fail over to L2CAP update procedure, which safely queues and negotiates
+             * with host stack after conflicting LL procedure completes.
+             */
+            entry = ble_gap_update_entry_find(conn_handle, NULL);
+            if (entry != NULL) {
+                printf("[BLE GAP] Collision (status=%d) on conn=%d! Auto-failing over to L2CAP update (itvl: %d..%d [%.2f..%.2f ms], lat: %d, to: %d ms)...\n",
+                       ev->status, conn_handle,
+                       entry->params.itvl_min, entry->params.itvl_max,
+                       entry->params.itvl_min * 1.25f, entry->params.itvl_max * 1.25f,
+                       entry->params.latency, entry->params.supervision_timeout * 10);
+                ble_gap_update_to_l2cap(&entry->params, &l2cap_params);
+                entry->exp_os_ticks = ble_npl_time_get() +
+                                      ble_npl_time_ms_to_ticks32(BLE_GAP_UPDATE_TIMEOUT_MS);
+            }
             break;
 
         case BLE_ERR_UNSUPP_REM_FEATURE:
@@ -5738,9 +5759,12 @@ ble_gap_update_l2cap_cb(uint16_t conn_handle, int status, void *arg)
     if (entry != NULL) {
         ble_gap_update_entry_free(entry);
         if (status != 0) {
+            printf("[BLE GAP] L2CAP Update Callback conn=%d completed with status=%d (%s)\n",
+                   conn_handle, status, status == BLE_HS_EREJECT ? "REJECTED BY HOST" : "ERROR");
             ble_gap_update_notify(conn_handle, status);
+        } else {
+            printf("[BLE GAP] L2CAP Update Callback conn=%d ACCEPTED BY HOST (waiting for controller LL event)\n", conn_handle);
         }
-        /* On success let's wait for the controller to notify about update */
     }
 }
 
@@ -5830,8 +5854,7 @@ ble_gap_update_tx(uint16_t conn_handle,
 
     cmd.conn_handle = htole16(conn_handle);
     cmd.conn_itvl_min = htole16(params->itvl_min);
-    // Target fastest requested interval (itvl_min) directly
-    cmd.conn_itvl_max = htole16(params->itvl_min);
+    cmd.conn_itvl_max = htole16(params->itvl_max);
     cmd.conn_latency = htole16(params->latency);
     cmd.supervision_timeout = htole16(params->supervision_timeout);
     cmd.min_ce_len = htole16(params->min_ce_len);
@@ -5841,9 +5864,8 @@ ble_gap_update_tx(uint16_t conn_handle,
                                         BLE_HCI_OCF_LE_CONN_UPDATE),
                                         &cmd, sizeof(cmd), NULL, 0);
     if (rc == 0) {
-        printf("[BLE GAP] -> Accepted fastest requested interval itvl %d..%d (%.2f ms)!\n",
-               params->itvl_min, params->itvl_min, params->itvl_min * 1.25f);
-        ((struct ble_gap_upd_params *)params)->itvl_max = params->itvl_min;
+        printf("[BLE GAP] -> Accepted requested interval range itvl %d..%d (%.2f..%.2f ms)!\n",
+               params->itvl_min, params->itvl_max, params->itvl_min * 1.25f, params->itvl_max * 1.25f);
         return 0;
     }
 
@@ -5969,13 +5991,16 @@ ble_gap_update_params(uint16_t conn_handle,
     BLE_HS_LOG(INFO, "\n");
 
     /*
-     * If we are the slave, use the L2CAP update procedure.
+     * Attempt Link Layer update first. If controller/role doesn't support it (e.g. rc != 0),
+     * safely fall back to the standard L2CAP update procedure.
      */
-    if (!(conn->bhc_flags & BLE_HS_CONN_F_MASTER)) {
+    rc = ble_gap_update_tx(conn_handle, params);
+    if (rc != 0) {
+        printf("[BLE GAP] ble_gap_update_tx conn=%d rc=%d -> falling back to L2CAP update procedure\n", conn_handle, rc);
         l2cap_update = 1;
         rc = 0;
     } else {
-        rc = ble_gap_update_tx(conn_handle, params);
+        printf("[BLE GAP] ble_gap_update_tx conn=%d Link Layer command sent successfully (rc=0)!\n", conn_handle);
     }
 
 done:

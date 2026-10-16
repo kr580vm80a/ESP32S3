@@ -439,9 +439,8 @@ void logi_bolt_loop() {
     bool buttonChanged = (s_buttons != s_lastSentButtons);
 
     // Dynamic rate-matched flush strictly synchronized with active OS connection interval:
-    // macOS:   15ms (exactly 1 packet per 15.00ms Apple connection event, ZERO queue backlog!)
-    // Windows: 8ms (exactly 1 packet per 7.50ms Windows connection event, ZERO queue backlog!)
-    uint32_t flushInterval = (getActiveClientOs() == OS_MAC) ? 15 : 8;
+    // Both macOS and Windows run at 7.50ms Turbo (itvl 6): 8ms flush matches 125-133Hz with zero queue backlog!
+    uint32_t flushInterval = 8;
 
     if (s_has_pending_data && (buttonChanged || (nowMs - s_lastFlush >= flushInterval))) {
         int16_t dx = 0;

@@ -472,16 +472,19 @@ ble_l2cap_sig_update_rsp_rx(uint16_t conn_handle,
     case BLE_L2CAP_SIG_UPDATE_RSP_RESULT_ACCEPT:
         cb_status = 0;
         rc = 0;
+        printf("[BLE L2CAP] Host (conn=%d) ACCEPTED Connection Parameter Update (result=0x0000)\n", conn_handle);
         break;
 
     case BLE_L2CAP_SIG_UPDATE_RSP_RESULT_REJECT:
         cb_status = BLE_HS_EREJECT;
         rc = 0;
+        printf("[BLE L2CAP] Host (conn=%d) REJECTED Connection Parameter Update (result=0x0001, EREJECT)!\n", conn_handle);
         break;
 
     default:
         cb_status = BLE_HS_EBADDATA;
         rc = 0;
+        printf("[BLE L2CAP] Host (conn=%d) sent UNKNOWN Update Response (result=0x%04x)\n", conn_handle, le16toh(rsp->result));
         break;
     }
 

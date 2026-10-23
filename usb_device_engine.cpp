@@ -9,6 +9,8 @@
 #include "hid_descriptors.h"
 #include "kvm_types.h"
 #include "cursor_engine.h"
+#include "ble_server.h"
+#include "usb_manager.h"
 
 void logPrint(const char* format, ...);
 
@@ -118,6 +120,48 @@ void usb_device_set_bound_mac(const String& mac) {
         scheduleBootCalibration();
     }
     updateKvmPowerAndRateProfiles("", true);
+    ejectUsbBoundBleClient();
+}
+
+static void scheduleUsbUnplugFailoverCheck(const String& unpluggedMac) {
+    if (unpluggedMac.length() == 0) return;
+    String* pMac = new String(unpluggedMac);
+    xTaskCreate([](void* param) {
+        String targetMac = *(String*)param;
+        delete (String*)param;
+        // Give the unplugged PC ~3.5s to auto-reconnect over BLE once Hardware Whitelist is unlocked
+        vTaskDelay(pdMS_TO_TICKS(3500));
+        if (usb_manager_is_pc_connected() && usb_device_get_bound_mac().equalsIgnoreCase(targetMac)) {
+            vTaskDelete(NULL);
+            return;
+        }
+        bool hasBle = false;
+        for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+            if (kvmClients[k].active && kvmClients[k].mac.equalsIgnoreCase(targetMac)) {
+                hasBle = true;
+                break;
+            }
+        }
+        if (!hasBle && monitorCount > 0 && monitors[currentMonitorIndex].mac.equalsIgnoreCase(targetMac)) {
+            isCalibrated = false;
+            firstConnectedPcMac = "";
+            for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
+                if (kvmClients[k].active && isMacInActiveLayout(kvmClients[k].mac)) {
+                    firstConnectedPcMac = kvmClients[k].mac;
+                    break;
+                }
+            }
+            if (firstConnectedPcMac.length() > 0) {
+                scheduleBootCalibration();
+                logPrint("[FAILOVER] USB PC %s unplugged and did not reconnect over BLE! Switched control to active PC %s",
+                         targetMac.c_str(), firstConnectedPcMac.c_str());
+            } else {
+                logPrint("[FAILOVER] USB PC %s unplugged and no active BLE PC available.", targetMac.c_str());
+            }
+            updateKvmPowerAndRateProfiles(isCalibrated ? firstConnectedPcMac : "");
+        }
+        vTaskDelete(NULL);
+    }, "usbFailoverCheck", 3072, pMac, 1, NULL);
 }
 
 void usb_device_clear_bound_mac() {
@@ -238,8 +282,12 @@ void usb_device_on_ble_connect(const String& mac, int os) {
     if (!usb_device_is_connected()) return;
     if (s_usbHostOs == -1) return;
     if (os != s_usbHostOs) return;
-    // If not bound or if currently bound, verify with probe
-    if (s_usbBoundMac.length() == 0 || s_usbBoundMac.equals(mac)) {
+    if (s_usbBoundMac.equalsIgnoreCase(mac) && !s_probeActive) {
+        logPrint("[USB DETECT] USB-bound PC %s reconnected via BLE while USB-C is active -> Ejecting BLE link...", mac.c_str());
+        ejectUsbBoundBleClient();
+        return;
+    }
+    if (s_usbBoundMac.length() == 0) {
         logPrint("[USB DETECT] Candidate %s connected via BLE (%s). Checking USB binding...",
                  mac.c_str(), os == OS_MAC ? "Mac" : "Win");
         usb_device_check_detection();
@@ -297,49 +345,26 @@ void usb_device_loop() {
             String oldBoundMac = s_usbBoundMac;
             usb_device_clear_bound_mac();
             s_probeActive = false;
+            checkAndResumeAdvertising();
             if (oldBoundMac.length() > 0) {
-                logPrint("[USB DEVICE] Host PC UNMOUNTED device! Cleared USB binding.");
-
-                // If the unmounted USB PC was the active monitor, check if it has BLE or needs failover
+                logPrint("[USB DEVICE] Host PC UNMOUNTED device! Cleared USB binding & unlocked BLE Whitelist for %s.", oldBoundMac.c_str());
+                updateKvmPowerAndRateProfiles(oldBoundMac, true);
                 if (monitorCount > 0 && monitors[currentMonitorIndex].mac.equals(oldBoundMac)) {
-                    bool hasBle = false;
-                    for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
-                        if (kvmClients[k].active && kvmClients[k].mac.equals(oldBoundMac)) {
-                            hasBle = true;
-                            break;
-                        }
-                    }
-                    if (!hasBle) {
-                        isCalibrated = false;
-                        firstConnectedPcMac = "";
-                        for (int k = 0; k < MAX_SUPPORTED_KVM_CLIENTS; k++) {
-                            if (kvmClients[k].active && isMacInActiveLayout(kvmClients[k].mac)) {
-                                firstConnectedPcMac = kvmClients[k].mac;
-                                break;
-                            }
-                        }
-                        if (firstConnectedPcMac.length() > 0) {
-                            scheduleBootCalibration();
-                            logPrint("[FAILOVER] USB PC %s unplugged and has no BLE! Switched control to active PC %s", oldBoundMac.c_str(), firstConnectedPcMac.c_str());
-                        } else {
-                            logPrint("[FAILOVER] USB PC %s unplugged and no active BLE PC available.", oldBoundMac.c_str());
-                        }
-                        updateKvmPowerAndRateProfiles(isCalibrated ? firstConnectedPcMac : "");
-                    } else {
-                        logPrint("[USB DEVICE] USB PC %s unplugged -> seamlessly continuing control over BLE!", oldBoundMac.c_str());
-                        updateKvmPowerAndRateProfiles(oldBoundMac, true);
-                    }
-                } else {
-                    updateKvmPowerAndRateProfiles("", true);
+                    scheduleUsbUnplugFailoverCheck(oldBoundMac);
                 }
             }
         }
     }
     if (s_eventSuspended) {
         s_eventSuspended = false;
+        s_seenMsftDescriptor = false;
+        checkAndResumeAdvertising();
         if (s_usbBoundMac.length() > 0) {
-            logPrint("[USB DEVICE] USB Bus Suspended (Cable unplugged or PC Sleep) -> KVM fallback to BLE");
-            updateKvmPowerAndRateProfiles("", true);
+            logPrint("[USB DEVICE] USB Bus Suspended (Cable unplugged or PC Sleep) -> Unlocked BLE Whitelist & resuming BLE for %s", s_usbBoundMac.c_str());
+            updateKvmPowerAndRateProfiles(s_usbBoundMac, true);
+            if (monitorCount > 0 && monitors[currentMonitorIndex].mac.equals(s_usbBoundMac)) {
+                scheduleUsbUnplugFailoverCheck(s_usbBoundMac);
+            }
         }
     }
     if (s_eventResumed) {
@@ -347,6 +372,7 @@ void usb_device_loop() {
         if (s_usbBoundMac.length() > 0) {
             logPrint("[USB DEVICE] USB Bus Resumed -> Re-activating 1000Hz HID!");
             updateKvmPowerAndRateProfiles("", true);
+            ejectUsbBoundBleClient();
         }
     }
 

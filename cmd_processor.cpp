@@ -246,8 +246,10 @@ void processCommand(String input, bool isBleSource) {
             int uOs = usb_device_get_detected_os();
             const char* osStr = (uOs == OS_MAC) ? "macOS" : (uOs == OS_ANDROID ? "Android" : "Windows");
             String boundMac = usb_device_get_bound_mac();
-            logPrint("[USB-C PC] Connected (1000Hz HID, Latency: 0) | Bound MAC: %s | Detected OS: %s",
-                     boundMac.length() > 0 ? boundMac.c_str() : "None", osStr);
+            String wlExcl = getActiveAdvExcludedMac();
+            logPrint("[USB-C PC] Connected (1000Hz HID, Latency: 0) | Bound MAC: %s | Detected OS: %s | BLE Ejected / Whitelist Locked: %s",
+                     boundMac.length() > 0 ? boundMac.c_str() : "None", osStr,
+                     boundMac.length() > 0 ? "YES (Radio Slot Freed)" : (wlExcl.length() > 0 ? wlExcl.c_str() : "NO"));
         } else {
             logPrint("[USB-C PC] Disconnected");
         }

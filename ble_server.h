@@ -10,3 +10,5 @@ bool isWebServiceModeActive();
 void checkWebServiceTimeout();
 bool isMacInActiveLayout(const String& mac);
 void printBondedDevices();
+void ejectUsbBoundBleClient();
+String getActiveAdvExcludedMac();

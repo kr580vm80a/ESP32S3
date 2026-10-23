@@ -119,9 +119,92 @@ static bool g_webServiceActive = false;
 static uint32_t g_webServiceStartTime = 0;
 static bool g_webClientConnected = false;
 static uint16_t g_webClientConnHandle = BLE_HS_CONN_HANDLE_NONE;
+static String g_activeAdvExcludedMac = "";
 
 bool isWebServiceModeActive() {
     return g_webServiceActive;
+}
+
+String getActiveAdvExcludedMac() {
+    return g_activeAdvExcludedMac;
+}
+
+static void syncBleWhitelist(NimBLEAdvertising* pAdvertising) {
+    // 1. Clear current NimBLE hardware whitelist while advertising is stopped
+    while (NimBLEDevice::getWhiteListCount() > 0) {
+        NimBLEAddress addr = NimBLEDevice::getWhiteListAddress(0);
+        if (!NimBLEDevice::whiteListRemove(addr)) {
+            break;
+        }
+    }
+
+    // 2. Determine if a USB-C bound PC should be excluded from BLE reconnecting
+    String excludedMac = "";
+    if (!g_webServiceActive && usb_manager_is_pc_connected() && usb_device_get_bound_mac().length() > 0) {
+        excludedMac = usb_device_get_bound_mac();
+    }
+
+    if (excludedMac.length() == 0) {
+        g_activeAdvExcludedMac = "";
+        pAdvertising->setScanFilter(false, false);
+        return;
+    }
+
+    // 3. Collect all allowed PC MACs (from active layout, kvmClients, and NVS bonds) EXCEPT excludedMac and peripherals
+    String allowedMacs[16];
+    int allowedCount = 0;
+
+    auto addAllowedMac = [&](const String& mac) {
+        if (mac.length() != 17) return;
+        if (mac.equalsIgnoreCase("USB") || mac.equalsIgnoreCase("USB-C")) return;
+        if (mac.equalsIgnoreCase(excludedMac)) return;
+        if (targetMouseMac.length() > 0 && mac.equalsIgnoreCase(targetMouseMac)) return;
+        if (targetKeyboardMac.length() > 0 && mac.equalsIgnoreCase(targetKeyboardMac)) return;
+        for (int i = 0; i < allowedCount; i++) {
+            if (allowedMacs[i].equalsIgnoreCase(mac)) return;
+        }
+        if (allowedCount < 16) {
+            allowedMacs[allowedCount++] = mac;
+        }
+    };
+
+    for (int i = 0; i < monitorCount; i++) {
+        addAllowedMac(monitors[i].mac);
+    }
+    for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+        addAllowedMac(kvmClients[i].mac);
+    }
+    int numBonds = NimBLEDevice::getNumBonds();
+    for (int b = 0; b < numBonds; b++) {
+        NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(b);
+        addAllowedMac(String(bondAddr.toString().c_str()));
+    }
+
+    // 4. Populate hardware Filter Accept List (Whitelist) in BLE Controller
+    int addedToWl = 0;
+    for (int i = 0; i < allowedCount; i++) {
+        NimBLEAddress resolvedAddr(allowedMacs[i].c_str(), BLE_ADDR_PUBLIC);
+        for (int b = 0; b < numBonds; b++) {
+            NimBLEAddress bondAddr = NimBLEDevice::getBondedAddress(b);
+            if (String(bondAddr.toString().c_str()).equalsIgnoreCase(allowedMacs[i])) {
+                resolvedAddr = bondAddr; // Preserves exact BLE_ADDR_PUBLIC or BLE_ADDR_RANDOM from bond
+                break;
+            }
+        }
+        if (NimBLEDevice::whiteListAdd(resolvedAddr)) {
+            addedToWl++;
+        }
+    }
+
+    g_activeAdvExcludedMac = excludedMac;
+    if (addedToWl > 0) {
+        // Block both scan requests and connection requests from non-whitelisted devices (including USB-C PC)
+        pAdvertising->setScanFilter(true, true);
+        logPrint("[BLE Whitelist] 🛡️ Hardware Filter ACTIVE: Excluded USB-C PC %s (%d allowed PC(s) in Whitelist)",
+                 excludedMac.c_str(), addedToWl);
+    } else {
+        pAdvertising->setScanFilter(false, false);
+    }
 }
 
 void startHidAdvertising() {
@@ -142,6 +225,7 @@ void startHidAdvertising() {
         pAdvertising->addServiceUUID(hidDevice->hidService()->getUUID());
     }
     pAdvertising->setScanResponse(false);
+    syncBleWhitelist(pAdvertising);
     pAdvertising->start();
     logPrint("[BLE Server] Advertising HID Combo");
 }
@@ -154,6 +238,8 @@ void startWebAdvertising() {
         logPrint("[BLE Server] Advertising STOPPED");
     }
     pAdvertising->reset();
+    g_activeAdvExcludedMac = "";
+    pAdvertising->setScanFilter(false, false);
 
     ble_svc_gap_device_name_set(BLE_WEB_SERVICE_NAME);
 
@@ -192,7 +278,8 @@ void deactivateWebServiceMode() {
     currentAuthNonce = "";
     led_indicator_set_web_service_active(false);
     logPrint("[BLE Server] ⚪ Web Service Mode DEACTIVATED. Resuming HID mode.");
-    startHidAdvertising();
+    checkAndResumeAdvertising();
+    ejectUsbBoundBleClient();
 }
 
 void checkWebServiceTimeout() {
@@ -211,6 +298,41 @@ void checkWebServiceTimeout() {
             deactivateWebServiceMode();
         }
     }
+}
+
+void ejectUsbBoundBleClient() {
+    if (!usb_manager_is_pc_connected()) return;
+    String boundMac = usb_device_get_bound_mac();
+    if (boundMac.length() == 0) return;
+
+    // 1. Update advertising & hardware whitelist FIRST so the disconnected PC cannot bounce back
+    checkAndResumeAdvertising();
+
+    // 2. Defer the BLE disconnect slightly (80ms) so it never executes inside a NimBLE GAP/GATT callback
+    static volatile bool s_ejectTaskActive = false;
+    if (s_ejectTaskActive) return;
+    s_ejectTaskActive = true;
+
+    xTaskCreate([](void* param) {
+        vTaskDelay(pdMS_TO_TICKS(80));
+        if (usb_manager_is_pc_connected()) {
+            String bMac = usb_device_get_bound_mac();
+            NimBLEServer* srv = NimBLEDevice::getServer();
+            if (srv && bMac.length() > 0) {
+                for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
+                    if (kvmClients[i].active && kvmClients[i].conn_id != BLE_HS_CONN_HANDLE_NONE &&
+                        kvmClients[i].mac.equalsIgnoreCase(bMac)) {
+                        if (g_webServiceActive && kvmClients[i].conn_id == g_webClientConnHandle) continue;
+                        logPrint("[BLE Server] 🔌 Ejecting redundant BLE connection for USB-C PC %s (conn: %d) -> 1000Hz Wired USB active & Whitelist locked",
+                                 kvmClients[i].mac.c_str(), kvmClients[i].conn_id);
+                        srv->disconnect(kvmClients[i].conn_id);
+                    }
+                }
+            }
+        }
+        s_ejectTaskActive = false;
+        vTaskDelete(NULL);
+    }, "usbBleEjectTask", 3072, NULL, 1, NULL);
 }
 
 void disconnectNonLayoutClients() {
@@ -276,6 +398,7 @@ void checkAndResumeAdvertising() {
     bool allLayoutConnected = (layoutPcs > 0) && (connectedLayoutPcs >= layoutPcs);
 
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    String desiredExcludedMac = (!g_webServiceActive && usb_manager_is_pc_connected()) ? usb_device_get_bound_mac() : "";
 
     // If all PCs belonging to active layout are connected:
     // 1. Stop advertising (no more PCs needed, freeing radio for peripherals/traffic).
@@ -283,6 +406,7 @@ void checkAndResumeAdvertising() {
     if (allLayoutConnected) {
         if (adv && adv->isAdvertising()) {
             adv->stop();
+            g_activeAdvExcludedMac = "";
             logPrint("[BLE Server] Advertising STOPPED. 🛑 All layout PCs (%d/%d) connected (Mouse: %d, KB: %d)",
                      connectedLayoutPcs, layoutPcs,
                      (mouseConnected || logi_bolt_is_mouse_connected()) ? 1 : 0,
@@ -291,17 +415,19 @@ void checkAndResumeAdvertising() {
         // Eject any extra PC that is not part of active layout
         disconnectNonLayoutClients();
     } else if (activeCount < maxAllowedPcConnections) {
-        // Still waiting for layout PCs (even if a non-layout PC connected, advertising stays active!)
-        if (adv && !adv->isAdvertising()) {
-            logPrint("[BLE Server] Advertising active (PCs: %d/%d [Layout: %d/%d] | Mouse: %d | KB: %d)", 
+        // Still waiting for layout PCs (or refreshing advertising when USB-C whitelist exclusion changes)
+        if (adv && (!adv->isAdvertising() || !g_activeAdvExcludedMac.equalsIgnoreCase(desiredExcludedMac))) {
+            logPrint("[BLE Server] Advertising active (PCs: %d/%d [Layout: %d/%d] | Mouse: %d | KB: %d | USB-Excluded: %s)", 
                      activeCount, maxAllowedPcConnections, connectedLayoutPcs, layoutPcs,
                      (mouseConnected || logi_bolt_is_mouse_connected()) ? 1 : 0, 
-                     kbConnected ? 1 : 0);
+                     kbConnected ? 1 : 0,
+                     desiredExcludedMac.length() > 0 ? desiredExcludedMac.c_str() : "NONE");
             startHidAdvertising();
         }
     } else {
         if (adv && adv->isAdvertising()) {
             adv->stop();
+            g_activeAdvExcludedMac = "";
             logPrint("[BLE Server] Advertising STOPPED. All %d connection slots full", activeCount);
         }
     }
@@ -1164,6 +1290,7 @@ void initBleServer() {
     
     // Setup BLE Server (Peripheral)
     pServer = NimBLEDevice::createServer();
+    pServer->advertiseOnDisconnect(false); // Prevent NimBLE from auto-starting unfiltered advertising after disconnect!
     pServer->setCallbacks(new ServerCallbacks());
     hidDevice = new NimBLEHIDDevice(pServer);
     keyboardInputChar = hidDevice->inputReport(1); // Report ID 1: Standard Keyboard (6KRO)

@@ -1,4 +1,5 @@
 #include "kvm_config.h"
+#include "usb_manager.h"
 #include "usb_device_engine.h"
 #include "cursor_engine.h"
 
@@ -118,13 +119,17 @@ String buildConfigJson() {
     doc["keyboardMac"] = kbMac;
     doc["keyboardName"] = kbName;
 
-    // Update connected status for clients based on live kvmClients[]
+    // Update connected status for clients based on live kvmClients[] and USB-C bound state
+    String usbBoundMac = usb_manager_is_pc_connected() ? usb_device_get_bound_mac() : "";
     JsonArray clientsArr = doc["clients"].as<JsonArray>();
     for (JsonObject c : clientsArr) {
-        c["connected"] = false;
+        String cMac = c["mac"] | "";
+        c["connected"] = (usbBoundMac.length() > 0 && cMac.equalsIgnoreCase(usbBoundMac));
     }
     for (int i = 0; i < MAX_SUPPORTED_KVM_CLIENTS; i++) {
-        if (kvmClients[i].active && kvmClients[i].mac.length() > 0) {
+        bool isClientActive = kvmClients[i].active ||
+                              (usbBoundMac.length() > 0 && kvmClients[i].mac.equalsIgnoreCase(usbBoundMac));
+        if (isClientActive && kvmClients[i].mac.length() > 0) {
             String activeMac = kvmClients[i].mac;
             bool exists = false;
             for (JsonObject c : clientsArr) {

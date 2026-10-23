@@ -179,7 +179,6 @@ void activateWebServiceMode() {
     lastConfigActivityTime = 0;
     led_indicator_set_web_service_active(true);
     startWebAdvertising();
-    updateKvmPowerAndRateProfiles("", true);
 }
 
 void deactivateWebServiceMode() {
@@ -194,7 +193,6 @@ void deactivateWebServiceMode() {
     led_indicator_set_web_service_active(false);
     logPrint("[BLE Server] ⚪ Web Service Mode DEACTIVATED. Resuming HID mode.");
     startHidAdvertising();
-    updateKvmPowerAndRateProfiles("", true);
 }
 
 void checkWebServiceTimeout() {
@@ -429,7 +427,7 @@ void updateKvmPowerAndRateProfiles(String activeMac, bool force) {
         bool inLayout = (monitorCount == 0) || isMacInActiveLayout(clientMac);
         bool isUsbHost = (usb_device_is_connected() && clientMac.length() > 0 && clientMac.equals(usb_device_get_bound_mac()));
         bool isPeripheralConnecting = isHostConnectingPeripheral();
-        bool shouldBeTurbo = isMouseActive && !isUsbHost && inLayout && !isPeripheralConnecting && !isWebServiceModeActive();
+        bool shouldBeTurbo = isMouseActive && !isUsbHost && inLayout && !isPeripheralConnecting;
 
         uint16_t minItvl;
         uint16_t maxItvl;
@@ -578,7 +576,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
         bool isMouseActive = mouseConnected || logi_bolt_is_mouse_connected();
         bool isUsbHost = (usb_device_is_connected() && peerMac.length() > 0 && peerMac.equals(usb_device_get_bound_mac()));
-        bool shouldBeTurbo = !isUsbHost && isMouseActive && inLayout && !isWebServiceModeActive();
+        bool shouldBeTurbo = !isUsbHost && isMouseActive && inLayout;
 
         bool isSubOptimal = (pOs == OS_MAC) ? (desc->conn_itvl > 8)
                                             : (desc->conn_itvl > 9 || desc->conn_latency < 20);
@@ -948,7 +946,7 @@ class SecurityCallbacks : public NimBLESecurityCallbacks {
                     bool isMouseActive = mouseConnected || logi_bolt_is_mouse_connected();
                     bool isUsbHost = (usb_device_is_connected() && peerMac.length() > 0 && peerMac.equals(usb_device_get_bound_mac()));
                     bool isPeripheralConnecting = isHostConnectingPeripheral();
-                    bool shouldBeTurbo = isMouseActive && !isUsbHost && inLayout && !isPeripheralConnecting && !isWebServiceModeActive();
+                    bool shouldBeTurbo = isMouseActive && !isUsbHost && inLayout && !isPeripheralConnecting;
                     if (shouldBeTurbo && d.conn_itvl > 8) {
                         int pcOs = OS_WINDOWS;
                         for (int m = 0; m < monitorCount; m++) {
